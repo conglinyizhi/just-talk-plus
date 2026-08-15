@@ -118,8 +118,9 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 	if err != nil {
 		return Check{
 			Name: "ASR 配置", OK: false, Severity: Warning,
-			Detail: shortDoctorErr(err),
-			Fix:    "在 " + cfgPath + " 的 [voice] / [voice.engine_config] 中修正语音引擎配置。",
+			Detail: fmt.Sprintf("语音引擎 %q 未配置凭据，请任选 %s 之一配置",
+				asrcfg.EngineType(cfg.Voice), engineChoices()),
+			Fix: "在 " + cfgPath + " 的 [voice].engine 选择引擎，并在 [voice.engine_config] 填写对应 api_key 等凭据。",
 		}
 	}
 	ok, detail := eng.Available(context.Background())
@@ -134,14 +135,7 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 	return Check{Name: "ASR 配置", OK: true, Severity: Warning, Detail: name + "：" + detail}
 }
 
-func shortDoctorErr(err error) string {
-	msg := strings.TrimSpace(err.Error())
-	if msg == "" {
-		return "未知错误"
-	}
-	msg = strings.ReplaceAll(msg, "\n", " ")
-	if len([]rune(msg)) <= 140 {
-		return msg
-	}
-	return string([]rune(msg)[:140]) + "..."
+// engineChoices 面向用户的引擎候选文案（与 README 保持一致）。
+func engineChoices() string {
+	return "doubao-stream / auralwise / openai"
 }
