@@ -16,13 +16,18 @@ import (
 )
 
 // DefaultEngine 未配置 engine 时使用的引擎（保持旧版行为）。
-const DefaultEngine = "doubao"
+const DefaultEngine = "doubao-stream"
 
-// Types 已注册引擎类型（排序），供 TUI/设置页选择。
+// userEngines 面向用户的引擎类型，与 README / doctor 文案保持一致。
+// null 是内部兜底（Build 空类型 / 显式 "null" 时返回），不列在候选里。
+var userEngines = []string{"doubao-stream", "auralwise", "openai"}
+
+// Types 面向用户的引擎类型（排序），供 TUI/设置页选择。
 func Types() []string {
-	types := speech.Types()
-	sort.Strings(types)
-	return types
+	out := make([]string, len(userEngines))
+	copy(out, userEngines)
+	sort.Strings(out)
+	return out
 }
 
 // EngineType 返回引擎类型；空 → doubao（向后兼容）。
@@ -44,8 +49,7 @@ func ConfigMap(vc config.VoiceConfig) map[string]string {
 	if vc.Language != "" && m["language"] == "" {
 		m["language"] = vc.Language
 	}
-	switch EngineType(vc) {
-	case "doubao", "volc-asr", "doubao-asr":
+	if EngineType(vc) == "doubao-stream" {
 		if m["api_key"] == "" && m["app_id"] == "" && strings.TrimSpace(vc.AppKey) != "" {
 			m["app_id"] = vc.AppKey
 		}

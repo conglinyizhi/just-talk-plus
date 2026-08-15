@@ -78,7 +78,7 @@ type Voice struct {
 //   - Speak/Transcribe 尊重 ctx 取消
 //   - 不支持的操作返回 ErrUnsupported，而不是 panic
 type Engine interface {
-	// Name 稳定短名，如 null / doubao-asr / auralwise / openai
+	// Name 稳定短名，如 null / doubao-stream / auralwise / openai
 	Name() string
 	Capabilities() Capabilities
 	// Available 环境是否可用；detail 给人看（缺 key、无二进制等）

@@ -22,7 +22,6 @@ import (
 
 func init() {
 	speech.Register("auralwise", NewFromMap)
-	speech.Register("aural-wise", NewFromMap)
 }
 
 // Engine 实现 speech.Engine（仅 STT）。

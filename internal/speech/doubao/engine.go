@@ -29,10 +29,7 @@ import (
 )
 
 func init() {
-	speech.Register("doubao", NewFromMap)
-	// 别名：配置页可读
-	speech.Register("volc-asr", NewFromMap)
-	speech.Register("doubao-asr", NewFromMap)
+	speech.Register("doubao-stream", NewFromMap)
 }
 
 // Engine 实现 speech.Engine（仅 STT）。
@@ -56,7 +53,7 @@ func NewFromMap(m map[string]string) (speech.Engine, error) {
 }
 
 func (e *Engine) Name() string {
-	return fmt.Sprintf("doubao-asr/%s/%s", e.cfg.ModelVersion, e.cfg.StreamMode)
+	return "doubao-stream"
 }
 
 func (e *Engine) Capabilities() speech.Capabilities {
