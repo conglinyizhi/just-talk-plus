@@ -1,0 +1,46 @@
+Third Party Notices
+===================
+
+Just Talk 依赖以下第三方组件。各组件版权归其作者所有，按各自许可条款分发。
+完整许可文本见各组件上游仓库；以下列表与 go.mod 保持对应。
+
+直接依赖
+---------
+
+| 组件 | 许可 | 版权 |
+| --- | --- | --- |
+| github.com/BurntSushi/toml | MIT | Toml authors |
+| github.com/fsnotify/fsnotify | BSD-3-Clause | fsnotify authors |
+| golang.org/x/sys | BSD-3-Clause | The Go Authors |
+| github.com/bendahl/uinput | MIT | bendahl |
+| github.com/charmbracelet/bubbles | MIT | Charmbracelet, Inc. |
+| github.com/charmbracelet/bubbletea | MIT | Charmbracelet, Inc. |
+| github.com/charmbracelet/lipgloss | MIT | Charmbracelet, Inc. |
+| github.com/coder/websocket | MIT | Nhooyr.io / coder |
+| github.com/google/uuid | BSD-3-Clause | Google Inc. |
+| github.com/atotto/clipboard | MIT | Ato Araki |
+
+间接依赖
+---------
+
+| 组件 | 许可 |
+| --- | --- |
+| github.com/aymanbagabas/go-osc52/v2 | MIT |
+| github.com/charmbracelet/colorprofile | MIT |
+| github.com/charmbracelet/x/ansi, cellbuf, term | MIT |
+| github.com/clipperhouse/displaywidth, stringish, uax29/v2 | MIT |
+| github.com/erikgeiser/coninput | MIT |
+| github.com/lucasb-eyer/go-colorful | MIT |
+| github.com/mattn/go-isatty, go-localereader, go-runewidth | MIT |
+| github.com/muesli/ansi, cancelreader, termenv | MIT |
+| github.com/rivo/uniseg | MIT |
+| github.com/xo/terminfo | MIT |
+| golang.org/x/text | BSD-3-Clause |
+
+平台协议头文件（plugins/overlay）
+---------------------------------
+
+- xdg-shell-client-protocol.h：Copyright 2008-2013 Kristian Høgsberg 等，
+  见文件内完整版权声明
+- wlr-layer-shell-unstable-v1-client-protocol.h / -protocol.c：
+  Copyright 2017 Drew DeVault，见文件内完整版权声明

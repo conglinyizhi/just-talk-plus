@@ -1,3 +1,8 @@
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// This file is part of Just Talk.
+
 package doubao
 
 // WebSocket 二进制帧（大模型流式 ASR）：header + optional sequence + payload size + payload。

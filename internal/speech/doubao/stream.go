@@ -1,3 +1,8 @@
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// This file is part of Just Talk.
+
 package doubao
 
 // 豆包流式识别会话：实现 speech.StreamingEngine / speech.StreamSession。

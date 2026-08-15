@@ -1,5 +1,11 @@
 //go:build linux
 
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// This file was modified from the original Just Talk by whoamihappyhacking
+// (GPL-3.0). See NOTICE for maintenance history.
+
 package doctor
 
 import (

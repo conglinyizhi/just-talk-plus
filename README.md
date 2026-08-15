@@ -249,7 +249,7 @@ api_key = "sk-…"
 
 ## 维护与贡献
 
-Just Talk 由 `whoamihappyhacking` 维护。
+Just Talk 由 `conglinyizhi` 维护（基于 `whoamihappyhacking` 的原作继续开发，版权声明见 [NOTICE](NOTICE)）。
 
 本项目不接受 Pull Request。欢迎通过 Issue 反馈 bug、使用体验和功能建议。
 

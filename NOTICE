@@ -1,0 +1,24 @@
+Just Talk
+=========
+
+Copyright (C) 2026 conglinyizhi
+
+本软件基于 GNU General Public License v3.0 开源，完整许可文本见 LICENSE。
+本文件及代码中标注的 SPDX 标识符遵循 SPDX License List 规范。
+
+维护与修改历史
+---------------
+
+- 本项目最初由 whoamihappyhacking 开发并以 GPL-3.0 发布（Just Talk）。
+- conglinyizhi 自 2026 年起接管维护；对既有文件所做的修改在文件头部
+  带有 modified 声明，新建文件带有新的版权声明。
+- 原作者的版权与贡献声明保持有效，按 GPL-3.0 第 5 节要求不得移除。
+
+第三方组件
+-----------
+
+- 语音引擎抽象层（internal/speech）移植自 go-human-handler 项目的
+  backend/internal/speech 模块，并按本项目需求扩展了流式会话与批处理适配。
+- 其余第三方依赖的版权声明见 THIRD_PARTY_NOTICES。
+- plugins/overlay 中包含的 xdg-shell 与 wlr-layer-shell 协议头文件版权
+  归其原始作者所有（见文件内注释），随项目以 GPL-3.0 分发。

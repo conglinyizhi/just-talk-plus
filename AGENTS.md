@@ -1,127 +1,75 @@
 # AGENTS.md
 
-This file gives coding agents concise guidance for working in this repository.
+Coding-agent guidance for working in this repository.
+
+## License And Copyright — read first
+
+This project is **GPL-3.0-only** (`LICENSE`). These rules are not optional:
+
+- Never modify `LICENSE` or change the project license.
+- Every Go source file carries a copyright header (`Copyright` + `SPDX-License-Identifier: GPL-3.0-only`). Never remove or alter an existing header.
+- New files must include a header signed by the current maintainer:
+  ```go
+  // Copyright (C) 2026 conglinyizhi
+  // SPDX-License-Identifier: GPL-3.0-only
+  ```
+- Files modified from the original Just Talk carry a "modified from the original Just Talk by whoamihappyhacking" notice; keep it intact (GPL §5 preserves upstream legal notices and marks changes).
+- `NOTICE` and `THIRD_PARTY_NOTICES` document ownership and third-party licenses: do not delete them, and update `THIRD_PARTY_NOTICES` when adding dependencies. Keep third-party license headers intact (e.g. the xdg-shell / wlr-layer-shell protocol headers in `plugins/overlay/`).
 
 ## Project
 
-Just Talk is a desktop voice input tool. It records with a global hotkey, sends audio to streaming ASR, then copies recognized text to the clipboard or submits it into the focused input field.
-
-The supported desktop targets are Linux, macOS, and Windows.
+Desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows.
 
 ## Build And Test
 
-This project uses native platform APIs. Linux and macOS require cgo; Windows uses direct Win32 calls and builds with `CGO_ENABLED=0`.
+Linux/macOS need cgo; Windows builds with `CGO_ENABLED=0`.
 
 ```bash
-make build              # Build for the current platform
-make run                # Run on the current platform
-make test               # Run all tests
-go test ./...           # Faster default test command
+go test ./...            # tests
 go test ./... -tags no_x11
-goreleaser check
 CGO_ENABLED=1 go build -o build/just-talk ./cmd/just-talk
-go build -o build/just-talk.exe ./cmd/just-talk  # Windows
-JUST_TALK_TEST_WINDOWS_AUDIO=1 go test ./plugins/voice -run TestWindowsRecorderIntegration -v
-JUST_TALK_TEST_WINDOWS_HOTKEY=1 go test ./hotkey -run TestWindowsHookIntegration -v
+go build -o build/just-talk.exe ./cmd/just-talk   # Windows
 ```
 
-Release builds are configured by `.goreleaser.yaml` and `.github/workflows/release.yml`, using GoReleaser v2 through the official `goreleaser/goreleaser-action`. Pushing a `v*` tag builds and publishes Linux, macOS, and Windows archives for amd64 and arm64, plus `SHA256SUMS.txt`. Linux and macOS release binaries must remain native cgo builds on their respective GitHub-hosted runners. GoReleaser OSS split/merge is not available, so each native matrix runner creates one archive and the final job only merges those archives into the GitHub Release.
+Runtime: `just-talk` (TUI default), `--no-tui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_BACKEND`); `mock` is provider-testing only.
 
-Do not add or preserve non-cgo macOS fallback builds. A build that compiles but cannot provide native hotkeys, recording, clipboard, auto-submit, or overlay is worse than an explicit build failure.
-
-Useful runtime commands:
-
-```bash
-just-talk               # TUI mode, default
-just-talk --no-tui      # daemon mode
-just-talk --doctor      # startup environment check
-just-talk --backend x11
-just-talk --backend wayland
-```
-
-`JUST_TALK_BACKEND` or `--backend` can force `x11`, `wayland`, or `darwin`. `mock` exists for internal provider testing but is not part of the normal user path.
-
-## Platform Dependencies
-
-Linux:
-
-- Wayland hotkeys use evdev and require readable `/dev/input/event*`, usually via the `input` group.
-- Wayland clipboard and auto-submit use `wl-clipboard` and `wtype`.
-- X11 hotkeys and overlay use native X11 through cgo.
-- X11 auto-submit uses XTest and clipboard tools.
-
-macOS:
-
-- Global hotkeys use CGEventTap through `ApplicationServices`.
-- Recording uses CoreAudio / AudioQueue.
-- Clipboard uses NSPasteboard.
-- Auto-submit posts native keyboard events.
-- Overlay uses an AppKit `NSPanel` helper process.
-- Users grant Accessibility and Microphone permissions to the terminal app that launches Just Talk, not to a separate `.app` bundle.
-- Full Xcode is not required, but Apple Command Line Tools must provide `clang` and the macOS SDK.
-
-Windows:
-
-- Global hotkeys poll `GetAsyncKeyState` at 5 ms intervals and use `WH_KEYBOARD_LL` as a short-lived physical-edge fallback. Providers emit state edges without key-repeat events.
-- The low-level hook is observational: it must always pass events to the next hook and must not consume or replay modifier keys. This keeps normal `Alt`, `Super`, and combinations such as `Alt+Tab` untouched. Windows modifier combinations require an exact modifier set; hook fallback state is reconciled against the unsuppressed physical key state on new modifier presses and after release.
-- Recording uses native `winmm` wave input at 16 kHz, 16-bit mono PCM.
-- Clipboard operations use the Win32 Unicode clipboard through the existing clipboard dependency.
-- Auto-submit uses `SendInput` to post Ctrl+V.
-- Overlay uses a no-activate, topmost, click-through Win32 window.
-- Config is stored under `%APPDATA%\just-talk`; logs and stats use `%LOCALAPPDATA%`.
-- No external ffmpeg, SoX, clipboard tool, cgo toolchain, or administrator privilege is required.
+Never add or keep non-cgo macOS fallback builds: a build that compiles but lacks native hotkeys/recording/clipboard/auto-submit/overlay is worse than a failed build.
 
 ## Architecture
 
-```text
-cmd/just-talk/main.go
-  -> config.Load
-  -> doctor.Run
-  -> hotkey.NewProvider
-  -> engine.New
-  -> load voice + overlay plugins
-  -> TUI or daemon mode
-```
+Startup: `cmd/just-talk/main.go` → `config.Load` → `doctor.Run` → `hotkey.NewProvider` → `engine.New` → load voice + overlay plugins → TUI or daemon.
 
-Core packages:
+- `hotkey/`: global hotkey providers + combo/event types.
+- `engine/`: plugin lifecycle, config reload.
+- `plugins/voice/`: recorder, ASR sessions, hotkey behavior, clipboard/auto-submit dispatch, stats.
+- `plugins/overlay/`: recording status capsule.
+- `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai`.
+- `internal/asrcfg/`: builds an engine from `config.VoiceConfig`; the single place importing engine packages (registers them).
+- `internal/autotype/`, `internal/clipboard/`, `internal/doctor/`, `internal/tui/` (Bubble Tea UI: dynamic engine form + channel picker).
 
-- `hotkey/`: platform global hotkey providers plus shared combo/event types.
-- `engine/`: plugin lifecycle and config reload orchestration.
-- `plugins/voice/`: recorder, ASR streaming, hotkey behavior, clipboard/auto-submit dispatch, stats.
-- `plugins/overlay/`: recording status capsule for Linux, macOS, and Windows.
-- `internal/autotype/`: platform paste/auto-submit implementation.
-- `internal/clipboard/`: platform clipboard implementation.
-- `internal/doctor/`: startup environment checks.
-- `internal/tui/`: Bubble Tea configuration UI.
+## ASR Engines
 
-## Hotkey Notes
+The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 
-`Combo` is `{Mods Modifier, Key KeyCode}`. Modifier-only hotkeys use `KeyNone`, for example `Option+Command` on macOS maps to `ModAlt|ModSuper` with `KeyNone`.
+- Selection: `[voice].engine` (default `doubao-stream`) + `[voice].engine_config`; legacy `app_key`/`access_key`/`resource_id` are Doubao-only shortcuts.
+- Canonical types: `doubao-stream`, `auralwise`, `openai`. Do not add aliases (removed on purpose).
+- `null` is the internal fallback only; never list it in the TUI channel picker.
+- Streaming engines implement `speech.StreamingEngine`; batch-only engines are wrapped by `speech.BatchSession` (buffers PCM, `Transcribe` at stop; the plugin waits longer for them).
+- Adding an engine: `speech.Register` in the package init → blank import in `internal/asrcfg` → add to `asrcfg.Types()` (`userEngines`) and the TUI `engineChannels` → update the bilingual README. Match the recorder's 16 kHz 16-bit mono PCM.
+- Doubao: `model_version` `"1.0"` (bigasr, `volc.bigasr.sauc.*`, `app_id`+`access_key`) or `"2.0"` (seedasr, `volc.seedasr.sauc.*`, `api_key`). The resource ID derives from `model_version` — never ship a default `resource_id` in `config.Default()` (it overrides the derivation).
 
-Providers should emit key down/up events promptly. Fast repeated toggle presses and hold-mode release handling are user-visible and have historically been fragile, so avoid changes that add blocking work to provider event loops or hotkey handlers.
+## Platform Constraints
 
-Plugin hotkey registration must happen in `Plugin.Init()`, not in `Plugin.Start()`. The registry starts dispatch goroutines after plugin loading; registering late can drop events.
+- Wayland: evdev hotkeys (`input` group), `wl-clipboard`/`wtype` for clipboard/auto-submit.
+- X11: native X11 via cgo; auto-submit uses XTest.
+- macOS: CGEventTap hotkeys, CoreAudio/AudioQueue recording, NSPasteboard, AppKit NSPanel overlay; users grant Accessibility/Microphone to the launching terminal, not a `.app` bundle.
+- Windows: `GetAsyncKeyState` polling + observational `WH_KEYBOARD_LL` fallback that always passes events through and never consumes/replays modifiers (`Alt`, `Super`, `Alt+Tab` stay untouched; combinations need an exact modifier set). winmm recording (16 kHz 16-bit mono), Win32 clipboard, `SendInput` Ctrl+V, click-through topmost overlay. No ffmpeg/SoX/cgo/admin needed.
 
-## Voice Pipeline Notes
+## Behavioural Rules
 
-Stopping a recording is intentionally split from hotkey handling:
-
-- Hotkey handlers update state quickly.
-- Recorder stop, final audio send, ASR final wait, clipboard writes, and auto-submit happen in background finish work.
-- Debug logs should identify whether a stop is waiting on recorder, final audio send, ASR final, clipboard, or ASR client close.
-
-Avoid double-output bugs: recognized final text should be dispatched once per user-stopped session. If changing ASR result handling, check both `Final()` and `Done()` paths.
-
-## UI And Logging
-
-TUI mode must not write normal logs to stdout/stderr because it corrupts the Bubble Tea layout. TUI logs go through the in-app log/status area; debug event details should only be visible when `--debug` is enabled.
-
-`voice.SetOutput(io.Discard)` is intentional in TUI mode.
-
-## Repository Rules
-
-- Prefer existing package boundaries and platform-specific files with build tags.
-- Keep user-facing doctor output short and action-oriented. Do not list implementation details as checks unless the user can act on them.
-- README is bilingual: update both `README.md` and `README.en.md`.
-- `CHANGELOG.md` should be updated for user-visible behavior changes.
-- The project does not accept pull requests; issues are welcome.
+- Hotkeys: register in `Plugin.Init()`, never `Start()` (late registration drops events). Keep provider event loops and hotkey handlers free of blocking work.
+- Recording stop is split from hotkey handling: handlers update state fast; recorder stop, final audio send, ASR final wait, clipboard, auto-submit run in background finish work. Debug logs say which stage a stop is waiting on.
+- Dispatch recognized text exactly once per user-stopped session; when changing ASR result handling check both `Final()` and `Done()` paths.
+- TUI mode must not write logs to stdout/stderr (corrupts the Bubble Tea layout); `voice.SetOutput(io.Discard)` is intentional.
+- Prefer existing package boundaries and platform-specific build tags. Keep doctor output short and actionable.
+- README is bilingual (`README.md` + `README.en.md`); update `CHANGELOG.md` for user-visible changes.

@@ -1,3 +1,8 @@
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// This file is part of Just Talk.
+
 package doubao
 
 // 豆包（火山引擎）语音识别引擎：仅 STT，不做 TTS / 闲时版。

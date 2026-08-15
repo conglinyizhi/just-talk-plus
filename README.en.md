@@ -249,7 +249,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintenance And Contributions
 
-Just Talk is maintained by `whoamihappyhacking`.
+Just Talk is maintained by `conglinyizhi` (continuing the original work by `whoamihappyhacking`; see [NOTICE](NOTICE) for copyright statements).
 
 This project does not accept pull requests. Issues are welcome for bug reports, usage feedback, and feature discussion.
 
