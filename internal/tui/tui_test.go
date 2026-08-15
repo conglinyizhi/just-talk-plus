@@ -1,7 +1,7 @@
 // Copyright (C) 2026 conglinyizhi
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// This file is part of Just Talk.
+// This file is part of Just Talk Plus.
 
 package tui
 
@@ -38,9 +38,34 @@ func TestBuildFieldsDoubao(t *testing.T) {
 	fields := buildFields(cfg)
 
 	keys := fieldKeys(fields)
-	for _, want := range []string{"enabled", "engine", "language", "ec.model_version", "ec.stream_mode", "ec.api_key", "ec.app_id", "ec.access_key", "hotwords"} {
+	// 主表单只保留公共字段 + 渠道配置入口
+	for _, want := range []string{"enabled", "engine", "language", "channel_config", "push_to_talk", "auto_submit", "stop_delay_ms"} {
 		if !keys[want] {
 			t.Fatalf("missing field %q in %v", want, keys)
+		}
+	}
+	for _, hidden := range []string{"ec.model_version", "ec.stream_mode", "ec.api_key", "ec.app_id", "ec.access_key", "ec.base_host", "hotwords"} {
+		if keys[hidden] {
+			t.Fatalf("channel-specific field %q should live in the overlay: %v", hidden, keys)
+		}
+	}
+	// 渠道配置入口是 action 类型
+	if f := fieldByKey(fields, "channel_config"); f.fType != fAction {
+		t.Fatalf("channel_config fType = %v, want fAction", f.fType)
+	}
+}
+
+func TestChannelConfigFieldsDoubao(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "doubao-stream"
+	cfg.Voice.AppKey = "legacy-app"
+	fields := channelConfigFields(cfg.Voice, testTI)
+
+	keys := fieldKeys(fields)
+	// 弹层包含全部渠道专属设置：模型版本、流式模式、凭据、热词
+	for _, want := range []string{"ec.model_version", "ec.stream_mode", "ec.api_key", "ec.app_id", "ec.access_key", "ec.base_host", "hotwords"} {
+		if !keys[want] {
+			t.Fatalf("missing overlay field %q in %v", want, keys)
 		}
 	}
 	// 旧版平铺 app_key 迁移显示到 ec.app_id
@@ -60,11 +85,22 @@ func TestBuildFieldsOpenai(t *testing.T) {
 	fields := buildFields(cfg)
 
 	keys := fieldKeys(fields)
-	if keys["ec.model_version"] || keys["ec.app_id"] || keys["hotwords"] {
-		t.Fatalf("openai should not show doubao fields: %v", keys)
+	// 主表单统一：无任何渠道专属字段
+	for _, hidden := range []string{"ec.model_version", "ec.model", "ec.api_key", "ec.base_url", "hotwords"} {
+		if keys[hidden] {
+			t.Fatalf("channel-specific field %q should live in the overlay: %v", hidden, keys)
+		}
 	}
-	if f := fieldByKey(fields, "ec.model"); f.input.Value() != "whisper-small" {
+	if !keys["channel_config"] {
+		t.Fatalf("main form should have channel_config entry: %v", keys)
+	}
+	// 弹层含模型设置
+	ov := channelConfigFields(cfg.Voice, testTI)
+	if f := fieldByKey(ov, "ec.model"); f.input.Value() != "whisper-small" {
 		t.Fatalf("model = %q", f.input.Value())
+	}
+	if f := fieldByKey(ov, "ec.api_key"); f.input.Value() != "sk-1" {
+		t.Fatalf("api_key = %q", f.input.Value())
 	}
 }
 
@@ -72,13 +108,8 @@ func TestSwitchEnginePreservesValues(t *testing.T) {
 	cfg := config.Default() // engine = doubao-stream
 	m := New(cfg)
 	for i := range m.fields {
-		switch m.fields[i].key {
-		case "push_to_talk":
+		if m.fields[i].key == "push_to_talk" {
 			m.fields[i].input.SetValue("F9")
-		case "ec.api_key":
-			m.fields[i].input.SetValue("sk-test")
-		case "ec.model_version":
-			m.fields[i].optIdx = 1 // 2.0 (seedasr)
 		}
 	}
 	m.switchEngine("openai")
@@ -89,21 +120,16 @@ func TestSwitchEnginePreservesValues(t *testing.T) {
 	if f := fieldByKey(m.fields, "push_to_talk"); f.input.Value() != "F9" {
 		t.Fatalf("hotkey lost: %q", f.input.Value())
 	}
-	// api_key 在两个引擎中都存在，应保留
-	if f := fieldByKey(m.fields, "ec.api_key"); f.input.Value() != "sk-test" {
-		t.Fatalf("api_key lost: %q", f.input.Value())
-	}
-	// doubao 专属字段不应残留
-	if fieldByKey(m.fields, "ec.model_version") != nil {
-		t.Fatal("ec.model_version should not exist for openai")
+	// 渠道配置入口始终存在
+	if fieldByKey(m.fields, "channel_config") == nil {
+		t.Fatal("channel_config entry should exist for openai")
 	}
 }
 
 func TestSwitchEngineBackToDoubaoKeepsModelVersion(t *testing.T) {
 	cfg := config.Default()
 	cfg.Voice.EngineConfig = map[string]string{"model_version": "2.0"}
-	m := New(cfg)
-	if f := fieldByKey(m.fields, "ec.model_version"); f.selectValue() != "2.0" {
+	if f := fieldByKey(channelConfigFields(cfg.Voice, testTI), "ec.model_version"); f.selectValue() != "2.0" {
 		t.Fatalf("model_version = %q, want 2.0", f.selectValue())
 	}
 }
@@ -114,18 +140,24 @@ func testTI(v string) textinput.Model {
 	return ti
 }
 
-func TestEngineFieldsAuralwise(t *testing.T) {
+func TestChannelConfigFieldsAuralwise(t *testing.T) {
 	cfg := config.Default()
 	cfg.Voice.Engine = "auralwise"
 	cfg.Voice.EngineConfig = map[string]string{"api_key": "asr_x", "optimize": "true"}
-	fields := buildFields(cfg)
-	keys := fieldKeys(fields)
+	// 主表单无渠道专属字段
+	keys := fieldKeys(buildFields(cfg))
+	if keys["ec.api_key"] || keys["ec.base_url"] || keys["ec.optimize"] {
+		t.Fatalf("auralwise settings should live in the overlay: %v", keys)
+	}
+	// 弹层字段
+	ov := channelConfigFields(cfg.Voice, testTI)
+	ovKeys := fieldKeys(ov)
 	for _, want := range []string{"ec.api_key", "ec.base_url", "ec.optimize"} {
-		if !keys[want] {
-			t.Fatalf("missing field %q in %v", want, keys)
+		if !ovKeys[want] {
+			t.Fatalf("missing overlay field %q in %v", want, ovKeys)
 		}
 	}
-	if f := fieldByKey(fields, "ec.optimize"); f.selectValue() != "true" {
+	if f := fieldByKey(ov, "ec.optimize"); f.selectValue() != "true" {
 		t.Fatalf("optimize = %q, want true", f.selectValue())
 	}
 }
@@ -176,9 +208,9 @@ func TestEnginePickerNavigationAndConfirm(t *testing.T) {
 			t.Fatalf("engine = %q, want openai", f.selectValue())
 		}
 	}
-	// openai 动态字段已重建
-	if fieldByKey(m.fields, "ec.model") == nil {
-		t.Fatal("openai fields not rebuilt")
+	// 主表单统一重建，渠道配置入口仍在
+	if fieldByKey(m.fields, "channel_config") == nil {
+		t.Fatal("channel_config entry should survive engine switch")
 	}
 }
 
@@ -237,5 +269,191 @@ func TestRenderPicker(t *testing.T) {
 	// doubao-stream 的 subtitle 提到 1.0 / 2.0 模型版本
 	if !strings.Contains(out, "1.0") || !strings.Contains(out, "2.0") {
 		t.Fatalf("picker render should mention doubao model versions:\n%s", out)
+	}
+}
+
+func TestChannelConfigOverlayOpen(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "openai"
+	m := New(cfg)
+	m.openChannelConfig()
+	if m.configOverlay == nil {
+		t.Fatal("overlay should open")
+	}
+	if m.configOverlay.title != "[openai] 渠道配置" {
+		t.Fatalf("title = %q", m.configOverlay.title)
+	}
+	if fieldByKey(m.configOverlay.fields, "ec.api_key") == nil || fieldByKey(m.configOverlay.fields, "ec.base_url") == nil {
+		t.Fatalf("overlay fields missing: %v", fieldKeys(m.configOverlay.fields))
+	}
+}
+
+func TestChannelConfigOverlayApply(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "openai"
+	m := New(cfg)
+	m.openChannelConfig()
+	// 填 API Key 与 Base URL
+	if f := fieldByKey(m.configOverlay.fields, "ec.api_key"); f != nil {
+		f.input.SetValue("sk-123")
+	}
+	if f := fieldByKey(m.configOverlay.fields, "ec.base_url"); f != nil {
+		f.input.SetValue("http://127.0.0.1:8000/v1")
+	}
+	m.applyConfigOverlay()
+	if m.configOverlay != nil {
+		t.Fatal("overlay should close after apply")
+	}
+	if got := cfg.Voice.EngineConfig["api_key"]; got != "sk-123" {
+		t.Fatalf("api_key = %q", got)
+	}
+	if got := cfg.Voice.EngineConfig["base_url"]; got != "http://127.0.0.1:8000/v1" {
+		t.Fatalf("base_url = %q", got)
+	}
+}
+
+func TestChannelConfigOverlayKeys(t *testing.T) {
+	cfg := config.Default() // doubao-stream
+	m := New(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+
+	// j 导航到下一字段
+	m.handleConfigOverlayKey(tea.KeyMsg{Type: tea.KeyDown})
+	if ov.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", ov.cursor)
+	}
+	// enter 编辑字段
+	m.handleConfigOverlayKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !ov.editing {
+		t.Fatal("should enter editing")
+	}
+	// esc 退出编辑
+	m.handleConfigOverlayKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if ov.editing {
+		t.Fatal("should exit editing")
+	}
+	// esc 取消关闭（不保存）
+	m.handleConfigOverlayKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.configOverlay != nil {
+		t.Fatal("esc should close overlay")
+	}
+	if len(cfg.Voice.EngineConfig) != 0 {
+		t.Fatalf("cancel must not write EngineConfig: %v", cfg.Voice.EngineConfig)
+	}
+}
+
+func TestEnterOnChannelConfigOpensOverlay(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	for i, f := range m.fields {
+		if f.key == "channel_config" {
+			m.cursor = i
+			break
+		}
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.configOverlay == nil {
+		t.Fatal("enter on channel_config should open overlay")
+	}
+	if m.picker != nil {
+		t.Fatal("should not open the engine picker")
+	}
+}
+
+func TestRenderConfigOverlay(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "doubao-stream"
+	cfg.Voice.AppKey = "legacy-app"
+	m := New(cfg)
+	m.w, m.h = 100, 40
+	m.openChannelConfig()
+	out := m.renderConfigOverlay()
+	if out == "" {
+		t.Fatal("empty overlay render")
+	}
+	for _, want := range []string{"[doubao-stream] 渠道配置", "API Key(新版)", "App ID(旧版)", "Access Key(旧版)", "Base Host"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("overlay render missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestChannelConfigOverlayApplyDoubao(t *testing.T) {
+	cfg := config.Default() // doubao-stream
+	m := New(cfg)
+	m.openChannelConfig()
+	// 模型版本 2.0 + 热词 + API Key
+	if f := fieldByKey(m.configOverlay.fields, "ec.model_version"); f != nil {
+		f.optIdx = 1 // 2.0 (seedasr)
+	}
+	if f := fieldByKey(m.configOverlay.fields, "hotwords"); f != nil {
+		f.input.SetValue("Wayland, Sway")
+	}
+	if f := fieldByKey(m.configOverlay.fields, "ec.api_key"); f != nil {
+		f.input.SetValue("volc-key")
+	}
+	m.applyConfigOverlay()
+	if m.configOverlay != nil {
+		t.Fatal("overlay should close after apply")
+	}
+	if got := cfg.Voice.EngineConfig["model_version"]; got != "2.0" {
+		t.Fatalf("model_version = %q", got)
+	}
+	if got := cfg.Voice.EngineConfig["api_key"]; got != "volc-key" {
+		t.Fatalf("api_key = %q", got)
+	}
+	if got := cfg.Voice.Hotwords; len(got) != 2 || got[0] != "Wayland" || got[1] != "Sway" {
+		t.Fatalf("hotwords = %v", got)
+	}
+}
+
+func TestChannelConfigFollowsEngineSwitch(t *testing.T) {
+	cfg := config.Default() // doubao-stream
+	m := New(cfg)
+	// 通过渠道选择切到 openai（模拟真实操作路径）
+	m.openEnginePicker()
+	for i, it := range engineChannels {
+		if it.name == "openai" {
+			m.picker.idx = i
+			break
+		}
+	}
+	m.handlePickerKey("enter")
+	if got := m.currentEngine(); got != "openai" {
+		t.Fatalf("engine = %q, want openai", got)
+	}
+	// 打开渠道配置：必须是 openai 的字段，不能残留 doubao 的
+	m.openChannelConfig()
+	if m.configOverlay == nil {
+		t.Fatal("overlay should open")
+	}
+	if m.configOverlay.title != "[openai] 渠道配置" {
+		t.Fatalf("title = %q", m.configOverlay.title)
+	}
+	keys := fieldKeys(m.configOverlay.fields)
+	if !keys["ec.model"] {
+		t.Fatalf("openai overlay should show model field: %v", keys)
+	}
+	if keys["ec.model_version"] || keys["ec.stream_mode"] || keys["hotwords"] {
+		t.Fatalf("doubao fields must not leak into openai overlay: %v", keys)
+	}
+}
+
+func TestChannelConfigEntryBelowEngineField(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	var engineIdx, configIdx int
+	for i, f := range m.fields {
+		switch f.key {
+		case "engine":
+			engineIdx = i
+		case "channel_config":
+			configIdx = i
+		}
+	}
+	// 渠道配置入口紧跟引擎字段之后
+	if configIdx != engineIdx+1 {
+		t.Fatalf("channel_config at %d, engine at %d; want immediately after", configIdx, engineIdx)
 	}
 }

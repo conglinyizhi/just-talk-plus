@@ -42,6 +42,7 @@ const (
 	fString fieldType = iota
 	fToggle
 	fSelect
+	fAction // 二级入口：回车打开渠道配置弹层
 )
 
 type field struct {
@@ -106,47 +107,57 @@ func pickerItemByName(name string) (pickerItem, bool) {
 	return pickerItem{}, false
 }
 
+// configOverlayState 渠道配置二级弹层；nil 表示未打开。
+type configOverlayState struct {
+	title   string
+	fields  []field
+	cursor  int
+	editing bool
+}
+
 type Model struct {
-	w, h        int
-	ready       bool
-	info        hotkey.ProviderInfo
-	logs        []string
-	devices     []string
-	cfg         *config.Config
-	debug       bool
-	showLogs    bool
-	OnSave      func(*config.Config) error
-	fields      []field
-	cursor      int
-	editing     bool
-	helpVisible bool
-	logExpanded bool
-	picker      *pickerState // 渠道选择弹层；nil = 未打开
+	w, h          int
+	ready         bool
+	info          hotkey.ProviderInfo
+	logs          []string
+	devices       []string
+	cfg           *config.Config
+	debug         bool
+	showLogs      bool
+	OnSave        func(*config.Config) error
+	fields        []field
+	cursor        int
+	editing       bool
+	helpVisible   bool
+	logExpanded   bool
+	picker        *pickerState        // 渠道选择弹层；nil = 未打开
+	configOverlay *configOverlayState // 渠道配置二级弹层；nil = 未打开
 }
 
 func New(cfg *config.Config) *Model {
 	return &Model{cfg: cfg, fields: buildFields(cfg), logs: make([]string, 0, 100), cursor: -1, showLogs: true}
 }
 
-// buildFields 公共字段 + 当前引擎的动态配置字段。
+// buildFields 公共字段 + 「渠道配置」二级入口。
+// 所有引擎专属设置（凭据、模型版本、热词等）收进渠道配置弹层，主表单保持统一。
 func buildFields(cfg *config.Config) []field {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 	engines := asrcfg.Types()
-	common := []field{
+	return []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "引擎", key: "engine", help: "回车打开渠道选择；doubao-stream 流式 / auralwise、openai 批处理", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
+		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 	}
-	return append(common, engineFields(vc, ti)...)
 }
 
-// engineFields 按所选引擎生成配置字段，键以 "ec." 前缀写入 [voice.engine_config]。
-func engineFields(vc config.VoiceConfig, ti func(string) textinput.Model) []field {
+// channelConfigFields 构建「渠道配置」弹层里的字段：凭据 + 该引擎的全部专属设置。
+func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model) []field {
 	ec := vc.EngineConfig
 	// get 优先 engine_config，其次旧版平铺字段（迁移显示）。
 	get := func(name string) string {
@@ -200,10 +211,11 @@ func engineFields(vc config.VoiceConfig, ti func(string) textinput.Model) []fiel
 }
 
 // switchEngine 切换引擎并重建动态字段，保留已编辑但未保存的字段值。
+// 同时同步 m.cfg.Voice.Engine，保证渠道配置弹层等按当前引擎工作。
 func (m *Model) switchEngine(engine string) {
 	saved := m.fieldValues()
+	m.cfg.Voice.Engine = engine
 	next := *m.cfg
-	next.Voice.Engine = engine
 	m.fields = buildFields(&next)
 	m.applyFieldValues(saved)
 	// 引擎 select 以新值覆盖（不恢复旧选择）
@@ -218,6 +230,16 @@ func (m *Model) switchEngine(engine string) {
 	} else if m.cursor >= len(m.fields) {
 		m.cursor = len(m.fields) - 1
 	}
+}
+
+// currentEngine 返回主表单「引擎」字段当前选中的值。
+func (m *Model) currentEngine() string {
+	for _, f := range m.fields {
+		if f.key == "engine" {
+			return f.selectValue()
+		}
+	}
+	return m.cfg.Voice.Engine
 }
 
 // fieldValues 收集当前所有字段值（按 key），用于切换引擎时保留未保存输入。
@@ -300,9 +322,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
 
-	// 渠道选择弹层打开时，所有按键交给弹层处理
+	// 弹层打开时，所有按键交给弹层处理（渠道选择 / 渠道配置）
 	if m.picker != nil {
 		return m.handlePickerKey(k)
+	}
+	if m.configOverlay != nil {
+		return m.handleConfigOverlayKey(msg)
 	}
 
 	// Editing a field
@@ -360,10 +385,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.save()
 		return nil
 	case "e", "i", "enter":
-		// 引擎字段用渠道选择弹层，而非普通编辑
-		if m.cursor >= 0 && m.cursor < len(m.fields) && m.fields[m.cursor].key == "engine" {
-			m.openEnginePicker()
-			return nil
+		if m.cursor >= 0 && m.cursor < len(m.fields) {
+			switch m.fields[m.cursor].key {
+			case "engine": // 引擎字段用渠道选择弹层
+				m.openEnginePicker()
+				return nil
+			case "channel_config": // 渠道配置入口：打开二级弹层
+				m.openChannelConfig()
+				return nil
+			}
 		}
 		m.editing = true
 		if m.cursor < 0 {
@@ -404,13 +434,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 // openEnginePicker 打开引擎渠道选择弹层，光标定位到当前引擎。
 func (m *Model) openEnginePicker() {
-	engine := m.cfg.Voice.Engine
-	for _, f := range m.fields {
-		if f.key == "engine" {
-			engine = f.selectValue()
-			break
-		}
-	}
+	engine := m.currentEngine()
 	idx := 0
 	for i, it := range engineChannels {
 		if it.name == engine {
@@ -451,6 +475,199 @@ func (m *Model) selectEngine(name string) {
 	m.picker = nil
 	m.switchEngine(name)
 	m.logf("引擎已切换为 %s", name)
+}
+
+// ---- 渠道配置二级弹层 ----
+
+// openChannelConfig 打开当前引擎的「渠道配置」弹层（凭据、端点等）。
+// 引擎取自主表单当前选中值（渠道选择弹层确认后可能尚未写回 m.cfg）。
+func (m *Model) openChannelConfig() {
+	engine := m.currentEngine()
+	vc := m.cfg.Voice
+	vc.Engine = engine
+	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+	m.configOverlay = &configOverlayState{
+		title:  fmt.Sprintf("[%s] 渠道配置", engine),
+		fields: channelConfigFields(vc, ti),
+		cursor: 0,
+	}
+}
+
+// handleConfigOverlayKey 弹层按键：j/k 导航，e 编辑，s 保存并关闭，esc 取消。
+func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
+	k := msg.String()
+	ov := m.configOverlay
+	if ov == nil {
+		return nil
+	}
+
+	// 编辑字段
+	if ov.editing && ov.cursor >= 0 && ov.cursor < len(ov.fields) {
+		f := &ov.fields[ov.cursor]
+		switch k {
+		case "esc", "enter":
+			ov.editing = false
+			f.input.Blur()
+			return nil
+		}
+		switch f.fType {
+		case fSelect:
+			switch k {
+			case "j", "down":
+				f.optIdx++
+				if f.optIdx >= len(f.opts) {
+					f.optIdx = 0
+				}
+			case "k", "up":
+				f.optIdx--
+				if f.optIdx < 0 {
+					f.optIdx = len(f.opts) - 1
+				}
+			}
+		case fString:
+			var cmd tea.Cmd
+			f.input, cmd = f.input.Update(msg)
+			return cmd
+		}
+		return nil
+	}
+
+	// 导航态
+	switch k {
+	case "j", "down":
+		ov.cursor++
+		if ov.cursor >= len(ov.fields) {
+			ov.cursor = 0
+		}
+	case "k", "up":
+		ov.cursor--
+		if ov.cursor < 0 {
+			ov.cursor = len(ov.fields) - 1
+		}
+	case "e", "i", "enter":
+		ov.editing = true
+		if ov.fields[ov.cursor].fType == fString {
+			ov.fields[ov.cursor].input.Focus()
+		}
+	case "s":
+		m.saveChannelConfig()
+	case "esc", "q", "ctrl+c":
+		m.configOverlay = nil
+	}
+	return nil
+}
+
+// saveChannelConfig 把弹层字段写回 [voice.engine_config] 并保存到磁盘。
+func (m *Model) saveChannelConfig() {
+	m.applyConfigOverlay()
+	if err := config.Save(m.cfg); err != nil {
+		m.logf("❌ 渠道配置保存失败: %s", err)
+	} else {
+		m.logf("✅ 渠道配置已保存")
+	}
+}
+
+// applyConfigOverlay 把弹层字段合并进配置并关闭弹层（不写盘）。
+func (m *Model) applyConfigOverlay() {
+	ov := m.configOverlay
+	if ov == nil {
+		return
+	}
+	vc := &m.cfg.Voice
+	if vc.EngineConfig == nil {
+		vc.EngineConfig = map[string]string{}
+	}
+	for _, f := range ov.fields {
+		switch {
+		case f.key == "hotwords":
+			vc.Hotwords = splitList(f.input.Value())
+		case strings.HasPrefix(f.key, "ec."):
+			name := strings.TrimPrefix(f.key, "ec.")
+			val := strings.TrimSpace(f.input.Value())
+			if f.fType == fSelect {
+				val = f.selectValue()
+			}
+			if val == "" {
+				delete(vc.EngineConfig, name)
+			} else {
+				vc.EngineConfig[name] = val
+			}
+		}
+	}
+	m.configOverlay = nil
+}
+
+// renderConfigOverlay 渲染渠道配置浮层（水平居中，字段可编辑）。
+func (m *Model) renderConfigOverlay() string {
+	ov := m.configOverlay
+	if ov == nil {
+		return ""
+	}
+	width := 72
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	inner := width - 4
+	if inner < 40 {
+		inner = 40
+	}
+	var lines []string
+	lines = append(lines, " "+lStyle.Render(ov.title))
+	for i, f := range ov.fields {
+		marker := "  "
+		if i == ov.cursor {
+			if ov.editing {
+				marker = aStyle.Render("▶ ")
+			} else {
+				marker = aStyle.Render("▸ ")
+			}
+		}
+		lines = append(lines, marker+lStyle.Render(f.label+": ")+m.renderOverlayField(i, f, ov))
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 导航  e 编辑  s 保存  esc 取消"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+// renderOverlayField 渲染弹层内的字段（弹层有自己的 cursor/editing 状态）。
+func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) string {
+	editing := ov.editing && ov.cursor == i
+	switch f.fType {
+	case fString:
+		v := f.input.Value()
+		if (f.key == "ec.api_key" || f.key == "ec.access_key") && !editing && len(v) > 6 {
+			v = v[:6] + "***"
+		}
+		if editing {
+			return f.input.View()
+		}
+		return vStyle.Render(v)
+	case fSelect:
+		v := f.opts[f.optIdx]
+		if editing {
+			return aStyle.Render("[" + v + " ▲▼]")
+		}
+		return vStyle.Render(v)
+	}
+	return ""
 }
 
 // renderPicker 渲染渠道选择浮层（水平居中，subtitle 固定宽度自动换行）。
@@ -506,9 +723,6 @@ func (m *Model) renderPicker() string {
 func (m *Model) save() {
 	next := *m.cfg
 	vc := &next.Voice
-	if vc.EngineConfig == nil {
-		vc.EngineConfig = map[string]string{}
-	}
 	for _, f := range m.fields {
 		switch f.key {
 		case "enabled":
@@ -525,22 +739,6 @@ func (m *Model) save() {
 			vc.AutoSubmit = f.boolVal
 		case "stop_delay_ms":
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
-		case "hotwords":
-			vc.Hotwords = splitList(f.input.Value())
-		default:
-			// 引擎配置字段：写入 [voice.engine_config]
-			if strings.HasPrefix(f.key, "ec.") {
-				name := strings.TrimPrefix(f.key, "ec.")
-				val := strings.TrimSpace(f.input.Value())
-				if f.fType == fSelect {
-					val = f.selectValue()
-				}
-				if val == "" {
-					delete(vc.EngineConfig, name)
-				} else {
-					vc.EngineConfig[name] = val
-				}
-			}
 		}
 	}
 	combo, err := config.ParseHotkey(vc.PushToTalk)
@@ -612,7 +810,7 @@ func (m *Model) View() string {
 		return "loading..."
 	}
 	var b strings.Builder
-	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk") + "\n")
+	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk Plus") + "\n")
 	b.WriteString(vStyle.Render("减少用键盘的次数，改用口喷吧。") + "\n")
 	b.WriteString(m.renderVoiceStats() + "\n\n")
 	b.WriteString(lStyle.Render("── 配置 (e 编辑, s 保存, h 帮助, j/k 导航) ──") + "\n")
@@ -659,6 +857,8 @@ func (m *Model) View() string {
 	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | h 帮助 | esc 退出编辑 | s 保存 | q 退出"))
 	if m.picker != nil {
 		b.WriteString("\n" + m.renderPicker())
+	} else if m.configOverlay != nil {
+		b.WriteString("\n" + m.renderConfigOverlay())
 	}
 	return b.String()
 }
@@ -778,6 +978,8 @@ func (m *Model) renderField(i int, f field) string {
 			return aStyle.Render("[" + v + " ▲▼]")
 		}
 		return vStyle.Render(v)
+	case fAction:
+		return aStyle.Render("▶ ") + vStyle.Render("进入")
 	}
 	return ""
 }
