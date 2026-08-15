@@ -38,7 +38,7 @@ type VoiceConfig struct {
 	StopDelayMs int    `toml:"stop_delay_ms"`
 	Language    string `toml:"language"`
 	AutoSubmit  bool   `toml:"auto_submit"`
-	// Engine 语音引擎类型：doubao（默认）| auralwise | openai | null。
+	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | null。
 	Engine string `toml:"engine"`
 	// EngineConfig 引擎私有配置（api_key、base_url、model 等），键值对。
 	EngineConfig map[string]string `toml:"engine_config"`
@@ -53,8 +53,8 @@ func Default() *Config {
 	return &Config{
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
-			Language: "zh-CN", AutoSubmit: true, ResourceID: "volc.bigasr.sauc.duration",
-			Engine: "doubao",
+			Language: "zh-CN", AutoSubmit: true,
+			Engine: "doubao-stream",
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
