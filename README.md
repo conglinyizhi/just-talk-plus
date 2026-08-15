@@ -184,22 +184,33 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 ### 语音引擎
 
-`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao"`，并保留 `app_key` / `access_key` / `resource_id` 三个旧版平铺字段作为豆包旧凭据的快捷写法（新配置建议直接写 `engine_config`）。
+`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；选定后自动显示该引擎的配置项（凭据、模型版本等），保存后写入 `engine_config`；`app_key` / `access_key` / `resource_id` 三个旧版平铺字段仍作为豆包旧凭据的兼容写法保留。
 
-豆包（火山引擎）流式 ASR，边录边识别，支持热词：
+#### 豆包（火山引擎）流式 ASR
+
+边录边识别，支持热词。豆包有两种接入方式：
+
+| 接入方式 | 模型版本 | 凭据 | 资源 ID（默认） |
+| --- | --- | --- | --- |
+| 豆包 1.0（旧版控制台） | `1.0` | `app_id` + `access_key`（或旧版平铺 `app_key` / `access_key`） | `volc.bigasr.sauc.*` |
+| 豆包 2.0（新版控制台） | `2.0` | `api_key` | `volc.seedasr.sauc.*` |
+
+新版凭据二选一：新版控制台创建应用后拿到 `X-Api-Key`，用 `api_key`；旧版控制台的 App ID + Access Token 用 `app_id` + `access_key`。示例：
 
 ```toml
 [voice]
-engine = "doubao"
+engine = "doubao-stream"
 language = "zh-CN"
 
 [voice.engine_config]
-# 新版凭据（二选一：api_key 或 app_id+access_key）
+# 新版控制台凭据
 api_key = "…"
+# 或用旧版凭据：
 # app_id = "…"
 # access_key = "…"
-# model_version = "1.0"      # 1.0=bigasr（默认） | 2.0=seedasr
-# stream_mode = "async"      # stream | nostream | async（默认 async）
+# 接入方式：
+model_version = "1.0"      # 1.0=bigasr（默认） | 2.0=seedasr
+stream_mode = "async"      # stream | nostream | async（默认 async）
 # resource_id = "volc.bigasr.sauc.duration"  # 显式覆盖资源 ID
 # base_host = "openspeech.bytedance.com"
 ```
@@ -217,7 +228,7 @@ api_key = "asr_…"
 # poll_timeout = "10m"
 ```
 
-OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）：
+OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）。想了解可用的转写模型，可以访问 [QianwenAI 模型库（搜索 asr）](https://www.qianwenai.com/models?search=asr) 参考：
 
 ```toml
 [voice]
@@ -229,7 +240,7 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；豆包为流式引擎，识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；豆包（doubao-stream）为流式引擎，识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 
 ## 更新日志

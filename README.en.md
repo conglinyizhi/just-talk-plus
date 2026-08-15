@@ -184,22 +184,33 @@ On Windows, `Win` and `Super` both refer to the Windows logo key. If recording i
 
 ### Speech Engines
 
-The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao"`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials; for new setups, prefer `engine_config`.
+The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description (Doubao lets you pick the 1.0 / 2.0 model version afterwards); the selected engine then shows its matching settings, saved into `engine_config`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials.
 
-Doubao (Volcano Engine) streaming ASR with live partial results and hotword support:
+#### Doubao (Volcano Engine) Streaming ASR
+
+Live partial results and hotword support. Doubao has two access modes:
+
+| Access | model_version | Credentials | Default resource ID |
+| --- | --- | --- | --- |
+| Doubao 1.0 (legacy console) | `1.0` | `app_id` + `access_key` (or legacy flat `app_key` / `access_key`) | `volc.bigasr.sauc.*` |
+| Doubao 2.0 (new console) | `2.0` | `api_key` | `volc.seedasr.sauc.*` |
+
+Credentials: use `api_key` with the `X-Api-Key` from the new console, or `app_id` + `access_key` with legacy console credentials. Example:
 
 ```toml
 [voice]
-engine = "doubao"
+engine = "doubao-stream"
 language = "zh-CN"
 
 [voice.engine_config]
-# New credentials (choose one: api_key or app_id+access_key)
+# New console credentials
 api_key = "…"
+# Or legacy credentials:
 # app_id = "…"
 # access_key = "…"
-# model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
-# stream_mode = "async"      # stream | nostream | async (default async)
+# Access mode:
+model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
+stream_mode = "async"      # stream | nostream | async (default async)
 # resource_id = "volc.bigasr.sauc.duration"  # explicit resource override
 # base_host = "openspeech.bytedance.com"
 ```
@@ -217,7 +228,7 @@ api_key = "asr_…"
 # poll_timeout = "10m"
 ```
 
-OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.):
+OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.). To explore available transcription models, see the [QianwenAI model catalog (search asr)](https://www.qianwenai.com/models?search=asr):
 
 ```toml
 [voice]
@@ -229,7 +240,7 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; Doubao is a streaming engine and shows partial results while recording. Set `engine = "null"` to disable recognition.
+Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; Doubao (`doubao-stream`) is a streaming engine and shows partial results while recording. Set `engine = "null"` to disable recognition.
 
 
 ## Changelog

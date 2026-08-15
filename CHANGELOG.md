@@ -7,6 +7,11 @@ All notable project changes are tracked here.
 - Added a pluggable ASR engine layer (`internal/speech`) with a registry, ported from the go-human-handler speech module: `doubao` (Volcano Engine, streaming + batch), `auralwise` (async task transcription), and a new OpenAI-compatible Whisper engine (`openai`). `[voice].engine` selects the engine and `[voice.engine_config]` holds engine-specific settings; `app_key`/`access_key`/`resource_id` remain as Doubao legacy shortcuts.
 - Batch-only engines are wrapped into streaming sessions via a buffering adapter (`speech.BatchSession`) so the recording pipeline stays unchanged; batch engines get a longer final-result wait.
 - The TUI gained an engine selector, and `--doctor` now reports the configured engine's availability instead of assuming Doubao credentials.
+- Reworked the TUI into an engine-aware dynamic form: switching the Engine field shows only that engine's settings (Doubao model version/stream mode/two credential sets/hotwords; AuralWise API key/base URL/optimize; OpenAI API key/base URL/model) and saves them into `engine_config`; legacy flat Doubao fields are migrated into the form.
+- The Engine field now opens a channel picker overlay (j/k navigation, per-channel description subtitles) instead of a cycling select; selecting a channel rebuilds the form underneath.
+- Renamed the Doubao engine type from `doubao` to `doubao-stream` to make the streaming nature explicit; the picker description notes that the 1.0 / 2.0 model version is chosen after selecting the channel. The OpenAI channel description points to the QianwenAI model catalog for available ASR models.
+- Removed engine type aliases (`volc-asr`, `doubao-asr`, `aural-wise`); the canonical types are `doubao-stream` / `auralwise` / `openai`, and `null` is now an internal fallback only. Doubao's 1.0 (bigasr) vs 2.0 (seedasr) access modes are documented in the README with a comparison table.
+- `--doctor` ASR guidance now asks users to configure any one of the supported engines instead of showing a raw Doubao credential error.
 
 ## v0.0.3 - 2026-07-29
 
