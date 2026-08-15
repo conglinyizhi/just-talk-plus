@@ -133,7 +133,7 @@ func (t terminalApp) AuthTarget() string {
 		return "当前终端应用"
 	}
 	if t.Name == "远程 SSH 会话" {
-		return "实际启动 Just Talk 的桌面终端应用"
+		return "实际启动 Just Talk Plus 的桌面终端应用"
 	}
 	return t.Name
 }

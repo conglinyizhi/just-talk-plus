@@ -1,7 +1,7 @@
 // Copyright (C) 2026 conglinyizhi
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// This file is part of Just Talk.
+// This file is part of Just Talk Plus.
 
 // Package asrcfg 把 config.VoiceConfig 翻译成语音引擎配置，并负责引擎注册。
 // voice 插件与 doctor 共用，避免两边各自拼配置。

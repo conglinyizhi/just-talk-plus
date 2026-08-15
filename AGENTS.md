@@ -18,7 +18,7 @@ This project is **GPL-3.0-only** (`LICENSE`). These rules are not optional:
 
 ## Project
 
-Desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows.
+Just Talk Plus is a desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows. (Successor of Just Talk; the `just-talk` binary and config paths keep the old name.)
 
 ## Build And Test
 

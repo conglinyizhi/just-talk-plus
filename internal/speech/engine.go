@@ -1,7 +1,7 @@
 // Copyright (C) 2026 conglinyizhi
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// This file is part of Just Talk.
+// This file is part of Just Talk Plus.
 
 // Package speech 提供语音引擎抽象层（TTS / STT / 流式 STT），供接入具体厂商实现。
 //

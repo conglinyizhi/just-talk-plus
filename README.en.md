@@ -1,14 +1,14 @@
-# Just Talk
+# Just Talk Plus
 
 [中文](README.md)
 
-Just Talk is a desktop voice input tool. It records audio with a global hotkey, sends it to streaming ASR, and then copies the recognized text to the clipboard or submits it directly into the focused input field.
+Just Talk Plus is a desktop voice input tool. It records audio with a global hotkey, sends it to streaming ASR, and then copies the recognized text to the clipboard or submits it directly into the focused input field.
 
 It is built for people who want to type less and speak more while coding, chatting, writing notes, or working with long text.
 
 ## Screenshot
 
-![Just Talk TUI](docs/screenshot-tui.png)
+![Just Talk Plus TUI](docs/screenshot-tui.png)
 
 ## Features
 
@@ -34,7 +34,7 @@ Linux, macOS, and Windows desktops are supported:
 
 ## Build
 
-Just Talk uses native platform APIs. Linux and macOS builds require cgo; Windows uses direct Win32 calls from Go and does not require cgo.
+Just Talk Plus uses native platform APIs. Linux and macOS builds require cgo; Windows uses direct Win32 calls from Go and does not require cgo.
 
 Linux build dependencies:
 
@@ -86,7 +86,7 @@ make install
 
 macOS must be built on macOS. The project does not provide a non-cgo build.
 
-Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`:
+Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk.exe`:
 
 ```powershell
 .\build\just-talk.exe --install
@@ -184,7 +184,7 @@ On Windows, `Win` and `Super` both refer to the Windows logo key. If recording i
 
 ### Speech Engines
 
-The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description (Doubao lets you pick the 1.0 / 2.0 model version afterwards); the selected engine then shows its matching settings, saved into `engine_config`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials.
+The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description (Doubao lets you pick the 1.0 / 2.0 model version afterwards); the main form keeps only common settings, while all channel-specific options (credentials, model version, hotwords, etc.) live in a second-level "channel config" overlay (Enter to open, `s` to save, `esc` to cancel), all persisted into `engine_config`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials.
 
 #### Doubao (Volcano Engine) Streaming ASR
 
@@ -249,10 +249,10 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintenance And Contributions
 
-Just Talk is maintained by `conglinyizhi` (continuing the original work by `whoamihappyhacking`; see [NOTICE](NOTICE) for copyright statements).
+Just Talk Plus is maintained by `conglinyizhi` (continuing the original work by `whoamihappyhacking`; see [NOTICE](NOTICE) for copyright statements).
 
 This project does not accept pull requests. Issues are welcome for bug reports, usage feedback, and feature discussion.
 
 ## License
 
-Just Talk is licensed under the GNU General Public License v3.0.
+Just Talk Plus is licensed under the GNU General Public License v3.0.

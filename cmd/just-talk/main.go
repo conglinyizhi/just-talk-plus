@@ -247,7 +247,7 @@ func installDir() (string, error) {
 				return "", fmt.Errorf("find local application data directory: %w", err)
 			}
 		}
-		return filepath.Join(base, "Programs", "Just Talk"), nil
+		return filepath.Join(base, "Programs", "Just Talk Plus"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

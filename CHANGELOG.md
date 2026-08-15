@@ -5,6 +5,7 @@ All notable project changes are tracked here.
 ## Unreleased
 
 - Added copyright headers to source files (new files © conglinyizhi, modified files carry a modified notice), plus `NOTICE` and `THIRD_PARTY_NOTICES` documenting project ownership, maintenance history, and third-party dependency licenses. Maintenance of Just Talk moved from `whoamihappyhacking` to `conglinyizhi`; the project remains GPL-3.0.
+- Renamed the application to Just Talk Plus (in-app TUI title, README, doctor output, and install paths); the binary and config paths keep the `just-talk` name.
 
 - Added a pluggable ASR engine layer (`internal/speech`) with a registry, ported from the go-human-handler speech module: `doubao` (Volcano Engine, streaming + batch), `auralwise` (async task transcription), and a new OpenAI-compatible Whisper engine (`openai`). `[voice].engine` selects the engine and `[voice.engine_config]` holds engine-specific settings; `app_key`/`access_key`/`resource_id` remain as Doubao legacy shortcuts.
 - Batch-only engines are wrapped into streaming sessions via a buffering adapter (`speech.BatchSession`) so the recording pipeline stays unchanged; batch engines get a longer final-result wait.

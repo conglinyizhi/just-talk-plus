@@ -1,14 +1,14 @@
-# Just Talk
+# Just Talk Plus
 
 [English](README.en.md)
 
 减少用键盘的次数，改用口喷吧。
 
-Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音识别结果复制到剪贴板，或直接上屏到当前输入框，适合写代码、聊天、记笔记和处理长文本输入。
+Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音识别结果复制到剪贴板，或直接上屏到当前输入框，适合写代码、聊天、记笔记和处理长文本输入。
 
 ## 截图
 
-![Just Talk TUI](docs/screenshot-tui.png)
+![Just Talk Plus TUI](docs/screenshot-tui.png)
 
 ## 功能
 
@@ -34,7 +34,7 @@ Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快�
 
 ## 构建
 
-Just Talk 依赖平台原生能力。Linux 和 macOS 构建需要启用 cgo；Windows 使用纯 Go 的 Win32 调用，不需要 cgo。
+Just Talk Plus 依赖平台原生能力。Linux 和 macOS 构建需要启用 cgo；Windows 使用纯 Go 的 Win32 调用，不需要 cgo。
 
 Linux 构建依赖：
 
@@ -86,7 +86,7 @@ make install
 
 macOS 需要在本机 macOS 上构建；项目不提供非 cgo 版本。
 
-Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk\just-talk.exe`：
+Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk.exe`：
 
 ```powershell
 .\build\just-talk.exe --install
@@ -184,7 +184,7 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 ### 语音引擎
 
-`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；选定后自动显示该引擎的配置项（凭据、模型版本等），保存后写入 `engine_config`；`app_key` / `access_key` / `resource_id` 三个旧版平铺字段仍作为豆包旧凭据的兼容写法保留。
+`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；主表单只保留公共设置，全部渠道专属配置（凭据、模型版本、热词等）收在「渠道配置」二级弹层（按回车进入、`s` 保存、`esc` 取消），保存后写入 `engine_config`；`app_key` / `access_key` / `resource_id` 三个旧版平铺字段仍作为豆包旧凭据的兼容写法保留。
 
 #### 豆包（火山引擎）流式 ASR
 
@@ -249,10 +249,10 @@ api_key = "sk-…"
 
 ## 维护与贡献
 
-Just Talk 由 `conglinyizhi` 维护（基于 `whoamihappyhacking` 的原作继续开发，版权声明见 [NOTICE](NOTICE)）。
+Just Talk Plus 由 `conglinyizhi` 维护（基于 `whoamihappyhacking` 的原作继续开发，版权声明见 [NOTICE](NOTICE)）。
 
 本项目不接受 Pull Request。欢迎通过 Issue 反馈 bug、使用体验和功能建议。
 
 ## 许可证
 
-Just Talk 使用 GNU General Public License v3.0 开源。
+Just Talk Plus 使用 GNU General Public License v3.0 开源。
