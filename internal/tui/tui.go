@@ -46,7 +46,58 @@ type field struct {
 	input   textinput.Model
 	boolVal bool
 	opts    []string
+	optVals []string // select 显示值对应的写入值（缺省 = opts）
 	optIdx  int
+}
+
+// selectValue 返回 select 字段当前选中的写入值。
+func (f field) selectValue() string {
+	if len(f.optVals) > 0 && f.optIdx >= 0 && f.optIdx < len(f.optVals) {
+		return f.optVals[f.optIdx]
+	}
+	if f.optIdx >= 0 && f.optIdx < len(f.opts) {
+		return f.opts[f.optIdx]
+	}
+	return ""
+}
+
+// pickerItem 渠道选择弹层中的一条候选，subtitle 说明该渠道特点。
+type pickerItem struct {
+	name     string
+	subtitle string
+}
+
+// pickerState 渠道选择弹层状态；nil 表示未打开。
+type pickerState struct {
+	title string
+	items []pickerItem
+	idx   int
+}
+
+// engineChannels 渠道候选与特点说明（与 README / doctor 文案保持一致）。
+var engineChannels = []pickerItem{
+	{
+		name:     "doubao-stream",
+		subtitle: "火山引擎流式 ASR，边录边出字，支持热词；选定后可在下方表单中选择模型版本（1.0 / 2.0）",
+	},
+	{
+		name:     "auralwise",
+		subtitle: "异步任务转写，整段识别，无需公网 URL",
+	},
+	{
+		name:     "openai",
+		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点；了解更多模型：https://www.qianwenai.com/models?search=asr",
+	},
+}
+
+// pickerItemByName 返回指定渠道的候选项。
+func pickerItemByName(name string) (pickerItem, bool) {
+	for _, it := range engineChannels {
+		if it.name == name {
+			return it, true
+		}
+	}
+	return pickerItem{}, false
 }
 
 type Model struct {
@@ -64,24 +115,145 @@ type Model struct {
 	editing     bool
 	helpVisible bool
 	logExpanded bool
+	picker      *pickerState // 渠道选择弹层；nil = 未打开
 }
 
 func New(cfg *config.Config) *Model {
+	return &Model{cfg: cfg, fields: buildFields(cfg), logs: make([]string, 0, 100), cursor: -1, showLogs: true}
+}
+
+// buildFields 公共字段 + 当前引擎的动态配置字段。
+func buildFields(cfg *config.Config) []field {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 	engines := asrcfg.Types()
-	fs := []field{
+	common := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
-		{label: "引擎", key: "engine", help: "doubao 流式；auralwise/openai 批处理（在 [voice.engine_config] 填 api_key 等）", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
-		{label: "App Key", key: "app_key", help: "仅 doubao 旧版凭据", fType: fString, input: ti(vc.AppKey)},
-		{label: "Access Key", key: "access_key", help: "仅 doubao 旧版凭据", fType: fString, input: ti(vc.AccessKey)},
+		{label: "引擎", key: "engine", help: "回车打开渠道选择；doubao-stream 流式 / auralwise、openai 批处理", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
+		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
-		{label: "热词", key: "hotwords", help: "逗号分隔术语（doubao）", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 	}
-	return &Model{cfg: cfg, fields: fs, logs: make([]string, 0, 100), cursor: -1, showLogs: true}
+	return append(common, engineFields(vc, ti)...)
+}
+
+// engineFields 按所选引擎生成配置字段，键以 "ec." 前缀写入 [voice.engine_config]。
+func engineFields(vc config.VoiceConfig, ti func(string) textinput.Model) []field {
+	ec := vc.EngineConfig
+	// get 优先 engine_config，其次旧版平铺字段（迁移显示）。
+	get := func(name string) string {
+		if v := ec[name]; v != "" {
+			return v
+		}
+		switch name {
+		case "app_id":
+			return vc.AppKey
+		case "access_key":
+			return vc.AccessKey
+		case "resource_id":
+			return vc.ResourceID
+		}
+		return ""
+	}
+	def := func(v, d string) string {
+		if strings.TrimSpace(v) == "" {
+			return d
+		}
+		return v
+	}
+
+	switch asrcfg.EngineType(vc) {
+	case "auralwise":
+		return []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（asr_…）", fType: fString, input: ti(ec["api_key"])},
+			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.auralwise.cn/v1", fType: fString, input: ti(ec["base_url"])},
+			{label: "Optimize", key: "ec.optimize", help: "auto | true | false", fType: fSelect, opts: []string{"auto", "true", "false"}, optIdx: idxOf([]string{"auto", "true", "false"}, def(ec["optimize"], "auto"))},
+		}
+	case "openai":
+		return []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（sk-…）", fType: fString, input: ti(ec["api_key"])},
+			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.openai.com/v1", fType: fString, input: ti(ec["base_url"])},
+			{label: "模型", key: "ec.model", help: "默认 whisper-1", fType: fString, input: ti(ec["model"])},
+		}
+	default: // doubao-stream
+		mvOpts := []string{"1.0 (bigasr)", "2.0 (seedasr)"}
+		mvVals := []string{"1.0", "2.0"}
+		smOpts := []string{"async", "stream", "nostream"}
+		return []field{
+			{label: "模型版本", key: "ec.model_version", help: "1.0=bigasr 旧资源 / 2.0=seedasr 新资源", fType: fSelect, opts: mvOpts, optVals: mvVals, optIdx: idxOf(mvVals, def(ec["model_version"], "1.0"))},
+			{label: "流式模式", key: "ec.stream_mode", help: "默认 async", fType: fSelect, opts: smOpts, optIdx: idxOf(smOpts, def(ec["stream_mode"], "async"))},
+			{label: "API Key(新版)", key: "ec.api_key", help: "新版控制台 X-Api-Key；与下方旧版凭据二选一", fType: fString, input: ti(ec["api_key"])},
+			{label: "App ID(旧版)", key: "ec.app_id", help: "旧版控制台 App ID（无 api_key 时使用）", fType: fString, input: ti(get("app_id"))},
+			{label: "Access Key(旧版)", key: "ec.access_key", help: "旧版 Access Token", fType: fString, input: ti(get("access_key"))},
+			{label: "Base Host", key: "ec.base_host", help: "默认 openspeech.bytedance.com", fType: fString, input: ti(ec["base_host"])},
+			{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+		}
+	}
+}
+
+// switchEngine 切换引擎并重建动态字段，保留已编辑但未保存的字段值。
+func (m *Model) switchEngine(engine string) {
+	saved := m.fieldValues()
+	next := *m.cfg
+	next.Voice.Engine = engine
+	m.fields = buildFields(&next)
+	m.applyFieldValues(saved)
+	// 引擎 select 以新值覆盖（不恢复旧选择）
+	for i := range m.fields {
+		if m.fields[i].key == "engine" {
+			m.fields[i].optIdx = idxOf(m.fields[i].opts, engine)
+			break
+		}
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	} else if m.cursor >= len(m.fields) {
+		m.cursor = len(m.fields) - 1
+	}
+}
+
+// fieldValues 收集当前所有字段值（按 key），用于切换引擎时保留未保存输入。
+func (m *Model) fieldValues() map[string]string {
+	out := make(map[string]string, len(m.fields))
+	for _, f := range m.fields {
+		switch f.fType {
+		case fString:
+			out[f.key] = f.input.Value()
+		case fToggle:
+			if f.boolVal {
+				out[f.key] = "on"
+			} else {
+				out[f.key] = "off"
+			}
+		case fSelect:
+			out[f.key] = f.selectValue()
+		}
+	}
+	return out
+}
+
+func (m *Model) applyFieldValues(vals map[string]string) {
+	for i := range m.fields {
+		v, ok := vals[m.fields[i].key]
+		if !ok {
+			continue
+		}
+		f := &m.fields[i]
+		switch f.fType {
+		case fString:
+			f.input.SetValue(v)
+		case fToggle:
+			f.boolVal = v == "on"
+		case fSelect:
+			idx := idxOf(f.opts, v)
+			if idx == 0 && len(f.opts) > 0 && f.opts[0] != v && len(f.optVals) > 0 {
+				idx = idxOf(f.optVals, v)
+			}
+			f.optIdx = idx
+		}
+	}
 }
 
 func (m *Model) SetDebug(debug bool) {
@@ -121,6 +293,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
+
+	// 渠道选择弹层打开时，所有按键交给弹层处理
+	if m.picker != nil {
+		return m.handlePickerKey(k)
+	}
 
 	// Editing a field
 	if m.editing && m.cursor >= 0 && m.cursor < len(m.fields) {
@@ -177,6 +354,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.save()
 		return nil
 	case "e", "i", "enter":
+		// 引擎字段用渠道选择弹层，而非普通编辑
+		if m.cursor >= 0 && m.cursor < len(m.fields) && m.fields[m.cursor].key == "engine" {
+			m.openEnginePicker()
+			return nil
+		}
 		m.editing = true
 		if m.cursor < 0 {
 			m.cursor = 0
@@ -211,9 +393,116 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	return nil
 }
+
+// ---- 渠道选择弹层 ----
+
+// openEnginePicker 打开引擎渠道选择弹层，光标定位到当前引擎。
+func (m *Model) openEnginePicker() {
+	engine := m.cfg.Voice.Engine
+	for _, f := range m.fields {
+		if f.key == "engine" {
+			engine = f.selectValue()
+			break
+		}
+	}
+	idx := 0
+	for i, it := range engineChannels {
+		if it.name == engine {
+			idx = i
+			break
+		}
+	}
+	m.picker = &pickerState{title: "选择识别引擎", items: engineChannels, idx: idx}
+}
+
+// handlePickerKey 弹层按键：j/k 导航，回车确认，esc/q 关闭。
+func (m *Model) handlePickerKey(k string) tea.Cmd {
+	p := m.picker
+	if p == nil {
+		return nil
+	}
+	switch k {
+	case "j", "down", "tab":
+		p.idx++
+		if p.idx >= len(p.items) {
+			p.idx = 0
+		}
+	case "k", "up", "shift+tab":
+		p.idx--
+		if p.idx < 0 {
+			p.idx = len(p.items) - 1
+		}
+	case "enter":
+		m.selectEngine(p.items[p.idx].name)
+	case "esc", "q", "ctrl+c":
+		m.picker = nil
+	}
+	return nil
+}
+
+// selectEngine 选中渠道：关闭弹层并按新引擎重建动态字段。
+func (m *Model) selectEngine(name string) {
+	m.picker = nil
+	m.switchEngine(name)
+	m.logf("引擎已切换为 %s", name)
+}
+
+// renderPicker 渲染渠道选择浮层（水平居中，subtitle 固定宽度自动换行）。
+func (m *Model) renderPicker() string {
+	p := m.picker
+	if p == nil {
+		return ""
+	}
+	width := 64
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	inner := width - 4
+	if inner < 30 {
+		inner = 30
+	}
+	subStyle := dStyle.Width(inner - 2)
+
+	var lines []string
+	lines = append(lines, " "+lStyle.Render(p.title))
+	for i, it := range p.items {
+		if i == p.idx {
+			lines = append(lines, aStyle.Render("▸ "+it.name))
+		} else {
+			lines = append(lines, "  "+vStyle.Render(it.name))
+		}
+		// subtitle 跟随光标行显示，自动换行
+		lines = append(lines, subStyle.Render("    "+it.subtitle))
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	// 水平居中
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
 func (m *Model) save() {
 	next := *m.cfg
 	vc := &next.Voice
+	if vc.EngineConfig == nil {
+		vc.EngineConfig = map[string]string{}
+	}
 	for _, f := range m.fields {
 		switch f.key {
 		case "enabled":
@@ -221,19 +510,31 @@ func (m *Model) save() {
 		case "push_to_talk":
 			vc.PushToTalk = f.input.Value()
 		case "mode":
-			vc.Mode = f.opts[f.optIdx]
+			vc.Mode = f.selectValue()
 		case "engine":
-			vc.Engine = f.opts[f.optIdx]
-		case "app_key":
-			vc.AppKey = f.input.Value()
-		case "access_key":
-			vc.AccessKey = f.input.Value()
+			vc.Engine = f.selectValue()
+		case "language":
+			vc.Language = f.input.Value()
 		case "auto_submit":
 			vc.AutoSubmit = f.boolVal
 		case "stop_delay_ms":
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 		case "hotwords":
 			vc.Hotwords = splitList(f.input.Value())
+		default:
+			// 引擎配置字段：写入 [voice.engine_config]
+			if strings.HasPrefix(f.key, "ec.") {
+				name := strings.TrimPrefix(f.key, "ec.")
+				val := strings.TrimSpace(f.input.Value())
+				if f.fType == fSelect {
+					val = f.selectValue()
+				}
+				if val == "" {
+					delete(vc.EngineConfig, name)
+				} else {
+					vc.EngineConfig[name] = val
+				}
+			}
 		}
 	}
 	combo, err := config.ParseHotkey(vc.PushToTalk)
@@ -350,6 +651,9 @@ func (m *Model) View() string {
 		}
 	}
 	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | h 帮助 | esc 退出编辑 | s 保存 | q 退出"))
+	if m.picker != nil {
+		b.WriteString("\n" + m.renderPicker())
+	}
 	return b.String()
 }
 
@@ -450,8 +754,8 @@ func (m *Model) renderField(i int, f field) string {
 	switch f.fType {
 	case fString:
 		v := f.input.Value()
-		if f.key == "access_key" && !editing && len(v) > 8 {
-			v = v[:8] + "***"
+		if (f.key == "ec.api_key" || f.key == "ec.access_key") && !editing && len(v) > 6 {
+			v = v[:6] + "***"
 		}
 		if editing {
 			return f.input.View()
