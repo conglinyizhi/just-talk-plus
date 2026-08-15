@@ -14,11 +14,11 @@ Just Talk 是一个面向桌面环境的语音输入工具。它通过全局快�
 
 - 全局快捷键录音，支持 `toggle` 和 `hold` 两种模式。
 - 语音热键限定为适合作为全局快捷键的按键：支持纯修饰键、功能键、Tab、CapsLock、方向键和导航键等；不支持字母、数字、标点、空格等普通字符键。
-- 豆包大模型流式 ASR，支持双向流优化版和二遍识别。
+- 多语音引擎可选：豆包（火山引擎）流式 ASR（默认，边录边识别）、AuralWise 批处理转写、OpenAI 兼容 Whisper 接口（可指向本地 whisper / Groq 等端点）。
 - 自动复制到剪贴板，支持自动上屏。
 - Wayland / X11 / macOS / Windows 顶层录音状态胶囊提示。
-- TUI 配置界面，支持热键、模式、自动上屏、停止延迟、热词等配置。
-- 热词增强识别，适合项目名、人名、英文术语和专有名词。
+- TUI 配置界面，支持热键、引擎、模式、自动上屏、停止延迟、热词等配置。
+- 热词增强识别（豆包），适合项目名、人名、英文术语和专有名词。
 - 录音历史统计，包括历史次数、总字数、平均速度和最近速度。
 
 ## 平台状态
@@ -181,6 +181,55 @@ push_to_talk = "Option+Command"
 ```
 
 Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不可用，请在“Windows 设置 → 隐私和安全性 → 麦克风”中允许桌面应用访问麦克风。
+
+### 语音引擎
+
+`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao"`，并保留 `app_key` / `access_key` / `resource_id` 三个旧版平铺字段作为豆包旧凭据的快捷写法（新配置建议直接写 `engine_config`）。
+
+豆包（火山引擎）流式 ASR，边录边识别，支持热词：
+
+```toml
+[voice]
+engine = "doubao"
+language = "zh-CN"
+
+[voice.engine_config]
+# 新版凭据（二选一：api_key 或 app_id+access_key）
+api_key = "…"
+# app_id = "…"
+# access_key = "…"
+# model_version = "1.0"      # 1.0=bigasr（默认） | 2.0=seedasr
+# stream_mode = "async"      # stream | nostream | async（默认 async）
+# resource_id = "volc.bigasr.sauc.duration"  # 显式覆盖资源 ID
+# base_host = "openspeech.bytedance.com"
+```
+
+AuralWise 异步任务转写（整段录音识别，无需公网 URL）：
+
+```toml
+[voice]
+engine = "auralwise"
+
+[voice.engine_config]
+api_key = "asr_…"
+# base_url = "https://api.auralwise.cn/v1"
+# optimize = "auto"          # auto | true | false
+# poll_timeout = "10m"
+```
+
+OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）：
+
+```toml
+[voice]
+engine = "openai"
+
+[voice.engine_config]
+api_key = "sk-…"
+# base_url = "https://api.openai.com/v1"   # 可指向兼容端点
+# model = "whisper-1"
+```
+
+批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；豆包为流式引擎，识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 
 ## 更新日志

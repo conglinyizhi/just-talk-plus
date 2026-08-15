@@ -1,0 +1,262 @@
+package doubao
+
+// 豆包流式识别会话：实现 speech.StreamingEngine / speech.StreamSession。
+//
+// 由 just-talk 旧版 ASRClient 演化而来：默认走 bigmodel_async（大模型流式 ASR 异步接口），
+// 录音期间边录边发 PCM，服务端返回带 definite 标记的 utterances 与最后一包（flags 0x02/0x03）。
+// 帧编码与旧版逐字节兼容（不压缩），鉴权统一走 setAuthHeaders（新/旧两套凭据都支持）。
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+	"sync"
+
+	"github.com/coder/websocket"
+	"github.com/google/uuid"
+
+	"github.com/c/just-talk-go/internal/speech"
+)
+
+// NewStream 实现 speech.StreamingEngine。
+func (e *Engine) NewStream(ctx context.Context, params speech.StreamParams) (speech.StreamSession, error) {
+	return NewStreamSession(e.cfg, params), nil
+}
+
+// StreamSession 一次流式识别会话。
+type StreamSession struct {
+	cfg       Config
+	params    speech.StreamParams
+	logger    *slog.Logger
+	conn      *websocket.Conn
+	writeSlot chan struct{}
+	resultCh  chan speech.StreamResult
+	done      chan struct{}
+	final     chan struct{}
+	finalOnce sync.Once
+	textMu    sync.RWMutex
+	lastText  string
+}
+
+// NewStreamSession 创建会话（不连接；连接在 Connect 中进行）。
+func NewStreamSession(cfg Config, params speech.StreamParams) *StreamSession {
+	writeSlot := make(chan struct{}, 1)
+	writeSlot <- struct{}{}
+	return &StreamSession{
+		cfg:       cfg,
+		params:    params,
+		logger:    slog.Default(),
+		writeSlot: writeSlot,
+		resultCh:  make(chan speech.StreamResult, 64),
+		done:      make(chan struct{}),
+		final:     make(chan struct{}),
+	}
+}
+
+// SetLogger 覆盖默认日志器（供插件注入带上下文的 logger）。
+func (s *StreamSession) SetLogger(l *slog.Logger) {
+	if l != nil {
+		s.logger = l
+	}
+}
+
+func (s *StreamSession) Connect(ctx context.Context) error {
+	url := s.cfg.streamURL()
+	s.logger.Info("connecting to ASR", "url", url)
+	header := http.Header{}
+	setAuthHeaders(header, s.cfg, s.cfg.StreamResourceID(), uuid.NewString())
+	header.Set("X-Api-Connect-Id", uuid.NewString())
+	conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+		HTTPHeader: header,
+	})
+	if err != nil {
+		if resp != nil {
+			return fmt.Errorf("websocket dial: HTTP %d %s: %w", resp.StatusCode, resp.Status, err)
+		}
+		return fmt.Errorf("websocket dial: %w", err)
+	}
+	s.conn = conn
+	if err := s.sendFullClientRequest(ctx); err != nil {
+		conn.Close(websocket.StatusInternalError, "init failed")
+		return fmt.Errorf("send init: %w", err)
+	}
+	s.logger.Info("ASR connected")
+	// 接收循环随连接启动，解析结果/关闭 final 与 done。
+	go s.ReceiveLoop(ctx)
+	return nil
+}
+
+func (s *StreamSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.writeSlot:
+	}
+	defer func() { s.writeSlot <- struct{}{} }()
+	if s.conn == nil {
+		return fmt.Errorf("ASR connection is not open")
+	}
+	frame, err := EncodeAudioOnly(pcm, false, isLast)
+	if err != nil {
+		return err
+	}
+	return s.conn.Write(ctx, websocket.MessageBinary, frame)
+}
+
+func (s *StreamSession) Results() <-chan speech.StreamResult { return s.resultCh }
+func (s *StreamSession) Done() <-chan struct{}               { return s.done }
+func (s *StreamSession) Final() <-chan struct{}              { return s.final }
+
+func (s *StreamSession) LastText() string {
+	s.textMu.RLock()
+	defer s.textMu.RUnlock()
+	return s.lastText
+}
+
+// ReceiveLoop 消费服务端消息直到连接断开或错误帧；调用方以 goroutine 运行。
+func (s *StreamSession) ReceiveLoop(ctx context.Context) {
+	defer close(s.resultCh)
+	defer close(s.done)
+	for {
+		_, data, err := s.conn.Read(ctx)
+		if err != nil {
+			return
+		}
+		s.parseResponse(data)
+	}
+}
+
+// Close 关闭连接。
+func (s *StreamSession) Close() error {
+	if s.conn != nil {
+		return s.conn.Close(websocket.StatusNormalClosure, "done")
+	}
+	return nil
+}
+
+func (s *StreamSession) sendFullClientRequest(ctx context.Context) error {
+	request := map[string]any{
+		"model_name":       "bigmodel",
+		"enable_itn":       s.cfg.EnableITN,
+		"enable_punc":      s.cfg.EnablePunc,
+		"enable_ddc":       s.cfg.EnableDDC,
+		"enable_word":      false,
+		"enable_nonstream": s.cfg.StreamMode != "stream",
+		"result_type":      "full",
+		"show_utterances":  true,
+	}
+	if len(s.params.Hotwords) > 0 {
+		if contextJSON, err := hotwordsContext(s.params.Hotwords); err == nil && contextJSON != "" {
+			request["corpus"] = map[string]any{"context": contextJSON}
+		}
+	}
+	audio := map[string]any{
+		"format": "pcm", "rate": speech.PCMRate, "bits": speech.PCMBits,
+		"channel": speech.PCMChannels, "codec": "raw",
+	}
+	if lang := s.effectiveLang(); lang != "" {
+		audio["language"] = lang
+	}
+	payload := map[string]any{
+		"user":    map[string]string{"uid": "just-talk"},
+		"audio":   audio,
+		"request": request,
+	}
+	jsonBytes, _ := json.Marshal(payload)
+	frame, err := EncodeFullClientRequest(jsonBytes, false)
+	if err != nil {
+		return err
+	}
+	return s.conn.Write(ctx, websocket.MessageBinary, frame)
+}
+
+func (s *StreamSession) effectiveLang() string {
+	if s.params.Lang != "" {
+		return s.params.Lang
+	}
+	return s.cfg.Language
+}
+
+// parseResponse 解析一帧服务端二进制消息。
+func (s *StreamSession) parseResponse(data []byte) {
+	sf, err := DecodeServerFrame(data)
+	if err != nil {
+		s.logger.Debug("bad ASR frame", "error", err)
+		return
+	}
+	switch sf.MsgType {
+	case msgErrorServer:
+		err := fmt.Errorf("ASR 服务错误 %d: %s", sf.ErrorCode, sf.ErrorMessage)
+		s.logger.Error("ASR server error", "code", sf.ErrorCode, "message", sf.ErrorMessage)
+		select {
+		case s.resultCh <- speech.StreamResult{Error: err}:
+		default:
+		}
+		s.finalOnce.Do(func() { close(s.final) })
+	case msgFullServer:
+		s.handleFullServerFrame(sf)
+	}
+}
+
+func (s *StreamSession) handleFullServerFrame(sf *ServerFrame) {
+	var resp struct {
+		Result struct {
+			Text       string `json:"text"`
+			Utterances []struct {
+				Text     string `json:"text"`
+				Definite bool   `json:"definite"`
+			} `json:"utterances"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(sf.Payload, &resp) != nil {
+		return
+	}
+	text := resp.Result.Text
+	isLastPacket := sf.Flags == flagLastNoSeq || sf.Flags == flagLastNegSeq
+	isFinalResult := isLastPacket
+	for _, u := range resp.Result.Utterances {
+		if u.Definite {
+			isFinalResult = true
+		}
+	}
+	if text != "" {
+		s.textMu.Lock()
+		s.lastText = text
+		s.textMu.Unlock()
+		select {
+		case s.resultCh <- speech.StreamResult{Text: text, IsFinal: isFinalResult}:
+		default:
+		}
+	}
+	if isLastPacket {
+		s.finalOnce.Do(func() { close(s.final) })
+	}
+}
+
+// hotwordsContext 把热词列表编码为 corpus context JSON。
+func hotwordsContext(words []string) (string, error) {
+	hotwords := make([]map[string]string, 0, len(words))
+	seen := make(map[string]struct{}, len(words))
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		if _, ok := seen[word]; ok {
+			continue
+		}
+		seen[word] = struct{}{}
+		hotwords = append(hotwords, map[string]string{"word": word})
+	}
+	if len(hotwords) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(map[string]interface{}{"hotwords": hotwords})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}

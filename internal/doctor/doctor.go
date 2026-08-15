@@ -1,11 +1,13 @@
 package doctor
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/c/just-talk-go/config"
+	"github.com/c/just-talk-go/internal/asrcfg"
 )
 
 type Severity int
@@ -107,4 +109,39 @@ func platformName(s string) string {
 	default:
 		return s
 	}
+}
+
+// asrEngineCheck 按配置构建语音引擎并探测可用性（引擎感知的 ASR 配置检查）。
+// cfgPath 用于生成可操作的 Fix 提示。
+func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
+	eng, err := asrcfg.Build(cfg.Voice)
+	if err != nil {
+		return Check{
+			Name: "ASR 配置", OK: false, Severity: Warning,
+			Detail: shortDoctorErr(err),
+			Fix:    "在 " + cfgPath + " 的 [voice] / [voice.engine_config] 中修正语音引擎配置。",
+		}
+	}
+	ok, detail := eng.Available(context.Background())
+	name := eng.Name()
+	if !ok {
+		return Check{
+			Name: "ASR 配置", OK: false, Severity: Warning,
+			Detail: name + "：" + detail,
+			Fix:    "在 " + cfgPath + " 的 [voice.engine_config] 中填写所需凭据（如 api_key）。",
+		}
+	}
+	return Check{Name: "ASR 配置", OK: true, Severity: Warning, Detail: name + "：" + detail}
+}
+
+func shortDoctorErr(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "未知错误"
+	}
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	if len([]rune(msg)) <= 140 {
+		return msg
+	}
+	return string([]rune(msg)[:140]) + "..."
 }

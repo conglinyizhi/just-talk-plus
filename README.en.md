@@ -14,11 +14,11 @@ It is built for people who want to type less and speak more while coding, chatti
 
 - Global hotkey recording with `toggle` and `hold` modes.
 - Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
-- Doubao streaming ASR with optimized bidirectional streaming and second-pass recognition.
+- Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
-- TUI configuration for hotkeys, mode, auto-submit, stop delay, hotwords, and related settings.
-- ASR hotwords for project names, people names, English terms, and domain-specific vocabulary.
+- TUI configuration for hotkeys, engine, mode, auto-submit, stop delay, hotwords, and related settings.
+- ASR hotwords (Doubao) for project names, people names, English terms, and domain-specific vocabulary.
 - Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
 
 ## Platform Status
@@ -181,6 +181,55 @@ push_to_talk = "Option+Command"
 ```
 
 On Windows, `Win` and `Super` both refer to the Windows logo key. If recording is unavailable, allow desktop applications to access the microphone under Windows Settings > Privacy & security > Microphone.
+
+### Speech Engines
+
+The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao"`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials; for new setups, prefer `engine_config`.
+
+Doubao (Volcano Engine) streaming ASR with live partial results and hotword support:
+
+```toml
+[voice]
+engine = "doubao"
+language = "zh-CN"
+
+[voice.engine_config]
+# New credentials (choose one: api_key or app_id+access_key)
+api_key = "…"
+# app_id = "…"
+# access_key = "…"
+# model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
+# stream_mode = "async"      # stream | nostream | async (default async)
+# resource_id = "volc.bigasr.sauc.duration"  # explicit resource override
+# base_host = "openspeech.bytedance.com"
+```
+
+AuralWise async task transcription (whole-recording recognition, no public URL required):
+
+```toml
+[voice]
+engine = "auralwise"
+
+[voice.engine_config]
+api_key = "asr_…"
+# base_url = "https://api.auralwise.cn/v1"
+# optimize = "auto"          # auto | true | false
+# poll_timeout = "10m"
+```
+
+OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.):
+
+```toml
+[voice]
+engine = "openai"
+
+[voice.engine_config]
+api_key = "sk-…"
+# base_url = "https://api.openai.com/v1"   # point at any compatible endpoint
+# model = "whisper-1"
+```
+
+Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; Doubao is a streaming engine and shows partial results while recording. Set `engine = "null"` to disable recognition.
 
 
 ## Changelog

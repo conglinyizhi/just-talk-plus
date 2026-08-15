@@ -30,18 +30,23 @@ type OverlayConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled     bool     `toml:"enabled"`
-	Mode        string   `toml:"mode"`
-	PushToTalk  string   `toml:"push_to_talk"`
-	Device      string   `toml:"device"`
-	Gain        int      `toml:"gain"`
-	StopDelayMs int      `toml:"stop_delay_ms"`
-	Language    string   `toml:"language"`
-	AutoSubmit  bool     `toml:"auto_submit"`
-	AppKey      string   `toml:"app_key"`
-	AccessKey   string   `toml:"access_key"`
-	ResourceID  string   `toml:"resource_id"`
-	Hotwords    []string `toml:"hotwords"`
+	Enabled     bool   `toml:"enabled"`
+	Mode        string `toml:"mode"`
+	PushToTalk  string `toml:"push_to_talk"`
+	Device      string `toml:"device"`
+	Gain        int    `toml:"gain"`
+	StopDelayMs int    `toml:"stop_delay_ms"`
+	Language    string `toml:"language"`
+	AutoSubmit  bool   `toml:"auto_submit"`
+	// Engine 语音引擎类型：doubao（默认）| auralwise | openai | null。
+	Engine string `toml:"engine"`
+	// EngineConfig 引擎私有配置（api_key、base_url、model 等），键值对。
+	EngineConfig map[string]string `toml:"engine_config"`
+	// 以下为 doubao 旧版平铺字段，向后兼容；新配置建议写入 engine_config。
+	AppKey     string   `toml:"app_key"`
+	AccessKey  string   `toml:"access_key"`
+	ResourceID string   `toml:"resource_id"`
+	Hotwords   []string `toml:"hotwords"`
 }
 
 func Default() *Config {
@@ -49,6 +54,7 @@ func Default() *Config {
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
 			Language: "zh-CN", AutoSubmit: true, ResourceID: "volc.bigasr.sauc.duration",
+			Engine: "doubao",
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

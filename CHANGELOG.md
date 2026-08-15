@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added a pluggable ASR engine layer (`internal/speech`) with a registry, ported from the go-human-handler speech module: `doubao` (Volcano Engine, streaming + batch), `auralwise` (async task transcription), and a new OpenAI-compatible Whisper engine (`openai`). `[voice].engine` selects the engine and `[voice.engine_config]` holds engine-specific settings; `app_key`/`access_key`/`resource_id` remain as Doubao legacy shortcuts.
+- Batch-only engines are wrapped into streaming sessions via a buffering adapter (`speech.BatchSession`) so the recording pipeline stays unchanged; batch engines get a longer final-result wait.
+- The TUI gained an engine selector, and `--doctor` now reports the configured engine's availability instead of assuming Doubao credentials.
+
 ## v0.0.3 - 2026-07-29
 
 - Reworked Windows modifier-only hotkeys so the low-level hook only observes key edges and never consumes or replays modifiers. `Alt+Super` works through exact physical-state matching, stale hook state is cleared without combining separate single-key presses, and system shortcuts such as `Alt+Tab` remain untouched.

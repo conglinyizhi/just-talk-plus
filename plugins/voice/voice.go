@@ -17,8 +17,10 @@ import (
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/engine"
 	"github.com/c/just-talk-go/hotkey"
+	"github.com/c/just-talk-go/internal/asrcfg"
 	"github.com/c/just-talk-go/internal/autotype"
 	"github.com/c/just-talk-go/internal/clipboard"
+	"github.com/c/just-talk-go/internal/speech"
 )
 
 const (
@@ -259,7 +261,7 @@ type VoicePlugin struct {
 	sessionID              uint64
 	sessionGen             uint64
 	recorder               *Recorder
-	asrClient              *ASRClient
+	asrClient              speech.StreamSession
 	asrCancel              context.CancelFunc
 	audioDone              <-chan struct{}
 	autoSubmit             bool
@@ -279,7 +281,7 @@ type VoicePlugin struct {
 type recordingSession struct {
 	sessionID   uint64
 	recorder    *Recorder
-	asrClient   *ASRClient
+	asrClient   speech.StreamSession
 	asrCancel   context.CancelFunc
 	audioDone   <-chan struct{}
 	autoSubmit  bool
@@ -289,7 +291,7 @@ type recordingSession struct {
 
 func NewVoicePlugin() *VoicePlugin     { return &VoicePlugin{stopDelayMs: defaultStopDelayMs} }
 func (p *VoicePlugin) Name() string    { return "voice" }
-func (p *VoicePlugin) Version() string { return "0.6.0" }
+func (p *VoicePlugin) Version() string { return "0.7.0" }
 
 func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.env = env
@@ -358,7 +360,7 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	p.mu.Unlock()
 
 	p.logger.Info("config_reloaded", "hotkey", combo, "mode", mode,
-		"auto_submit", vc.AutoSubmit, "stop_delay_ms", vc.StopDelayMs)
+		"auto_submit", vc.AutoSubmit, "stop_delay_ms", vc.StopDelayMs, "engine", asrcfg.EngineType(vc))
 
 	if !sameRegistration {
 		isOld := oldCombo.Key != hotkey.KeyNone || oldCombo.Mods != hotkey.ModNone
@@ -524,13 +526,7 @@ func (p *VoicePlugin) startRecording() {
 		return
 	}
 	vc := p.cfg.Voice
-	asrCfg := ASRConfig{AppKey: vc.AppKey, AccessKey: vc.AccessKey, ResourceID: vc.ResourceID, Language: vc.Language, Hotwords: vc.Hotwords}
-	if asrCfg.ResourceID == "" {
-		asrCfg.ResourceID = "volc.bigasr.sauc.duration"
-	}
-	if asrCfg.Language == "" {
-		asrCfg.Language = "zh-CN"
-	}
+	params := speech.StreamParams{Lang: vc.Language, Hotwords: vc.Hotwords}
 	var rec *Recorder
 	if vc.Device != "" {
 		rec = NewRecorderWithDevice(p.logger, vc.Device, vc.Gain)
@@ -562,14 +558,56 @@ func (p *VoicePlugin) startRecording() {
 	p.publishStatusLocked()
 	p.mu.Unlock() // Release lock before slow WebSocket dial
 
-	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, asrCfg)
+	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params)
 	if shouldStopImmediately {
 		p.startStopDelay()
 	}
 }
 
-func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, asrCfg ASRConfig) {
-	client := NewASRClient(asrCfg, p.logger)
+// newSession 按引擎能力选择会话：支持流式的引擎直接开流式会话，
+// 只支持批处理的引擎（auralwise / openai / null）由 BatchSession 包装。
+func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams) (speech.StreamSession, speech.Engine, error) {
+	eng, err := asrcfg.Build(p.cfg.Voice)
+	if err != nil {
+		return nil, nil, err
+	}
+	if se, ok := eng.(speech.StreamingEngine); ok {
+		sess, err := se.NewStream(ctx, params)
+		if err != nil {
+			return nil, eng, err
+		}
+		if ls, ok := sess.(interface{ SetLogger(*slog.Logger) }); ok {
+			ls.SetLogger(p.logger)
+		}
+		return sess, eng, nil
+	}
+	return speech.NewBatchSession(eng, params), eng, nil
+}
+
+func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams) {
+	client, engineInfo, err := p.newSession(ctx, params)
+	if err != nil {
+		wasCanceled := ctx.Err() != nil
+		cancel()
+		p.mu.Lock()
+		currentSession := p.sessionGen == sessionGen
+		if currentSession {
+			rec.Stop()
+			p.stopping, p.recorder, p.recording = false, nil, false
+			p.stopAt = time.Time{}
+			p.asrCancel = nil
+			if !wasCanceled {
+				p.publishErrorLocked("ASR 引擎配置错误: "+shortError(err), sessionID)
+			} else {
+				p.publishStatusLocked()
+			}
+		}
+		p.mu.Unlock()
+		if currentSession && !wasCanceled {
+			pout("❌ ASR 引擎配置错误: %v", err)
+		}
+		return
+	}
 	if err := client.Connect(ctx); err != nil {
 		wasCanceled := ctx.Err() != nil
 		cancel()
@@ -592,7 +630,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		}
 		return
 	}
-	pout("✅ ASR 已连接")
+	pout("✅ ASR 已连接 (引擎: %s)", engineInfo.Name())
 
 	p.mu.Lock()
 	if p.sessionGen != sessionGen || !p.recording || p.recorder != rec {
@@ -607,7 +645,6 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.publishStatusLocked()
 	p.mu.Unlock()
 
-	go client.ReceiveLoop(ctx)
 	go func() {
 		defer close(audioDone)
 		p.streamAudio(ctx, rec, client)
@@ -785,16 +822,21 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			}
 		}
 		if finalSent {
-			p.logger.Debug("finish session: waiting ASR final")
+			// 流式引擎通常秒回；批处理引擎（auralwise/openai）需要更长的转写时间
+			finalTimeout := 15 * time.Second
+			if _, isBatch := session.asrClient.(*speech.BatchSession); isBatch {
+				finalTimeout = 5 * time.Minute
+			}
+			p.logger.Debug("finish session: waiting ASR final", "timeout", finalTimeout)
 			select {
 			case <-session.asrClient.Final():
 				p.logger.Debug("finish session: ASR final received")
 			case <-session.asrClient.Done():
 				p.logger.Debug("finish session: ASR done")
-			case <-time.After(15 * time.Second):
+			case <-time.After(finalTimeout):
 				if !p.sessionCanceled(session.sessionID) {
 					pout("⚠️  识别超时")
-					p.publishError("识别超时: 等待 ASR final 超过 15s", session.sessionID)
+					p.publishError(fmt.Sprintf("识别超时: 等待 ASR final 超过 %s", finalTimeout), session.sessionID)
 				}
 			}
 		}
@@ -1015,7 +1057,7 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client *ASRClient) {
+func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession) {
 	buf := make([]byte, 6400)
 	for {
 		select {

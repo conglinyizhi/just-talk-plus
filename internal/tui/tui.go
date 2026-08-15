@@ -7,6 +7,7 @@ import (
 
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/hotkey"
+	"github.com/c/just-talk-go/internal/asrcfg"
 	"github.com/c/just-talk-go/plugins/voice"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -68,15 +69,17 @@ type Model struct {
 func New(cfg *config.Config) *Model {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+	engines := asrcfg.Types()
 	fs := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
-		{label: "App Key", key: "app_key", help: "火山 App ID", fType: fString, input: ti(vc.AppKey)},
-		{label: "Access Key", key: "access_key", help: "火山 Access Token", fType: fString, input: ti(vc.AccessKey)},
+		{label: "引擎", key: "engine", help: "doubao 流式；auralwise/openai 批处理（在 [voice.engine_config] 填 api_key 等）", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
+		{label: "App Key", key: "app_key", help: "仅 doubao 旧版凭据", fType: fString, input: ti(vc.AppKey)},
+		{label: "Access Key", key: "access_key", help: "仅 doubao 旧版凭据", fType: fString, input: ti(vc.AccessKey)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
-		{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+		{label: "热词", key: "hotwords", help: "逗号分隔术语（doubao）", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 	}
 	return &Model{cfg: cfg, fields: fs, logs: make([]string, 0, 100), cursor: -1, showLogs: true}
 }
@@ -219,6 +222,8 @@ func (m *Model) save() {
 			vc.PushToTalk = f.input.Value()
 		case "mode":
 			vc.Mode = f.opts[f.optIdx]
+		case "engine":
+			vc.Engine = f.opts[f.optIdx]
 		case "app_key":
 			vc.AppKey = f.input.Value()
 		case "access_key":
