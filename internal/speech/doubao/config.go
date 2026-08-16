@@ -16,22 +16,22 @@ import (
 //	app_id           旧版 X-Api-App-Id / App-Key
 //	access_key       旧版 X-Api-Access-Key
 //	model_version    1.0 | 2.0（默认 1.0；与旧版 just-talk 的 bigasr 资源一致，2.0 用 seedasr）
-//	stream_mode      stream | nostream | async（默认 async；与旧版 just-talk 行为一致）
+//	stream_mode      nostream | async（默认 async；文档仅这两个 WebSocket 端点，无 stream）
 //	stream_billing   duration | concurrent（默认 duration）
 //	file_mode        flash | standard（默认 flash；标准版需公网 URL，本机上传优先 flash）
 //	resource_id      显式覆盖流式 X-Api-Resource-Id（默认由 model_version+billing 推导）
 //	language         可选 BCP-47
 //	enable_itn       true/false（默认 true）
-//	enable_punc      true/false（默认 true）
+//	enable_punc      true/false（默认 true；文档默认 false，语音输入工具开启标点更友好）
 //	enable_ddc       true/false（默认 false）
-//	base_host        默认 openspeech.bytedance.com
+//	base_host        默认 openspeech.bytedance.com（官方固定域名；仅在自建代理/网关时覆盖）
 
 type Config struct {
 	APIKey        string
 	AppID         string
 	AccessKey     string
 	ModelVersion  string // 1.0 | 2.0
-	StreamMode    string // stream | nostream | async
+	StreamMode    string // nostream | async
 	StreamBilling string // duration | concurrent
 	FileMode      string // flash | standard
 	ResourceID    string // 显式资源 ID 覆盖
@@ -62,7 +62,12 @@ func ParseConfig(m map[string]string) (Config, error) {
 		EnableDDC:     parseBoolDefault(m["enable_ddc"], false),
 	}
 	if c.ModelVersion == "" {
-		c.ModelVersion = "1.0"
+		// 新版 X-Api-Key 通常绑定流式 2.0（seedasr）；旧版凭据保持 1.0（bigasr）兼容。
+		if c.APIKey != "" {
+			c.ModelVersion = "2.0"
+		} else {
+			c.ModelVersion = "1.0"
+		}
 	}
 	if c.StreamMode == "" {
 		c.StreamMode = "async"
@@ -92,9 +97,9 @@ func (c Config) validate() error {
 		return fmt.Errorf("doubao: model_version 须为 1.0 或 2.0")
 	}
 	switch c.StreamMode {
-	case "stream", "nostream", "async":
+	case "nostream", "async":
 	default:
-		return fmt.Errorf("doubao: stream_mode 须为 stream|nostream|async")
+		return fmt.Errorf("doubao: stream_mode 须为 nostream|async")
 	}
 	switch c.StreamBilling {
 	case "duration", "concurrent":
@@ -142,8 +147,6 @@ func (c Config) FileResourceID() string {
 
 func (c Config) streamPath() string {
 	switch c.StreamMode {
-	case "stream":
-		return "/api/v3/sauc/bigmodel"
 	case "async":
 		return "/api/v3/sauc/bigmodel_async"
 	default:

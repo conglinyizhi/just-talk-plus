@@ -116,14 +116,14 @@ func TestHotwordsContextDedupesAndSkipsEmpty(t *testing.T) {
 }
 
 func TestStreamRequestUsesConfigFlags(t *testing.T) {
-	// 验证请求参数随配置变化（enable_nonstream 随 stream_mode 切换）
+	// 默认 async；enable_nonstream 仅在 async（双向流+二遍识别）开启
 	async := NewStreamSession(Config{StreamMode: "async"}, speech.StreamParams{})
 	if async.cfg.StreamMode != "async" {
 		t.Fatal("default stream mode should be async")
 	}
-	stream := NewStreamSession(Config{StreamMode: "stream"}, speech.StreamParams{})
-	if stream.cfg.StreamMode != "stream" {
-		t.Fatal("stream mode not honored")
+	nostream := NewStreamSession(Config{StreamMode: "nostream"}, speech.StreamParams{})
+	if nostream.cfg.StreamMode != "nostream" {
+		t.Fatal("nostream mode not honored")
 	}
 }
 

@@ -149,7 +149,7 @@ func (s *StreamSession) sendFullClientRequest(ctx context.Context) error {
 		"enable_punc":      s.cfg.EnablePunc,
 		"enable_ddc":       s.cfg.EnableDDC,
 		"enable_word":      false,
-		"enable_nonstream": s.cfg.StreamMode != "stream",
+		"enable_nonstream": s.cfg.StreamMode == "async", // 双向流开启二遍识别，分句带 definite
 		"result_type":      "full",
 		"show_utterances":  true,
 	}

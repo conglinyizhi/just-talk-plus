@@ -116,3 +116,10 @@ func TestParseConfigRejectIdle(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestParseConfigRejectLegacyStreamMode(t *testing.T) {
+	// 文档仅 bigmodel_nostream / bigmodel_async 两个端点，stream 模式已移除
+	if _, err := ParseConfig(map[string]string{"api_key": "k", "stream_mode": "stream"}); err == nil {
+		t.Fatal("stream_mode=stream should be rejected")
+	}
+}

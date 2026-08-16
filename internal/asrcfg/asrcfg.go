@@ -55,7 +55,12 @@ func ConfigMap(vc config.VoiceConfig) map[string]string {
 		m["language"] = vc.Language
 	}
 	if EngineType(vc) == "doubao-stream" {
-		if m["api_key"] == "" && m["app_id"] == "" && strings.TrimSpace(vc.AppKey) != "" {
+		// 新版 api_key 时不合并旧版平铺字段：顶层 resource_id 会钉死 1.0 的 bigasr 资源，
+		// 导致新版 key（通常绑定 2.0/seedasr）握手 403。旧版凭据仍按旧行为合并。
+		if m["api_key"] != "" {
+			return m
+		}
+		if m["app_id"] == "" && strings.TrimSpace(vc.AppKey) != "" {
 			m["app_id"] = vc.AppKey
 		}
 		if m["access_key"] == "" && strings.TrimSpace(vc.AccessKey) != "" {

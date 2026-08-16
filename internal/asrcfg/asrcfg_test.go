@@ -131,7 +131,7 @@ func TestDoubaoResourceDerivation(t *testing.T) {
 	if cfg := config.Default(); cfg.Voice.ResourceID != "" {
 		t.Fatalf("default ResourceID should be empty, got %q", cfg.Voice.ResourceID)
 	}
-	// 2.0 → seedasr
+	// 显式 2.0 → seedasr
 	eng, err := Build(config.VoiceConfig{EngineConfig: map[string]string{"api_key": "k", "model_version": "2.0"}})
 	if err != nil {
 		t.Fatal(err)
@@ -140,14 +140,23 @@ func TestDoubaoResourceDerivation(t *testing.T) {
 	if !strings.Contains(detail, "resource_stream=volc.seedasr.sauc.duration") {
 		t.Fatalf("2.0 should derive seedasr resource: %s", detail)
 	}
-	// 默认 1.0 → bigasr（与旧版行为一致）
+	// 新版 api_key 未指定 model_version → 默认 2.0（seedasr），避免 403
 	eng, err = Build(config.VoiceConfig{EngineConfig: map[string]string{"api_key": "k"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, detail = eng.Available(nil)
+	if !strings.Contains(detail, "resource_stream=volc.seedasr.sauc.duration") {
+		t.Fatalf("new api_key should default to 2.0/seedasr: %s", detail)
+	}
+	// 旧版凭据未指定 model_version → 默认 1.0（bigasr）
+	eng, err = Build(config.VoiceConfig{AppKey: "a", AccessKey: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, detail = eng.Available(nil)
 	if !strings.Contains(detail, "resource_stream=volc.bigasr.sauc.duration") {
-		t.Fatalf("1.0 should derive bigasr resource: %s", detail)
+		t.Fatalf("legacy credentials should default to 1.0/bigasr: %s", detail)
 	}
 	// 显式 resource_id 优先
 	eng, err = Build(config.VoiceConfig{EngineConfig: map[string]string{"api_key": "k", "resource_id": "volc.custom.res"}})
@@ -157,5 +166,37 @@ func TestDoubaoResourceDerivation(t *testing.T) {
 	_, detail = eng.Available(nil)
 	if !strings.Contains(detail, "resource_stream=volc.custom.res") {
 		t.Fatalf("explicit resource_id should win: %s", detail)
+	}
+}
+
+func TestConfigMapNewAPIKeySkipsLegacyFields(t *testing.T) {
+	// 新版 api_key 时，顶层旧版平铺字段（app_id/access_key/resource_id）不应注入，
+	// 否则旧 resource_id 会把资源钉死在 1.0/bigasr 导致新版 key 403
+	m := ConfigMap(config.VoiceConfig{
+		Engine:     "doubao-stream",
+		AppKey:     "legacy-app",
+		AccessKey:  "legacy-secret",
+		ResourceID: "volc.bigasr.sauc.duration",
+		EngineConfig: map[string]string{
+			"api_key": "new-key",
+		},
+	})
+	if m["api_key"] != "new-key" {
+		t.Fatalf("api_key = %q", m["api_key"])
+	}
+	for _, key := range []string{"app_id", "access_key", "resource_id"} {
+		if _, ok := m[key]; ok {
+			t.Fatalf("legacy field %q should not be injected with new api_key: %v", key, m)
+		}
+	}
+	// 旧版凭据（无 api_key）仍按旧行为合并
+	m2 := ConfigMap(config.VoiceConfig{
+		Engine:     "doubao-stream",
+		AppKey:     "a",
+		AccessKey:  "s",
+		ResourceID: "volc.custom.res",
+	})
+	if m2["app_id"] != "a" || m2["access_key"] != "s" || m2["resource_id"] != "volc.custom.res" {
+		t.Fatalf("legacy merge broken: %v", m2)
 	}
 }
