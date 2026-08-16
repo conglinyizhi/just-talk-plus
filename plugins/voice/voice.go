@@ -897,8 +897,9 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 		if autoSubmit {
 			// 自动上屏：机制上必须「写剪贴板 → 模拟粘贴」。
 			// 主开关 write_clipboard 关闭或子开关 restore_clipboard 开启时，
-			// 上屏成功后把原内容还原，尽量不污染剪贴板历史；
-			// 上屏失败时文本留在剪贴板作为兜底（用户可手动粘贴）。
+			// 上屏成功后把原内容还原，尽量不污染剪贴板历史。
+			// 二级开关 no_clipboard_on_fail：上屏失败时也不写入剪贴板
+			// （还原原内容，识别文本不留在剪贴板）。
 			var origClipboard string
 			restore := vc.WriteClipboard == false || vc.RestoreClipboard
 			if restore {
@@ -910,7 +911,12 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			}
 			if err := autotype.Paste(text, p.logger); err != nil {
 				pout("❌ 上屏失败: %v", err)
-				if vc.WriteClipboard {
+				if restore && vc.NoClipboardOnFail {
+					// 失败也不写入剪贴板：还原原内容
+					restoreClipboard(origClipboard, p.logger)
+					pout("ℹ️  未写入剪贴板")
+				} else if vc.WriteClipboard {
+					// 兜底：文本留在剪贴板供手动粘贴
 					pout("📋 已复制到剪贴板")
 				}
 			} else {

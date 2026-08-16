@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added a second-level option "上屏失败也不写入" (`no_clipboard_on_fail`, on by default, nested under 识别后写入剪贴板 → 上屏后尽量不动剪贴板): when autotype fails, the original clipboard content is restored too and the recognized text is not left in the clipboard — previously a failed submit left the text there as a fallback. Combined with the existing options, the clipboard (and clipboard-manager history) is never touched by the recognized text.
+
 - Reworked clipboard handling into two options to reduce clipboard-history pollution (your clipboard history is your scratchpad): a master toggle "识别后写入剪贴板" (`write_clipboard`, on by default) controls whether recognition results are written to the clipboard at all (off = never write, e.g. to avoid polluting a clipboard manager); its sub-option "上屏后尽量不动剪贴板" (`restore_clipboard`, on by default) restores the original clipboard after a successful autotype — on failure the text stays in the clipboard as a fallback copy. Autotype itself must borrow the clipboard (write → simulate paste), so the restore keeps your copied content intact.
 
 - Added "上屏后恢复剪贴板" (`restore_clipboard`, on by default): autotype pastes via the clipboard, so after a successful submit the original clipboard content is restored, preventing your copied text from being overwritten. (X11 already did this internally; now it applies on all platforms via the output layer, with a reliable success callback from `autotype.Paste`.)

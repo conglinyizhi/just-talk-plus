@@ -236,6 +236,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）", fType: fToggle, boolVal: vc.AutoSpace},
 		{label: "识别后写入剪贴板", key: "write_clipboard", help: "识别完成后是否写入剪贴板；关闭可减少污染剪贴板历史（上屏仍需临时借用）", fType: fToggle, boolVal: vc.WriteClipboard},
 		{label: "上屏后尽量不动剪贴板", key: "restore_clipboard", help: "上屏成功后还原剪贴板原内容；上屏失败时文本留在剪贴板", fType: fToggle, boolVal: vc.RestoreClipboard, indent: 1},
+		{label: "上屏失败也不写入", key: "no_clipboard_on_fail", help: "上屏失败时同样还原剪贴板，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail, indent: 2},
 	}
 
 	return map[tabID][]field{
@@ -567,6 +568,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.WriteClipboard = f.boolVal
 			case "restore_clipboard":
 				vc.RestoreClipboard = f.boolVal
+			case "no_clipboard_on_fail":
+				vc.NoClipboardOnFail = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 			case "auto_gain":

@@ -65,6 +65,9 @@ type VoiceConfig struct {
 	// RestoreClipboard 子选项（依赖 WriteClipboard）：自动上屏成功后尽量不操作剪贴板，
 	// 把上屏前保存的原内容还原；上屏失败时文本留在剪贴板作为兜底。
 	RestoreClipboard bool `toml:"restore_clipboard"`
+	// NoClipboardOnFail 二级子选项：上屏失败时也不写入剪贴板（原内容保持还原），
+	// 仅在 write_clipboard 与 restore_clipboard 均开启时生效。
+	NoClipboardOnFail bool `toml:"no_clipboard_on_fail"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`
 	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。
@@ -119,7 +122,7 @@ func Default() *Config {
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
-			WriteClipboard: true, RestoreClipboard: true,
+			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
 			Engine: "doubao-stream",
 		},
 		Overlay: OverlayConfig{

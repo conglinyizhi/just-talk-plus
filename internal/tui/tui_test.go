@@ -67,13 +67,23 @@ func TestBuildTabFields(t *testing.T) {
 		}
 	}
 	output := tabKeys(m.tabField[tabOutput])
-	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space", "write_clipboard", "restore_clipboard"} {
+	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space", "write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
 		if !output[want] {
 			t.Fatalf("output tab missing %q: %v", want, output)
 		}
 	}
 	if f := fieldByKey(m, "omit_trailing_all"); f.indent != 1 {
 		t.Fatalf("omit_trailing_all indent = %d", f.indent)
+	}
+	// 剪贴板选项三级缩进：写入剪贴板(0) → 上屏后不动(1) → 上屏失败也不写(2)
+	if f := fieldByKey(m, "write_clipboard"); f.indent != 0 {
+		t.Fatalf("write_clipboard indent = %d", f.indent)
+	}
+	if f := fieldByKey(m, "restore_clipboard"); f.indent != 1 {
+		t.Fatalf("restore_clipboard indent = %d", f.indent)
+	}
+	if f := fieldByKey(m, "no_clipboard_on_fail"); f.indent != 2 {
+		t.Fatalf("no_clipboard_on_fail indent = %d", f.indent)
 	}
 }
 
