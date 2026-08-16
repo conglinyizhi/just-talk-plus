@@ -4,6 +4,17 @@
 // This file was modified from the original Just Talk by whoamihappyhacking
 // (GPL-3.0). See NOTICE for maintenance history.
 
+// Package tui 提供 Just Talk Plus 的 Bubble Tea 配置界面。
+//
+// 主绘制基于 charmbracelet 组件库：
+//   - list      设置项列表（title/description 两行布局，自带滚动与光标）
+//   - textinput 字符串/数字字段编辑
+//   - help      底部按键帮助（由按键绑定自动生成）
+//   - lipgloss  tab 分组栏与整体样式
+//
+// 布局为 tab 分组（通用/引擎/麦克风/输出/历史），垂直高度只取决于
+// 单组字段数，不再随设置项总数线性增长。渠道选择、渠道配置、麦克风调试
+// 为模态弹层，保留独立交互。
 package tui
 
 import (
@@ -15,6 +26,9 @@ import (
 	"github.com/c/just-talk-go/hotkey"
 	"github.com/c/just-talk-go/internal/asrcfg"
 	"github.com/c/just-talk-go/plugins/voice"
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -36,13 +50,14 @@ type devMsg struct {
 	Devices []string
 	Error   error
 }
+
 type fieldType int
 
 const (
 	fString fieldType = iota
 	fToggle
 	fSelect
-	fAction // 二级入口：回车打开渠道配置弹层
+	fAction // 二级入口：回车打开弹层/面板
 )
 
 type field struct {
@@ -55,7 +70,7 @@ type field struct {
 	opts    []string
 	optVals []string // select 显示值对应的写入值（缺省 = opts）
 	optIdx  int
-	indent  int // 层级缩进（副设置项依赖主设置项时用，渲染时 label 前加空格）
+	indent  int // 层级缩进（副设置项依赖主设置项时用）
 }
 
 // selectValue 返回 select 字段当前选中的写入值。
@@ -68,6 +83,22 @@ func (f field) selectValue() string {
 	}
 	return ""
 }
+
+// ---- tab 分组 ----
+
+type tabID int
+
+const (
+	tabGeneral tabID = iota
+	tabEngine
+	tabMic
+	tabOutput
+	tabHistory
+)
+
+var tabNames = []string{"通用", "引擎", "麦克风", "输出", "历史"}
+
+// ---- 弹层状态（保留现有模态交互）----
 
 // pickerItem 渠道选择弹层中的一条候选，subtitle 说明该渠道特点。
 type pickerItem struct {
@@ -86,7 +117,7 @@ type pickerState struct {
 var engineChannels = []pickerItem{
 	{
 		name:     "doubao-stream",
-		subtitle: "火山引擎流式 ASR，边录边出字，支持热词；选定后可在下方表单中选择模型版本（1.0 / 2.0）",
+		subtitle: "火山引擎流式 ASR，边录边出字，支持热词；选定后可在渠道配置中选择模型版本（1.0 / 2.0）",
 	},
 	{
 		name:     "auralwise",
@@ -96,16 +127,6 @@ var engineChannels = []pickerItem{
 		name:     "openai",
 		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点；了解更多模型：https://www.qianwenai.com/models?search=asr",
 	},
-}
-
-// pickerItemByName 返回指定渠道的候选项。
-func pickerItemByName(name string) (pickerItem, bool) {
-	for _, it := range engineChannels {
-		if it.name == name {
-			return it, true
-		}
-	}
-	return pickerItem{}, false
 }
 
 // configOverlayState 渠道配置二级弹层；nil 表示未打开。
@@ -119,63 +140,152 @@ type configOverlayState struct {
 // micPanelState 麦克风调试面板；nil 表示未打开。
 type micPanelState struct{}
 
-// historyPanelState 识别历史面板；nil 表示未打开。
-type historyPanelState struct {
-	idx int
+// ---- 按键绑定（供 help 组件展示）----
+
+type keyMap struct {
+	Up, Down, Enter, Left, Right, Save, Logs, Quit key.Binding
 }
 
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Enter, k.Left, k.Right, k.Save, k.Logs, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding { return [][]key.Binding{k.ShortHelp()} }
+
+var keys = keyMap{
+	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "上移")),
+	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "下移")),
+	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "编辑/进入")),
+	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "上一个分组")),
+	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "下一个分组")),
+	Save:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "保存")),
+	Logs:  key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "展开日志")),
+	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
+}
+
+// ---- list 条目适配 ----
+
+// fieldItem 设置项的 list.Item：title=设置名，description=当前值/提示。
+type fieldItem struct {
+	title string
+	desc  string
+}
+
+func (i fieldItem) Title() string       { return i.title }
+func (i fieldItem) Description() string { return i.desc }
+func (i fieldItem) FilterValue() string { return i.title }
+
+// historyItem 识别历史的 list.Item：title=文本，description=时间与操作提示。
+type historyItem struct {
+	title string
+	desc  string
+	idx   int
+}
+
+func (i historyItem) Title() string       { return i.title }
+func (i historyItem) Description() string { return i.desc }
+func (i historyItem) FilterValue() string { return i.title }
+
+// ---- 主 Model ----
+
 type Model struct {
-	w, h          int
-	ready         bool
-	info          hotkey.ProviderInfo
-	logs          []string
-	devices       []string
-	cfg           *config.Config
-	debug         bool
-	showLogs      bool
-	OnSave        func(*config.Config) error
-	fields        []field
-	cursor        int
-	editing       bool
-	helpVisible   bool
-	logExpanded   bool
-	picker        *pickerState        // 渠道选择弹层；nil = 未打开
-	configOverlay *configOverlayState // 渠道配置二级弹层；nil = 未打开
-	micPanel      *micPanelState      // 麦克风调试面板；nil = 未打开
-	historyPanel  *historyPanelState  // 识别历史面板；nil = 未打开
+	w, h        int
+	ready       bool
+	info        hotkey.ProviderInfo
+	logs        []string
+	devices     []string
+	cfg         *config.Config
+	debug       bool
+	showLogs    bool
+	logExpanded bool
+	OnSave      func(*config.Config) error
+
+	tab      tabID
+	tabField map[tabID][]field
+	list     list.Model
+	help     help.Model
+
+	editing      bool
+	editOriginal string // fString 编辑前的值（esc 恢复）
+	input        textinput.Model
+
+	picker        *pickerState
+	configOverlay *configOverlayState
+	micPanel      *micPanelState
 }
 
 func New(cfg *config.Config) *Model {
-	return &Model{cfg: cfg, fields: buildFields(cfg), logs: make([]string, 0, 100), cursor: -1, showLogs: true}
+	li := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	li.SetShowTitle(false)
+	li.SetShowStatusBar(false)
+	li.SetShowHelp(false)
+	li.SetFilteringEnabled(false)
+	li.SetShowPagination(false)
+
+	ti := textinput.New()
+	ti.Placeholder = "输入新值…"
+	ti.CharLimit = 128
+	ti.Cursor.Blink = false
+
+	m := &Model{
+		cfg:      cfg,
+		tabField: buildTabFields(cfg),
+		list:     li,
+		help:     help.New(),
+		input:    ti,
+		logs:     make([]string, 0, 100),
+		showLogs: true,
+		tab:      tabGeneral,
+	}
+	return m
 }
 
-// buildFields 公共字段 + 「渠道配置」二级入口。
-// 所有引擎专属设置（凭据、模型版本、热词等）收进渠道配置弹层，主表单保持统一。
-func buildFields(cfg *config.Config) []field {
+// ---- 字段构建（按 tab 分组）----
+
+// buildTabFields 按 tab 分组构建全部设置字段。
+func buildTabFields(cfg *config.Config) map[tabID][]field {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 	engines := asrcfg.Types()
-	return []field{
+
+	general := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
-		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9 / Ctrl+Alt+Tab；不支持字母、数字、标点、空格等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
+		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9；不支持字母数字等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
-		{label: "引擎", key: "engine", help: "回车打开渠道选择；doubao-stream 流式 / auralwise、openai 批处理", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
-		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
-		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整", fType: fAction},
-		{label: "历史记录", key: "history", help: "回车查看最近识别结果，可选中复制到剪贴板", fType: fAction},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
+		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
+	}
+
+	engineTab := []field{
+		{label: "引擎", key: "engine", help: "回车选择渠道；doubao-stream 流式 / auralwise、openai 批处理", fType: fAction},
+		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
+	}
+
+	mic := []field{
+		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整", fType: fAction},
+		{label: "增益", key: "gain", help: "1-100，细粒度；调试面板内可实时调整", fType: fString, input: ti(fmt.Sprintf("%d", vc.Gain))},
+		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
+	}
+
+	output := []field{
 		{label: "句尾标点省略", key: "omit_trailing_punct", help: "上屏/复制前省略句尾句号「。」", fType: fToggle, boolVal: vc.OmitTrailingPunct},
 		{label: "切断所有符号", key: "omit_trailing_all", help: "句尾所有标点一并省略（含英文）", fType: fToggle, boolVal: vc.OmitTrailingAll, indent: 1},
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
-		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
+	}
+
+	_ = engines
+	return map[tabID][]field{
+		tabGeneral: general,
+		tabEngine:  engineTab,
+		tabMic:     mic,
+		tabOutput:  output,
 	}
 }
 
 // channelConfigFields 构建「渠道配置」弹层里的字段：凭据 + 该引擎的全部专属设置。
 func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model) []field {
 	ec := vc.EngineConfig
-	// get 优先 engine_config，其次旧版平铺字段（迁移显示）。
 	get := func(name string) string {
 		if v := ec[name]; v != "" {
 			return v
@@ -214,7 +324,6 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 		mvOpts := []string{"1.0 (bigasr)", "2.0 (seedasr)"}
 		mvVals := []string{"1.0", "2.0"}
 		smOpts := []string{"async", "nostream"}
-		// 未显式设置 model_version 时，新版 api_key 默认 2.0（seedasr），旧版凭据默认 1.0
 		mvDefault := "1.0"
 		if ec["api_key"] != "" {
 			mvDefault = "2.0"
@@ -231,84 +340,6 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 	}
 }
 
-// switchEngine 切换引擎并重建动态字段，保留已编辑但未保存的字段值。
-// 同时同步 m.cfg.Voice.Engine，保证渠道配置弹层等按当前引擎工作。
-func (m *Model) switchEngine(engine string) {
-	saved := m.fieldValues()
-	m.cfg.Voice.Engine = engine
-	next := *m.cfg
-	m.fields = buildFields(&next)
-	m.applyFieldValues(saved)
-	// 引擎 select 以新值覆盖（不恢复旧选择）
-	for i := range m.fields {
-		if m.fields[i].key == "engine" {
-			m.fields[i].optIdx = idxOf(m.fields[i].opts, engine)
-			break
-		}
-	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	} else if m.cursor >= len(m.fields) {
-		m.cursor = len(m.fields) - 1
-	}
-}
-
-// currentEngine 返回主表单「引擎」字段当前选中的值。
-func (m *Model) currentEngine() string {
-	for _, f := range m.fields {
-		if f.key == "engine" {
-			return f.selectValue()
-		}
-	}
-	return m.cfg.Voice.Engine
-}
-
-// fieldValues 收集当前所有字段值（按 key），用于切换引擎时保留未保存输入。
-func (m *Model) fieldValues() map[string]string {
-	out := make(map[string]string, len(m.fields))
-	for _, f := range m.fields {
-		switch f.fType {
-		case fString:
-			out[f.key] = f.input.Value()
-		case fToggle:
-			if f.boolVal {
-				out[f.key] = "on"
-			} else {
-				out[f.key] = "off"
-			}
-		case fSelect:
-			out[f.key] = f.selectValue()
-		}
-	}
-	return out
-}
-
-func (m *Model) applyFieldValues(vals map[string]string) {
-	for i := range m.fields {
-		v, ok := vals[m.fields[i].key]
-		if !ok {
-			continue
-		}
-		f := &m.fields[i]
-		switch f.fType {
-		case fString:
-			f.input.SetValue(v)
-		case fToggle:
-			f.boolVal = v == "on"
-		case fSelect:
-			idx := idxOf(f.opts, v)
-			if idx == 0 && len(f.opts) > 0 && f.opts[0] != v && len(f.optVals) > 0 {
-				idx = idxOf(f.optVals, v)
-			}
-			f.optIdx = idx
-		}
-	}
-}
-
-func (m *Model) SetDebug(debug bool) {
-	m.debug = debug
-}
-
 func idxOf(opts []string, v string) int {
 	for i, o := range opts {
 		if o == v {
@@ -318,17 +349,115 @@ func idxOf(opts []string, v string) int {
 	return 0
 }
 
+// ---- list 数据刷新 ----
+
+// currentFields 返回当前 tab 的设置字段（历史 tab 返回 nil）。
+func (m *Model) currentFields() []field {
+	if m.tab == tabHistory {
+		return nil
+	}
+	return m.tabField[m.tab]
+}
+
+// selectedField 返回 list 当前选中项对应的字段。
+func (m *Model) selectedField() *field {
+	fs := m.currentFields()
+	i := m.list.Index()
+	if i < 0 || i >= len(fs) {
+		return nil
+	}
+	return &fs[i]
+}
+
+// refreshItems 按当前 tab 重建 list 条目（设置值变化后调用）。
+func (m *Model) refreshItems() {
+	if m.tab == tabHistory {
+		m.refreshHistoryItems()
+		return
+	}
+	fs := m.currentFields()
+	items := make([]list.Item, len(fs))
+	for i := range fs {
+		f := &fs[i]
+		items[i] = fieldItem{
+			title: strings.Repeat("  ", f.indent) + f.label,
+			desc:  m.fieldValue(f),
+		}
+	}
+	m.list.SetItems(items)
+}
+
+func (m *Model) refreshHistoryItems() {
+	hist := voice.History()
+	items := make([]list.Item, len(hist))
+	for i, e := range hist {
+		items[i] = historyItem{
+			title: truncateText(e.Text, 60),
+			desc:  "   " + e.Time.Format("15:04:05") + "  ·  回车复制到剪贴板",
+			idx:   i,
+		}
+	}
+	m.list.SetItems(items)
+}
+
+// fieldValue 渲染字段当前值（list 的 description 行）。
+func (m *Model) fieldValue(f *field) string {
+	switch f.fType {
+	case fString:
+		v := f.input.Value()
+		if v == "" {
+			return dStyle.Render("（空）")
+		}
+		if f.key == "ec.api_key" || f.key == "ec.access_key" {
+			if len(v) > 6 {
+				v = v[:6] + "***"
+			}
+		}
+		return v
+	case fToggle:
+		if f.boolVal {
+			return aStyle.Render("● 开")
+		}
+		return dStyle.Render("○ 关")
+	case fSelect:
+		return vStyle.Render(f.selectValue())
+	case fAction:
+		switch f.key {
+		case "engine":
+			return vStyle.Render(m.cfg.Voice.Engine) + dStyle.Render("（回车选择）")
+		case "mic_test":
+			return dStyle.Render("回车进入（当前增益 " + fmt.Sprintf("%d", voice.GetMicGain()) + "）")
+		default:
+			return dStyle.Render("回车进入")
+		}
+	}
+	return ""
+}
+
+// ---- 生命周期 ----
+
+func (m *Model) SetDebug(debug bool) { m.debug = debug }
+
 func (m *Model) Init() tea.Cmd { return tea.Batch(fetchDevices(), tea.EnterAltScreen, tickRefresh()) }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h, m.ready = msg.Width, msg.Height, true
+		m.list.SetWidth(msg.Width - 4)
+		m.list.SetHeight(msg.Height - 11)
+		m.help.Width = msg.Width - 4
+		m.refreshItems()
+		return m, nil
 	case tea.KeyMsg:
 		return m, m.handleKey(msg)
 	case backendMsg:
 		m.info = hotkey.ProviderInfo(msg)
 	case refreshMsg:
+		// 历史 tab 与状态区需要持续刷新
+		if m.tab == tabHistory && len(m.list.Items()) != len(voice.History()) {
+			m.refreshHistoryItems()
+		}
 		return m, tickRefresh()
 	case devMsg:
 		if msg.Error != nil {
@@ -343,7 +472,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
 
-	// 弹层/面板打开时，所有按键交给对应组件处理
+	// 弹层/面板优先
 	if m.picker != nil {
 		return m.handlePickerKey(k)
 	}
@@ -353,626 +482,192 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.micPanel != nil {
 		return m.handleMicPanelKey(k)
 	}
-	if m.historyPanel != nil {
-		return m.handleHistoryPanelKey(k)
-	}
 
-	// Editing a field
-	if m.editing && m.cursor >= 0 && m.cursor < len(m.fields) {
-		f := &m.fields[m.cursor]
-		switch k {
-		case "esc":
+	// 编辑态
+	if m.editing {
+		f := m.selectedField()
+		if f == nil {
 			m.editing = false
-			f.input.Blur()
 			return nil
-		case "enter":
+		}
+		switch {
+		case k == "esc":
+			if f.fType == fString {
+				f.input.SetValue(m.editOriginal)
+			}
 			m.editing = false
-			f.input.Blur()
-			m.save()
+			m.input.Blur()
+			m.refreshItems()
+			return nil
+		case k == "enter":
+			if f.fType == fString {
+				f.input.SetValue(m.input.Value())
+			}
+			m.editing = false
+			m.input.Blur()
+			m.refreshItems()
 			return nil
 		}
 		switch f.fType {
-		case fSelect:
-			switch k {
-			case "j", "down":
-				f.optIdx++
-				if f.optIdx >= len(f.opts) {
-					f.optIdx = 0
-				}
-			case "k", "up":
-				f.optIdx--
-				if f.optIdx < 0 {
-					f.optIdx = len(f.opts) - 1
-				}
-			}
-		case fToggle:
-			switch k {
-			case " ":
-				f.boolVal = !f.boolVal
-			case "j", "down", "k", "up":
-				m.editing = false
-				m.cursor++
-				if m.cursor >= len(m.fields) {
-					m.cursor = 0
-				}
-			}
 		case fString:
 			var cmd tea.Cmd
-			f.input, cmd = f.input.Update(msg)
+			m.input, cmd = m.input.Update(msg)
 			return cmd
-		}
-		return nil
-	}
-
-	// Navigation mode
-	switch k {
-	case "q", "ctrl+c":
-		return tea.Quit
-	case "s":
-		m.save()
-		return nil
-	case "e", "i", "enter":
-		if m.cursor >= 0 && m.cursor < len(m.fields) {
-			switch m.fields[m.cursor].key {
-			case "engine": // 引擎字段用渠道选择弹层
-				m.openEnginePicker()
-				return nil
-			case "channel_config": // 渠道配置入口：打开二级弹层
-				m.openChannelConfig()
-				return nil
-			case "mic_test": // 麦克风调试面板
-				voice.StartMicTest()
-				m.micPanel = &micPanelState{}
-				return nil
-			case "history": // 识别历史面板
-				m.historyPanel = &historyPanelState{}
-				return nil
+		case fSelect:
+			switch k {
+			case "j", "down", "k", "up", "left", "right":
+				f.optIdx = (f.optIdx + 1) % len(f.opts)
 			}
-		}
-		m.editing = true
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
-		if m.fields[m.cursor].fType == fString {
-			m.fields[m.cursor].input.Focus()
-		}
-	case "j", "down":
-		if m.cursor < 0 {
-			m.cursor = 0
-		} else {
-			m.cursor++
-			if m.cursor >= len(m.fields) {
-				m.cursor = len(m.fields) - 1
-			}
-		}
-	case "k", "up":
-		if m.cursor < 0 {
-			m.cursor = 0
-		} else {
-			m.cursor--
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-		}
-	case "l":
-		if m.showLogs {
-			m.logExpanded = !m.logExpanded
-		}
-	case "h":
-		m.helpVisible = !m.helpVisible
-	}
-	return nil
-}
-
-// ---- 渠道选择弹层 ----
-
-// openEnginePicker 打开引擎渠道选择弹层，光标定位到当前引擎。
-func (m *Model) openEnginePicker() {
-	engine := m.currentEngine()
-	idx := 0
-	for i, it := range engineChannels {
-		if it.name == engine {
-			idx = i
-			break
-		}
-	}
-	m.picker = &pickerState{title: "选择识别引擎", items: engineChannels, idx: idx}
-}
-
-// handlePickerKey 弹层按键：j/k 导航，回车确认，esc/q 关闭。
-func (m *Model) handlePickerKey(k string) tea.Cmd {
-	p := m.picker
-	if p == nil {
-		return nil
-	}
-	switch k {
-	case "j", "down", "tab":
-		p.idx++
-		if p.idx >= len(p.items) {
-			p.idx = 0
-		}
-	case "k", "up", "shift+tab":
-		p.idx--
-		if p.idx < 0 {
-			p.idx = len(p.items) - 1
-		}
-	case "enter":
-		m.selectEngine(p.items[p.idx].name)
-	case "esc", "q", "ctrl+c":
-		m.picker = nil
-	}
-	return nil
-}
-
-// selectEngine 选中渠道：关闭弹层并按新引擎重建动态字段。
-func (m *Model) selectEngine(name string) {
-	m.picker = nil
-	m.switchEngine(name)
-	m.logf("引擎已切换为 %s", name)
-}
-
-// ---- 渠道配置二级弹层 ----
-
-// openChannelConfig 打开当前引擎的「渠道配置」弹层（凭据、端点等）。
-// 引擎取自主表单当前选中值（渠道选择弹层确认后可能尚未写回 m.cfg）。
-func (m *Model) openChannelConfig() {
-	engine := m.currentEngine()
-	vc := m.cfg.Voice
-	vc.Engine = engine
-	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
-	m.configOverlay = &configOverlayState{
-		title:  fmt.Sprintf("[%s] 渠道配置", engine),
-		fields: channelConfigFields(vc, ti),
-		cursor: 0,
-	}
-}
-
-// handleConfigOverlayKey 弹层按键：j/k 导航，e 编辑，s 保存并关闭，esc 取消。
-func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
-	k := msg.String()
-	ov := m.configOverlay
-	if ov == nil {
-		return nil
-	}
-
-	// 编辑字段
-	if ov.editing && ov.cursor >= 0 && ov.cursor < len(ov.fields) {
-		f := &ov.fields[ov.cursor]
-		switch k {
-		case "esc", "enter":
-			ov.editing = false
-			f.input.Blur()
+			m.refreshItems()
 			return nil
 		}
-		switch f.fType {
-		case fSelect:
-			switch k {
-			case "j", "down":
-				f.optIdx++
-				if f.optIdx >= len(f.opts) {
-					f.optIdx = 0
-				}
-			case "k", "up":
-				f.optIdx--
-				if f.optIdx < 0 {
-					f.optIdx = len(f.opts) - 1
+		return nil
+	}
+
+	// 历史 tab：回车复制
+	if m.tab == tabHistory {
+		switch {
+		case key.Matches(msg, keys.Enter):
+			items := voice.History()
+			i := m.list.Index()
+			if i >= 0 && i < len(items) {
+				if err := voice.CopyHistoryEntry(i); err != nil {
+					m.logf("❌ 复制失败: %s", err)
+				} else {
+					m.logf("📋 已复制: %s", truncateText(items[i].Text, 60))
 				}
 			}
-		case fString:
-			var cmd tea.Cmd
-			f.input, cmd = f.input.Update(msg)
-			return cmd
+			return nil
+		case key.Matches(msg, keys.Left):
+			m.switchTab((tabHistory + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
+			return nil
+		case key.Matches(msg, keys.Right):
+			m.switchTab((tabHistory + 1) % tabID(len(tabNames)))
+			return nil
 		}
-		return nil
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return cmd
 	}
 
 	// 导航态
-	switch k {
-	case "j", "down":
-		ov.cursor++
-		if ov.cursor >= len(ov.fields) {
-			ov.cursor = 0
-		}
-	case "k", "up":
-		ov.cursor--
-		if ov.cursor < 0 {
-			ov.cursor = len(ov.fields) - 1
-		}
-	case "e", "i", "enter":
-		ov.editing = true
-		if ov.fields[ov.cursor].fType == fString {
-			ov.fields[ov.cursor].input.Focus()
-		}
-	case "s":
-		m.saveChannelConfig()
-	case "esc", "q", "ctrl+c":
-		m.configOverlay = nil
-	}
-	return nil
-}
-
-// saveChannelConfig 把弹层字段写回 [voice.engine_config] 并保存到磁盘。
-func (m *Model) saveChannelConfig() {
-	m.applyConfigOverlay()
-	if err := config.Save(m.cfg); err != nil {
-		m.logf("❌ 渠道配置保存失败: %s", err)
-	} else {
-		m.logf("✅ 渠道配置已保存")
-	}
-}
-
-// applyConfigOverlay 把弹层字段合并进配置并关闭弹层（不写盘）。
-func (m *Model) applyConfigOverlay() {
-	ov := m.configOverlay
-	if ov == nil {
-		return
-	}
-	vc := &m.cfg.Voice
-	if vc.EngineConfig == nil {
-		vc.EngineConfig = map[string]string{}
-	}
-	for _, f := range ov.fields {
-		switch {
-		case f.key == "hotwords":
-			vc.Hotwords = splitList(f.input.Value())
-		case strings.HasPrefix(f.key, "ec."):
-			name := strings.TrimPrefix(f.key, "ec.")
-			val := strings.TrimSpace(f.input.Value())
-			if f.fType == fSelect {
-				val = f.selectValue()
-			}
-			if val == "" {
-				delete(vc.EngineConfig, name)
-			} else {
-				vc.EngineConfig[name] = val
-			}
-		}
-	}
-	m.configOverlay = nil
-}
-
-// renderConfigOverlay 渲染渠道配置浮层（水平居中，字段可编辑）。
-func (m *Model) renderConfigOverlay() string {
-	ov := m.configOverlay
-	if ov == nil {
-		return ""
-	}
-	width := 72
-	if m.w > 0 && width > m.w-4 {
-		width = m.w - 4
-	}
-	inner := width - 4
-	if inner < 40 {
-		inner = 40
-	}
-	var lines []string
-	lines = append(lines, " "+lStyle.Render(ov.title))
-	for i, f := range ov.fields {
-		marker := "  "
-		if i == ov.cursor {
-			if ov.editing {
-				marker = aStyle.Render("▶ ")
-			} else {
-				marker = aStyle.Render("▸ ")
-			}
-		}
-		lines = append(lines, marker+lStyle.Render(f.label+": ")+m.renderOverlayField(i, f, ov))
-	}
-	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 导航  e 编辑  s 保存  esc 取消"))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")).
-		Width(width - 2).
-		Render(strings.Join(lines, "\n"))
-
-	pad := 0
-	if m.w > 0 {
-		pad = (m.w - lipgloss.Width(box)) / 2
-		if pad < 0 {
-			pad = 0
-		}
-	}
-	bl := strings.Split(box, "\n")
-	for i := range bl {
-		bl[i] = strings.Repeat(" ", pad) + bl[i]
-	}
-	return strings.Join(bl, "\n")
-}
-
-// renderOverlayField 渲染弹层内的字段（弹层有自己的 cursor/editing 状态）。
-func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) string {
-	editing := ov.editing && ov.cursor == i
-	switch f.fType {
-	case fString:
-		v := f.input.Value()
-		if (f.key == "ec.api_key" || f.key == "ec.access_key") && !editing && len(v) > 6 {
-			v = v[:6] + "***"
-		}
-		if editing {
-			return f.input.View()
-		}
-		return vStyle.Render(v)
-	case fSelect:
-		v := f.opts[f.optIdx]
-		if editing {
-			return aStyle.Render("[" + v + " ▲▼]")
-		}
-		return vStyle.Render(v)
-	}
-	return ""
-}
-
-// ---- 麦克风调试面板 ----
-
-// handleMicPanelKey 面板按键：+/- 细粒度调增益，空格切换自适应增益，esc 退出。
-// 测试录音由同一全局录音热键触发（voice 插件侧处理）。
-func (m *Model) handleMicPanelKey(k string) tea.Cmd {
-	switch k {
-	case "+", "=":
-		voice.SetMicGain(voice.MicTestLevel().Gain + 2)
-	case "-", "_":
-		voice.SetMicGain(voice.MicTestLevel().Gain - 2)
-	case " ":
-		voice.SetMicAutoGain(!voice.MicTestLevel().AutoGain)
-	case "esc", "q":
-		voice.StopMicTest()
-		m.micPanel = nil
-	}
-	return nil
-}
-
-// renderMicPanel 渲染麦克风调试面板（实时电平条 + 增益）。
-func (m *Model) renderMicPanel() string {
-	lvl := voice.MicTestLevel()
-	width := 60
-	if m.w > 0 && width > m.w-4 {
-		width = m.w - 4
-	}
-	barW := width - 12
-	if barW < 20 {
-		barW = 20
-	}
-	peakBar := renderLevelBar(lvl.Peak, barW)
-	rmsBar := renderLevelBar(lvl.RMS, barW)
-	state := "待机（按录音热键开始测试）"
-	if voice.MicTestTesting() {
-		state = "测试中（按录音热键停止）"
-	}
-	ag := "○ 关"
-	if lvl.AutoGain {
-		ag = "● 开"
-	}
-	clipMark := ""
-	if lvl.Clipping {
-		clipMark = eStyle.Render(" ⚠ 削波！")
-	}
-
-	lines := []string{
-		" " + lStyle.Render("🎤 麦克风调试"),
-		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak) + clipMark,
-		"  有效: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
-		"  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )"),
-		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
-		"  状态: " + vStyle.Render(state),
-		"",
-		" " + dStyle.Render("+/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),
-	}
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")).
-		Width(width - 2).
-		Render(strings.Join(lines, "\n"))
-
-	pad := 0
-	if m.w > 0 {
-		pad = (m.w - lipgloss.Width(box)) / 2
-		if pad < 0 {
-			pad = 0
-		}
-	}
-	bl := strings.Split(box, "\n")
-	for i := range bl {
-		bl[i] = strings.Repeat(" ", pad) + bl[i]
-	}
-	return strings.Join(bl, "\n")
-}
-
-// renderLevelBar 按 0..1 电平绘制字符条。
-func renderLevelBar(level float64, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if level < 0 {
-		level = 0
-	}
-	if level > 1 {
-		level = 1
-	}
-	filled := int(level*float64(width) + 0.5)
-	if filled > width {
-		filled = width
-	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-}
-
-// ---- 识别历史面板 ----
-
-// handleHistoryPanelKey 面板按键：j/k 选择，回车复制到剪贴板，esc 退出。
-func (m *Model) handleHistoryPanelKey(k string) tea.Cmd {
-	p := m.historyPanel
-	items := voice.History()
-	switch k {
-	case "j", "down":
-		if p.idx < len(items)-1 {
-			p.idx++
-		}
-	case "k", "up":
-		if p.idx > 0 {
-			p.idx--
-		}
-	case "enter":
-		if len(items) == 0 || p.idx >= len(items) {
+	switch {
+	case key.Matches(msg, keys.Quit):
+		return tea.Quit
+	case key.Matches(msg, keys.Save):
+		m.save()
+		return nil
+	case key.Matches(msg, keys.Left):
+		m.switchTab((m.tab + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
+		return nil
+	case key.Matches(msg, keys.Right):
+		m.switchTab((m.tab + 1) % tabID(len(tabNames)))
+		return nil
+	case key.Matches(msg, keys.Logs):
+		m.logExpanded = !m.logExpanded
+		return nil
+	case len(k) == 1 && k[0] >= '1' && k[0] <= '5':
+		m.switchTab(tabID(k[0] - '1'))
+		return nil
+	case key.Matches(msg, keys.Enter):
+		f := m.selectedField()
+		if f == nil {
 			return nil
 		}
-		if err := voice.CopyHistoryEntry(p.idx); err != nil {
-			m.logf("❌ 复制失败: %s", err)
-		} else {
-			m.logf("📋 已复制: %s", truncateText(items[p.idx].Text, 60))
+		switch f.fType {
+		case fAction:
+			m.triggerAction(f.key)
+		case fToggle:
+			f.boolVal = !f.boolVal
+			m.refreshItems()
+		case fString:
+			m.editing = true
+			m.editOriginal = f.input.Value()
+			m.input.SetValue(f.input.Value())
+			m.input.Focus()
+		case fSelect:
+			m.editing = true
 		}
-	case "esc", "q":
-		m.historyPanel = nil
+		return nil
 	}
-	return nil
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return cmd
 }
 
-// renderHistoryPanel 渲染识别历史面板（最近结果列表，可选中复制）。
-func (m *Model) renderHistoryPanel() string {
-	items := voice.History()
-	width := 64
-	if m.w > 0 && width > m.w-4 {
-		width = m.w - 4
+func (m *Model) switchTab(t tabID) {
+	if t == m.tab {
+		return
 	}
-	inner := width - 4
-	if inner < 40 {
-		inner = 40
+	m.tab = t
+	m.editing = false
+	m.input.Blur()
+	m.refreshItems()
+}
+
+// triggerAction 处理 fAction 入口：打开对应弹层/面板。
+func (m *Model) triggerAction(key string) {
+	switch key {
+	case "engine":
+		m.openEnginePicker()
+	case "channel_config":
+		m.openChannelConfig()
+	case "mic_test":
+		voice.StartMicTest()
+		m.micPanel = &micPanelState{}
 	}
-	lines := []string{" " + lStyle.Render("📋 历史记录（最近 "+itoa(len(items))+" 条）")}
-	if len(items) == 0 {
-		lines = append(lines, "  "+dStyle.Render("暂无识别结果"))
-	} else {
-		if m.historyPanel.idx >= len(items) {
-			m.historyPanel.idx = len(items) - 1
-		}
-		for i, it := range items {
-			text := truncateText(it.Text, inner-14)
-			ts := it.Time.Format("15:04:05")
-			if i == m.historyPanel.idx {
-				lines = append(lines, aStyle.Render("▸ ")+vStyle.Render(text)+dStyle.Render("  "+ts))
-			} else {
-				lines = append(lines, "  "+vStyle.Render(text)+dStyle.Render("  "+ts))
+}
+
+// currentEngine 返回当前选中的引擎。
+func (m *Model) currentEngine() string {
+	if m.cfg != nil && m.cfg.Voice.Engine != "" {
+		return m.cfg.Voice.Engine
+	}
+	return asrcfg.DefaultEngine
+}
+
+// ---- 保存 ----
+
+// applyFieldsTo 把所有 tab 的设置字段写回目标配置（纯内存，供 save 与测试使用）。
+func (m *Model) applyFieldsTo(next *config.Config) {
+	vc := &next.Voice
+	for _, fs := range m.tabField {
+		for _, f := range fs {
+			switch f.key {
+			case "enabled":
+				vc.Enabled = f.boolVal
+			case "push_to_talk":
+				vc.PushToTalk = f.input.Value()
+			case "mode":
+				vc.Mode = f.selectValue()
+			case "language":
+				vc.Language = f.input.Value()
+			case "auto_submit":
+				vc.AutoSubmit = f.boolVal
+			case "omit_trailing_punct":
+				vc.OmitTrailingPunct = f.boolVal
+			case "omit_trailing_all":
+				vc.OmitTrailingAll = f.boolVal
+			case "omit_trailing_ascii":
+				vc.OmitTrailingASCII = f.boolVal
+			case "stop_delay_ms":
+				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
+			case "gain":
+				fmt.Sscanf(f.input.Value(), "%d", &vc.Gain)
+				if vc.Gain < 1 {
+					vc.Gain = 1
+				}
+			case "auto_gain":
+				vc.AutoGain = f.boolVal
 			}
 		}
 	}
-	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 选择  回车复制到剪贴板  esc 退出"))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")).
-		Width(width - 2).
-		Render(strings.Join(lines, "\n"))
-
-	pad := 0
-	if m.w > 0 {
-		pad = (m.w - lipgloss.Width(box)) / 2
-		if pad < 0 {
-			pad = 0
-		}
-	}
-	bl := strings.Split(box, "\n")
-	for i := range bl {
-		bl[i] = strings.Repeat(" ", pad) + bl[i]
-	}
-	return strings.Join(bl, "\n")
 }
 
-// truncateText 截断文本到指定显示宽度（含中文宽字符）。
-func truncateText(s string, maxW int) string {
-	w := 0
-	for i, r := range s {
-		cw := 1
-		if r > 0x7F {
-			cw = 2
-		}
-		if w+cw > maxW {
-			return s[:i] + "…"
-		}
-		w += cw
-	}
-	return s
-}
-
-func itoa(n int) string { return fmt.Sprintf("%d", n) }
-
-// renderPicker 渲染渠道选择浮层（水平居中，subtitle 固定宽度自动换行）。
-func (m *Model) renderPicker() string {
-	p := m.picker
-	if p == nil {
-		return ""
-	}
-	width := 64
-	if m.w > 0 && width > m.w-4 {
-		width = m.w - 4
-	}
-	inner := width - 4
-	if inner < 30 {
-		inner = 30
-	}
-	subStyle := dStyle.Width(inner - 2)
-
-	var lines []string
-	lines = append(lines, " "+lStyle.Render(p.title))
-	for i, it := range p.items {
-		if i == p.idx {
-			lines = append(lines, aStyle.Render("▸ "+it.name))
-		} else {
-			lines = append(lines, "  "+vStyle.Render(it.name))
-		}
-		// subtitle 跟随光标行显示，自动换行
-		lines = append(lines, subStyle.Render("    "+it.subtitle))
-	}
-	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")).
-		Width(width - 2).
-		Render(strings.Join(lines, "\n"))
-
-	// 水平居中
-	pad := 0
-	if m.w > 0 {
-		pad = (m.w - lipgloss.Width(box)) / 2
-		if pad < 0 {
-			pad = 0
-		}
-	}
-	bl := strings.Split(box, "\n")
-	for i := range bl {
-		bl[i] = strings.Repeat(" ", pad) + bl[i]
-	}
-	return strings.Join(bl, "\n")
-}
 func (m *Model) save() {
 	next := *m.cfg
+	m.applyFieldsTo(&next)
 	vc := &next.Voice
-	for _, f := range m.fields {
-		switch f.key {
-		case "enabled":
-			vc.Enabled = f.boolVal
-		case "push_to_talk":
-			vc.PushToTalk = f.input.Value()
-		case "mode":
-			vc.Mode = f.selectValue()
-		case "engine":
-			vc.Engine = f.selectValue()
-		case "language":
-			vc.Language = f.input.Value()
-		case "auto_submit":
-			vc.AutoSubmit = f.boolVal
-		case "omit_trailing_punct":
-			vc.OmitTrailingPunct = f.boolVal
-		case "omit_trailing_all":
-			vc.OmitTrailingAll = f.boolVal
-		case "omit_trailing_ascii":
-			vc.OmitTrailingASCII = f.boolVal
-		case "stop_delay_ms":
-			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
-		}
-	}
 	combo, err := config.ParseHotkey(vc.PushToTalk)
 	if err != nil {
 		m.logf("❌ 热键格式错误: %s", err)
@@ -991,7 +686,6 @@ func (m *Model) save() {
 	} else {
 		m.logf("✅ 配置已保存到 %s", config.FindConfig())
 	}
-	m.logf("  push_to_talk=%s", vc.PushToTalk)
 	if m.OnSave != nil {
 		if err := m.OnSave(m.cfg); err != nil {
 			m.logf("❌ 热键注册失败: %s", err)
@@ -1004,10 +698,12 @@ func (m *Model) restorePushToTalkField() {
 	if !validVoiceHotkeyString(value) {
 		value = config.Default().Voice.PushToTalk
 	}
-	for i := range m.fields {
-		if m.fields[i].key == "push_to_talk" {
-			m.fields[i].input.SetValue(value)
-			break
+	for _, fs := range m.tabField {
+		for i := range fs {
+			if fs[i].key == "push_to_talk" {
+				fs[i].input.SetValue(value)
+				break
+			}
 		}
 	}
 	m.logf("↩️  热键已恢复为 %s", value)
@@ -1037,64 +733,133 @@ func splitList(s string) []string {
 	}
 	return out
 }
+
+// ---- 渲染 ----
+
 func (m *Model) View() string {
 	if !m.ready {
 		return "loading..."
 	}
+	m.refreshItems()
+	base := m.renderBase()
+	if m.picker == nil && m.configOverlay == nil && m.micPanel == nil {
+		return base
+	}
+	var overlay string
+	switch {
+	case m.picker != nil:
+		overlay = m.renderPicker()
+	case m.configOverlay != nil:
+		overlay = m.renderConfigOverlay()
+	case m.micPanel != nil:
+		overlay = m.renderMicPanel()
+	}
+	return overlayOn(base, overlay, m.h)
+}
+
+// renderBase 渲染主界面（不含模态弹层）。
+func (m *Model) renderBase() string {
 	var b strings.Builder
 	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk Plus") + "\n")
-	b.WriteString(vStyle.Render("减少用键盘的次数，改用口喷吧。") + "\n")
-	b.WriteString(m.renderVoiceStats() + "\n\n")
-	b.WriteString(lStyle.Render("── 配置 (e 编辑, s 保存, h 帮助, j/k 导航) ──") + "\n")
-	for i, f := range m.fields {
-		marker := "  "
-		if i == m.cursor {
-			if m.editing {
-				marker = aStyle.Render("▶ ")
-			} else {
-				marker = aStyle.Render("▸ ")
-			}
-		}
-		line := marker + strings.Repeat("  ", f.indent) + lStyle.Render(f.label+": ") + m.renderField(i, f)
-		if m.helpVisible && f.help != "" {
-			line += " " + dStyle.Render("("+f.help+")")
-		}
-		b.WriteString(line + "\n")
-	}
-	b.WriteString("\n" + lStyle.Render("── 录音状态 ──") + "\n")
+	b.WriteString(m.tabBar() + "\n")
+	b.WriteString(lStyle.Render("── 状态 ──") + "\n")
 	b.WriteString("  " + m.renderVoiceStatus() + "\n")
+	b.WriteString("  " + m.renderVoiceStats() + "\n\n")
+
+	if m.editing {
+		if f := m.selectedField(); f != nil {
+			b.WriteString(lStyle.Render(f.label+": ") + "\n")
+			b.WriteString("  " + m.input.View() + "\n")
+			b.WriteString(dStyle.Render("  enter 确认 · esc 取消") + "\n")
+		}
+	} else if m.tab == tabHistory && len(voice.History()) == 0 {
+		// 历史为空：多行中文提示（触发条件 + 内存特性）
+		b.WriteString(m.renderHistoryEmpty())
+	} else {
+		b.WriteString(m.list.View() + "\n")
+	}
+
 	if m.showLogs {
-		b.WriteString("\n" + lStyle.Render("── 日志 (l 展开) ──") + "\n")
-		maxLogs := 5
+		maxLogs := 3
 		if m.logExpanded {
 			maxLogs = 100
 		}
-		// TUI internal logs
 		s := 0
 		if len(m.logs) > maxLogs {
 			s = len(m.logs) - maxLogs
 		}
-		for _, l := range m.logs[s:] {
-			b.WriteString("  " + dStyle.Render(l) + "\n")
-		}
-		// Voice plugin logs
-		sv := 0
-		if len(voice.TUILogBuf) > maxLogs {
-			sv = len(voice.TUILogBuf) - maxLogs
-		}
-		for _, l := range voice.TUILogBuf[sv:] {
-			b.WriteString("  " + dStyle.Render(l) + "\n")
+		if s < len(m.logs) || len(voice.TUILogBuf) > 0 {
+			b.WriteString(lStyle.Render("── 日志 (L 展开) ──") + "\n")
+			for _, l := range m.logs[s:] {
+				b.WriteString("  " + dStyle.Render(l) + "\n")
+			}
+			sv := 0
+			if len(voice.TUILogBuf) > maxLogs {
+				sv = len(voice.TUILogBuf) - maxLogs
+			}
+			for _, l := range voice.TUILogBuf[sv:] {
+				b.WriteString("  " + dStyle.Render(l) + "\n")
+			}
 		}
 	}
-	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | h 帮助 | esc 退出编辑 | s 保存 | q 退出"))
-	if m.picker != nil {
-		b.WriteString("\n" + m.renderPicker())
-	} else if m.configOverlay != nil {
-		b.WriteString("\n" + m.renderConfigOverlay())
-	} else if m.micPanel != nil {
-		b.WriteString("\n" + m.renderMicPanel())
-	} else if m.historyPanel != nil {
-		b.WriteString("\n" + m.renderHistoryPanel())
+
+	b.WriteString(m.help.View(keys) + "\n")
+	return b.String()
+}
+
+// renderHistoryEmpty 历史为空时的提示：说明何时会出现内容，以及仅存内存不持久化。
+func (m *Model) renderHistoryEmpty() string {
+	msg := strings.Join([]string{
+		"  暂无识别结果",
+		"",
+		"  完成一次语音识别（上屏或复制到剪贴板）后，",
+		"  结果会显示在这里，最多保留最近 10 条。",
+		"",
+		"  历史仅保存在内存中：",
+		"  退出 Just Talk Plus 后会清空，不会保留到下次启动。",
+	}, "\n")
+	return dStyle.Render(msg) + "\n"
+}
+
+// overlayOn 把模态浮层垂直居中覆盖在 base 之上：用浮层行替换主内容对应行，
+// 主内容整体保持原位（不因弹层出现而被挤高）。
+func overlayOn(base, overlay string, screenH int) string {
+	baseLines := strings.Split(base, "\n")
+	ovLines := strings.Split(overlay, "\n")
+	if screenH > 0 {
+		for len(baseLines) < screenH {
+			baseLines = append(baseLines, "")
+		}
+	}
+	start := 0
+	if screenH > len(ovLines) {
+		start = (screenH - len(ovLines)) / 2
+	}
+	for i, line := range ovLines {
+		idx := start + i
+		if idx < 0 || idx >= len(baseLines) {
+			break
+		}
+		baseLines[idx] = line
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+// tabBar 渲染 tab 分组栏（bubbles 无 tab 组件，手写；当前 tab 高亮且保留数字键提示）。
+func (m *Model) tabBar() string {
+	base := lipgloss.NewStyle().Padding(0, 1)
+	active := base.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
+	inactive := base.Foreground(lipgloss.Color("8"))
+	var b strings.Builder
+	b.WriteString("  ")
+	for i, t := range tabNames {
+		label := fmt.Sprintf("%d %s", i+1, t)
+		if tabID(i) == m.tab {
+			b.WriteString(active.Render(label))
+		} else {
+			b.WriteString(inactive.Render(label))
+		}
+		b.WriteString(" ")
 	}
 	return b.String()
 }
@@ -1191,8 +956,256 @@ func (m *Model) renderVoiceStatus() string {
 	return strings.Join(parts, "  ")
 }
 
-func (m *Model) renderField(i int, f field) string {
-	editing := m.editing && m.cursor == i
+func (m *Model) logf(format string, args ...interface{}) {
+	if !m.showLogs {
+		return
+	}
+	m.logs = append(m.logs, fmt.Sprintf(format, args...))
+}
+
+// ---- 渠道选择弹层 ----
+
+func (m *Model) openEnginePicker() {
+	engine := m.currentEngine()
+	idx := 0
+	for i, it := range engineChannels {
+		if it.name == engine {
+			idx = i
+			break
+		}
+	}
+	m.picker = &pickerState{title: "选择识别引擎", items: engineChannels, idx: idx}
+}
+
+func (m *Model) handlePickerKey(k string) tea.Cmd {
+	p := m.picker
+	if p == nil {
+		return nil
+	}
+	switch k {
+	case "j", "down", "tab":
+		p.idx++
+		if p.idx >= len(p.items) {
+			p.idx = 0
+		}
+	case "k", "up", "shift+tab":
+		p.idx--
+		if p.idx < 0 {
+			p.idx = len(p.items) - 1
+		}
+	case "enter":
+		m.selectEngine(p.items[p.idx].name)
+	case "esc", "q", "ctrl+c":
+		m.picker = nil
+	}
+	return nil
+}
+
+func (m *Model) selectEngine(name string) {
+	m.picker = nil
+	m.cfg.Voice.Engine = name
+	m.refreshItems()
+	m.logf("引擎已切换为 %s", name)
+}
+
+func (m *Model) renderPicker() string {
+	p := m.picker
+	if p == nil {
+		return ""
+	}
+	width := 64
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	inner := width - 4
+	if inner < 30 {
+		inner = 30
+	}
+	subStyle := dStyle.Width(inner - 2)
+
+	var lines []string
+	lines = append(lines, " "+lStyle.Render(p.title))
+	for i, it := range p.items {
+		if i == p.idx {
+			lines = append(lines, aStyle.Render("▸ "+it.name))
+		} else {
+			lines = append(lines, "  "+vStyle.Render(it.name))
+		}
+		lines = append(lines, subStyle.Render("    "+it.subtitle))
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+// ---- 渠道配置二级弹层 ----
+
+func (m *Model) openChannelConfig() {
+	engine := m.currentEngine()
+	vc := m.cfg.Voice
+	vc.Engine = engine
+	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+	m.configOverlay = &configOverlayState{
+		title:  fmt.Sprintf("[%s] 渠道配置", engine),
+		fields: channelConfigFields(vc, ti),
+		cursor: 0,
+	}
+}
+
+func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
+	k := msg.String()
+	ov := m.configOverlay
+	if ov == nil {
+		return nil
+	}
+	if ov.editing && ov.cursor >= 0 && ov.cursor < len(ov.fields) {
+		f := &ov.fields[ov.cursor]
+		switch k {
+		case "esc", "enter":
+			ov.editing = false
+			f.input.Blur()
+			return nil
+		}
+		switch f.fType {
+		case fSelect:
+			switch k {
+			case "j", "down", "k", "up", "left", "right":
+				f.optIdx = (f.optIdx + 1) % len(f.opts)
+			}
+		case fString:
+			var cmd tea.Cmd
+			f.input, cmd = f.input.Update(msg)
+			return cmd
+		}
+		return nil
+	}
+	switch k {
+	case "j", "down":
+		ov.cursor++
+		if ov.cursor >= len(ov.fields) {
+			ov.cursor = 0
+		}
+	case "k", "up":
+		ov.cursor--
+		if ov.cursor < 0 {
+			ov.cursor = len(ov.fields) - 1
+		}
+	case "e", "i", "enter":
+		ov.editing = true
+		if ov.fields[ov.cursor].fType == fString {
+			ov.fields[ov.cursor].input.Focus()
+		}
+	case "s":
+		m.saveChannelConfig()
+	case "esc", "q", "ctrl+c":
+		m.configOverlay = nil
+	}
+	return nil
+}
+
+func (m *Model) saveChannelConfig() {
+	m.applyConfigOverlay()
+	if err := config.Save(m.cfg); err != nil {
+		m.logf("❌ 渠道配置保存失败: %s", err)
+	} else {
+		m.logf("✅ 渠道配置已保存")
+	}
+}
+
+func (m *Model) applyConfigOverlay() {
+	ov := m.configOverlay
+	if ov == nil {
+		return
+	}
+	vc := &m.cfg.Voice
+	if vc.EngineConfig == nil {
+		vc.EngineConfig = map[string]string{}
+	}
+	for _, f := range ov.fields {
+		switch {
+		case f.key == "hotwords":
+			vc.Hotwords = splitList(f.input.Value())
+		case strings.HasPrefix(f.key, "ec."):
+			name := strings.TrimPrefix(f.key, "ec.")
+			val := strings.TrimSpace(f.input.Value())
+			if f.fType == fSelect {
+				val = f.selectValue()
+			}
+			if val == "" {
+				delete(vc.EngineConfig, name)
+			} else {
+				vc.EngineConfig[name] = val
+			}
+		}
+	}
+	m.configOverlay = nil
+}
+
+func (m *Model) renderConfigOverlay() string {
+	ov := m.configOverlay
+	if ov == nil {
+		return ""
+	}
+	width := 72
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	var lines []string
+	lines = append(lines, " "+lStyle.Render(ov.title))
+	for i, f := range ov.fields {
+		marker := "  "
+		if i == ov.cursor {
+			if ov.editing {
+				marker = aStyle.Render("▶ ")
+			} else {
+				marker = aStyle.Render("▸ ")
+			}
+		}
+		lines = append(lines, marker+lStyle.Render(f.label+": ")+m.renderOverlayField(i, f, ov))
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 导航  e 编辑  s 保存  esc 取消"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) string {
+	editing := ov.editing && ov.cursor == i
 	switch f.fType {
 	case fString:
 		v := f.input.Value()
@@ -1203,38 +1216,125 @@ func (m *Model) renderField(i int, f field) string {
 			return f.input.View()
 		}
 		return vStyle.Render(v)
-	case fToggle:
-		if f.boolVal {
-			return aStyle.Render("● 开") + "  " + dStyle.Render("(空格)")
-		}
-		return dStyle.Render("○ 关  (空格)")
 	case fSelect:
 		v := f.opts[f.optIdx]
 		if editing {
 			return aStyle.Render("[" + v + " ▲▼]")
 		}
 		return vStyle.Render(v)
-	case fAction:
-		extra := ""
-		// 麦克风调试入口附带当前增益值，便于不进面板即可确认设置
-		if f.key == "mic_test" {
-			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", voice.GetMicGain()))
-		}
-		return aStyle.Render("▶ ") + vStyle.Render("进入") + extra
 	}
 	return ""
 }
 
-func (m *Model) logf(format string, args ...interface{}) {
-	if !m.showLogs {
-		return
+// ---- 麦克风调试面板 ----
+
+func (m *Model) handleMicPanelKey(k string) tea.Cmd {
+	switch k {
+	case "+", "=":
+		voice.SetMicGain(voice.MicTestLevel().Gain + 2)
+	case "-", "_":
+		voice.SetMicGain(voice.MicTestLevel().Gain - 2)
+	case " ":
+		voice.SetMicAutoGain(!voice.MicTestLevel().AutoGain)
+	case "esc", "q":
+		voice.StopMicTest()
+		m.micPanel = nil
 	}
-	m.logs = append(m.logs, fmt.Sprintf(format, args...))
+	return nil
+}
+
+func (m *Model) renderMicPanel() string {
+	lvl := voice.MicTestLevel()
+	width := 60
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	barW := width - 12
+	if barW < 20 {
+		barW = 20
+	}
+	peakBar := renderLevelBar(lvl.Peak, barW)
+	rmsBar := renderLevelBar(lvl.RMS, barW)
+	state := "待机（按录音热键开始测试）"
+	if voice.MicTestTesting() {
+		state = "测试中（按录音热键停止）"
+	}
+	ag := "○ 关"
+	if lvl.AutoGain {
+		ag = "● 开"
+	}
+	clipMark := ""
+	if lvl.Clipping {
+		clipMark = eStyle.Render(" ⚠ 削波！")
+	}
+
+	lines := []string{
+		" " + lStyle.Render("🎤 麦克风调试"),
+		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak) + clipMark,
+		"  有效: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
+		"  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )"),
+		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
+		"  状态: " + vStyle.Render(state),
+		"",
+		" " + dStyle.Render("+/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+func renderLevelBar(level float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if level < 0 {
+		level = 0
+	}
+	if level > 1 {
+		level = 1
+	}
+	filled := int(level*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+// truncateText 截断文本到指定显示宽度（含中文宽字符）。
+func truncateText(s string, maxW int) string {
+	w := 0
+	for i, r := range s {
+		cw := 1
+		if r > 0x7F {
+			cw = 2
+		}
+		if w+cw > maxW {
+			return s[:i] + "…"
+		}
+		w += cw
+	}
+	return s
 }
 
 func SetProviderInfo(info hotkey.ProviderInfo) tea.Cmd {
 	return func() tea.Msg { return backendMsg(info) }
 }
+
 func fetchDevices() tea.Cmd {
 	return func() tea.Msg {
 		devices, err := voice.ListDevices()
@@ -1250,5 +1350,3 @@ type refreshMsg struct{}
 func tickRefresh() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return refreshMsg{} })
 }
-
-// Handle refreshMsg in Update
