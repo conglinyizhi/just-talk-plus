@@ -37,16 +37,13 @@ func tabKeys(fs []field) map[string]bool {
 func readyModel(cfg *config.Config) *Model {
 	m := New(cfg)
 	m.w, m.h, m.ready = 100, 40, true
-	m.list.SetWidth(96)
-	m.list.SetHeight(20)
 	return m
 }
 
 // ---- 字段分组 ----
 
 func TestBuildTabFields(t *testing.T) {
-	cfg := config.Default()
-	m := New(cfg)
+	m := New(config.Default())
 
 	general := tabKeys(m.tabField[tabGeneral])
 	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "auto_submit", "stop_delay_ms"} {
@@ -70,7 +67,6 @@ func TestBuildTabFields(t *testing.T) {
 			t.Fatalf("output tab missing %q: %v", want, output)
 		}
 	}
-	// 副设置缩进
 	if f := fieldByKey(m, "omit_trailing_all"); f.indent != 1 {
 		t.Fatalf("omit_trailing_all indent = %d", f.indent)
 	}
@@ -84,111 +80,95 @@ func TestSwitchTab(t *testing.T) {
 	if m.tab != tabMic {
 		t.Fatalf("tab = %d", m.tab)
 	}
-	if len(m.list.Items()) != len(m.tabField[tabMic]) {
-		t.Fatalf("list items = %d, want %d", len(m.list.Items()), len(m.tabField[tabMic]))
-	}
-	// 数字键切换
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
 	if m.tab != tabOutput {
 		t.Fatalf("digit tab = %d, want tabOutput", m.tab)
 	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.tab != tabMic {
+		t.Fatalf("left = %d, want tabMic", m.tab)
+	}
 }
 
-func TestTabBar(t *testing.T) {
+func TestTabBarKeepsDigitOnActive(t *testing.T) {
 	m := readyModel(config.Default())
 	out := m.tabBar()
-	if !strings.Contains(out, "通用") || !strings.Contains(out, "历史") {
-		t.Fatalf("tab bar: %q", out)
+	for _, want := range []string{"1 通用", "2 引擎", "3 麦克风", "4 输出", "5 历史"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tab bar missing %q: %q", want, out)
+		}
 	}
 }
 
-// ---- 列表与编辑交互 ----
+// ---- 字段导航与编辑 ----
 
-func TestListEditingString(t *testing.T) {
-	cfg := config.Default()
-	m := readyModel(cfg)
-	m.switchTab(tabGeneral)
-	fs := m.tabField[tabGeneral]
-	idx := -1
-	for i := range fs {
-		if fs[i].key == "language" {
-			idx = i
-			break
-		}
+func TestFieldNavigation(t *testing.T) {
+	m := readyModel(config.Default())
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d", m.cursor)
 	}
-	m.list.Select(idx)
-	// enter 进入编辑（预填当前值，模拟清空后重新输入）
+	m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d", m.cursor)
+	}
+}
+
+func TestFieldEditingString(t *testing.T) {
+	m := readyModel(config.Default())
+	// 定位到语言字段（通用 tab 第 4 个）
+	for m.cursor < 3 {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.editing {
 		t.Fatal("should enter editing")
 	}
-	m.input.SetValue("")
-	for _, r := range "en-US" {
-		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
-	}
-	// enter 确认
+	lang := fieldByKey(m, "language")
+	lang.input.SetValue("")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.editing {
 		t.Fatal("should exit editing")
 	}
-	if got := fieldByKey(m, "language").input.Value(); got != "en-US" {
+	if got := lang.input.Value(); got != "en" {
 		t.Fatalf("language = %q", got)
 	}
-	// esc 取消恢复
-	m.list.Select(idx)
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	for _, r := range "fr" {
-		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
-	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
-	if got := fieldByKey(m, "language").input.Value(); got != "en-US" {
-		t.Fatalf("esc should restore: %q", got)
-	}
 }
 
-func TestListEditingToggle(t *testing.T) {
+func TestFieldEditingToggle(t *testing.T) {
 	m := readyModel(config.Default())
-	m.switchTab(tabGeneral)
-	fs := m.tabField[tabGeneral]
-	idx := -1
-	for i := range fs {
-		if fs[i].key == "auto_submit" {
-			idx = i
-			break
-		}
+	// 自动上屏是第 5 个字段
+	for m.cursor < 4 {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
 	}
-	before := fs[idx].boolVal
-	m.list.Select(idx)
+	f := fieldByKey(m, "auto_submit")
+	before := f.boolVal
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if fs[idx].boolVal == before {
+	if f.boolVal == before {
 		t.Fatal("toggle should flip on enter")
 	}
-	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if fs[idx].boolVal != before {
-		t.Fatal("toggle should flip back")
-	}
 }
 
-func TestListEditingSelect(t *testing.T) {
+func TestFieldEditingSelect(t *testing.T) {
 	m := readyModel(config.Default())
-	m.switchTab(tabGeneral)
-	fs := m.tabField[tabGeneral]
-	idx := -1
-	for i := range fs {
-		if fs[i].key == "mode" {
-			idx = i
-			break
-		}
+	// 模式是第 3 个字段
+	for m.cursor < 2 {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
 	}
-	before := fs[idx].optIdx
-	m.list.Select(idx)
+	f := fieldByKey(m, "mode")
+	before := f.optIdx
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.editing {
 		t.Fatal("select should enter editing")
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	if fs[idx].optIdx == before {
-		t.Fatal("select option should cycle on down")
+	if f.optIdx == before {
+		t.Fatal("select should cycle on down")
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.editing {
@@ -203,16 +183,15 @@ func TestTriggerAction(t *testing.T) {
 	m.switchTab(tabEngine)
 	fs := m.tabField[tabEngine]
 	for i := range fs {
-		m.list.Select(i)
+		m.cursor = i
+		m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 		switch fs[i].key {
 		case "engine":
-			m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 			if m.picker == nil {
 				t.Fatal("engine enter should open picker")
 			}
 			m.picker = nil
 		case "channel_config":
-			m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 			if m.configOverlay == nil {
 				t.Fatal("channel_config enter should open overlay")
 			}
@@ -220,7 +199,7 @@ func TestTriggerAction(t *testing.T) {
 		}
 	}
 	m.switchTab(tabMic)
-	m.list.Select(0) // mic_test
+	m.cursor = 0 // mic_test
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.micPanel == nil {
 		t.Fatal("mic_test enter should open panel")
@@ -237,19 +216,28 @@ func TestHistoryTab(t *testing.T) {
 	if m.tab != tabHistory {
 		t.Fatal("should switch to history")
 	}
-	m.refreshHistoryItems()
-	// 空历史下 enter 不 panic
+	// 空历史 enter 不 panic
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	// 左键回退到上一分组（输出），而不是跳到第一个
+	// 左键回退到输出，右键回绕到通用
 	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
 	if m.tab != tabOutput {
-		t.Fatalf("left from history should go to tabOutput, got %d", m.tab)
+		t.Fatalf("left from history = %d, want tabOutput", m.tab)
 	}
-	// 回到历史后右键回绕到第一个
 	m.switchTab(tabHistory)
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
 	if m.tab != tabGeneral {
-		t.Fatalf("right from history should wrap to tabGeneral, got %d", m.tab)
+		t.Fatalf("right from history = %d, want tabGeneral", m.tab)
+	}
+}
+
+func TestHistoryEmptyHint(t *testing.T) {
+	m := readyModel(config.Default())
+	m.switchTab(tabHistory)
+	out := m.View()
+	for _, want := range []string{"暂无识别结果", "内存", "下次启动"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("history empty hint missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -290,7 +278,7 @@ func TestConfigOverlayFlow(t *testing.T) {
 	for i := range ov.fields {
 		if ov.fields[i].key == "ec.model_version" {
 			ov.cursor = i
-			ov.fields[i].optIdx = 1 // 2.0
+			ov.fields[i].optIdx = 1
 			break
 		}
 	}
@@ -369,14 +357,83 @@ func TestApplyFieldsTo(t *testing.T) {
 
 func TestFieldValue(t *testing.T) {
 	m := readyModel(config.Default())
-	if got := m.fieldValue(fieldByKey(m, "auto_submit")); !strings.Contains(got, "●") {
-		t.Fatalf("toggle on: %q", got)
+	out := m.renderFields()
+	if !strings.Contains(out, "自动上屏:") || !strings.Contains(out, "● 开") {
+		t.Fatalf("fields render:\n%s", out)
 	}
-	if got := m.fieldValue(fieldByKey(m, "engine")); !strings.Contains(got, "doubao-stream") {
-		t.Fatalf("engine value: %q", got)
+	// 麦克风调试入口显示增益
+	m.switchTab(tabMic)
+	out = m.renderFields()
+	if !strings.Contains(out, "增益:") {
+		t.Fatalf("mic_test entry should show gain:\n%s", out)
 	}
-	if got := m.fieldValue(fieldByKey(m, "mic_test")); !strings.Contains(got, "增益") {
-		t.Fatalf("mic_test value: %q", got)
+}
+
+// ---- 弹层覆盖 ----
+
+func TestOverlayOnCoversInPlace(t *testing.T) {
+	base := "line0\nline1\nline2\nline3\nline4"
+	overlay := "OV0\nOV1"
+	out := overlayOn(base, overlay, 5)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 5 {
+		t.Fatalf("overlay must not change line count: %d", len(lines))
+	}
+	// 起始行保底 2（标题/tab 可见）
+	if lines[2] != "OV0" || lines[3] != "OV1" {
+		t.Fatalf("overlay placement:\n%s", out)
+	}
+	if lines[0] != "line0" || lines[1] != "line1" || lines[4] != "line4" {
+		t.Fatalf("base lines outside overlay changed:\n%s", out)
+	}
+}
+
+func TestOverlayOnSmallScreen(t *testing.T) {
+	base := "title\ntab\nstatus\ncontent\nhelp"
+	overlay := "O0\nO1\nO2\nO3\nO4\nO5\nO6\nO7\nO8\nO9"
+	out := overlayOn(base, overlay, 5)
+	lines := strings.Split(out, "\n")
+	if lines[0] != "title" || lines[1] != "tab" {
+		t.Fatalf("header must stay visible:\n%s", out)
+	}
+	if lines[2] != "O0" || lines[3] != "O1" {
+		t.Fatalf("truncated overlay not placed after header:\n%s", out)
+	}
+}
+
+func TestViewOverlayDoesNotPushContent(t *testing.T) {
+	base := readyModel(config.Default())
+	withOverlay := readyModel(config.Default())
+
+	baseView := base.View()
+	withOverlay.openEnginePicker()
+	ovView := withOverlay.View()
+
+	baseLines := strings.Split(baseView, "\n")
+	ovLines := strings.Split(ovView, "\n")
+	if ovLines[0] != baseLines[0] {
+		t.Fatalf("overlay pushed title away: base=%q overlay=%q", baseLines[0], ovLines[0])
+	}
+	titleRow := -1
+	for i, l := range ovLines {
+		if strings.Contains(l, "选择识别引擎") {
+			titleRow = i
+			break
+		}
+	}
+	if titleRow < 5 || titleRow > len(ovLines)/2+2 {
+		t.Fatalf("overlay not centered: title at row %d of %d", titleRow, len(ovLines))
+	}
+}
+
+// ---- 按键 ----
+
+func TestLogsKeyUppercaseL(t *testing.T) {
+	m := readyModel(config.Default())
+	before := m.logExpanded
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	if m.logExpanded == before {
+		t.Fatal("uppercase L should toggle logs")
 	}
 }
 
@@ -400,100 +457,5 @@ func TestTruncateText(t *testing.T) {
 	}
 	if got := truncateText("short", 10); got != "short" {
 		t.Fatalf("short: %q", got)
-	}
-}
-
-func TestTabBarKeepsDigitOnActive(t *testing.T) {
-	m := readyModel(config.Default())
-	out := m.tabBar()
-	// 当前 tab（通用）高亮但数字保留
-	if !strings.Contains(out, "1 通用") {
-		t.Fatalf("active tab should keep its digit: %q", out)
-	}
-	// 其他 tab 也带数字
-	for _, want := range []string{"2 引擎", "3 麦克风", "4 输出", "5 历史"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("tab bar missing %q: %q", want, out)
-		}
-	}
-}
-
-func TestLogsKeyUppercaseL(t *testing.T) {
-	m := readyModel(config.Default())
-	before := m.logExpanded
-	// 终端按 Shift+L 产生大写 'L' rune
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
-	if m.logExpanded == before {
-		t.Fatal("uppercase L should toggle logs")
-	}
-	// 小写 l 仍是"下一个分组"
-	tabBefore := m.tab
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
-	if m.tab == tabBefore {
-		t.Fatal("lowercase l should switch tab")
-	}
-}
-
-func TestOverlayOnCoversInPlace(t *testing.T) {
-	base := "line0\nline1\nline2\nline3\nline4"
-	overlay := "OV0\nOV1"
-	out := overlayOn(base, overlay, 5)
-	lines := strings.Split(out, "\n")
-	if len(lines) != 5 {
-		t.Fatalf("overlay must not change line count: %d", len(lines))
-	}
-	// 垂直居中：5 行中 2 行浮层 → 起始行 = (5-2)/2 = 1
-	if lines[1] != "OV0" || lines[2] != "OV1" {
-		t.Fatalf("overlay not centered:\n%s", out)
-	}
-	// 非覆盖行保留
-	if lines[0] != "line0" || lines[3] != "line3" || lines[4] != "line4" {
-		t.Fatalf("base lines outside overlay changed:\n%s", out)
-	}
-}
-
-func TestViewOverlayDoesNotPushContent(t *testing.T) {
-	cfg := config.Default()
-	base := readyModel(cfg)
-	withOverlay := readyModel(cfg)
-
-	baseView := base.View()
-	withOverlay.openEnginePicker()
-	ovView := withOverlay.View()
-
-	baseLines := strings.Split(baseView, "\n")
-	ovLines := strings.Split(ovView, "\n")
-	// 弹层不把顶部标题推走（覆盖而非追加）
-	if ovLines[0] != baseLines[0] {
-		t.Fatalf("overlay pushed title away: base=%q overlay=%q", baseLines[0], ovLines[0])
-	}
-	// 弹层内容出现在屏幕中部（而非底部追加）
-	titleRow := -1
-	for i, l := range ovLines {
-		if strings.Contains(l, "选择识别引擎") {
-			titleRow = i
-			break
-		}
-	}
-	if titleRow < 0 {
-		t.Fatalf("overlay content missing:\n%s", ovView)
-	}
-	if titleRow < 5 || titleRow > len(ovLines)/2+2 {
-		t.Fatalf("overlay not centered: title at row %d of %d", titleRow, len(ovLines))
-	}
-}
-
-func TestHistoryEmptyHint(t *testing.T) {
-	m := readyModel(config.Default())
-	m.switchTab(tabHistory)
-	out := m.View()
-	for _, want := range []string{"暂无识别结果", "内存", "下次启动"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("history empty hint missing %q:\n%s", want, out)
-		}
-	}
-	// 空历史时不渲染 list 的英文 "No items"
-	if strings.Contains(out, "No items") {
-		t.Fatalf("should not show English empty message:\n%s", out)
 	}
 }

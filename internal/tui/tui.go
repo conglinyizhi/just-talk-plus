@@ -6,15 +6,9 @@
 
 // Package tui 提供 Just Talk Plus 的 Bubble Tea 配置界面。
 //
-// 主绘制基于 charmbracelet 组件库：
-//   - list      设置项列表（title/description 两行布局，自带滚动与光标）
-//   - textinput 字符串/数字字段编辑
-//   - help      底部按键帮助（由按键绑定自动生成）
-//   - lipgloss  tab 分组栏与整体样式
-//
-// 布局为 tab 分组（通用/引擎/麦克风/输出/历史），垂直高度只取决于
-// 单组字段数，不再随设置项总数线性增长。渠道选择、渠道配置、麦克风调试
-// 为模态弹层，保留独立交互。
+// 布局为 tab 分组（通用/引擎/麦克风/输出/历史），每个 tab 内是单行字段表单
+// （label: value），垂直高度只取决于单组字段数。渠道选择、渠道配置、麦克风
+// 调试为模态弹层，屏幕居中覆盖主内容（保留标题与 tab 行可见）。
 package tui
 
 import (
@@ -26,9 +20,6 @@ import (
 	"github.com/c/just-talk-go/hotkey"
 	"github.com/c/just-talk-go/internal/asrcfg"
 	"github.com/c/just-talk-go/plugins/voice"
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -98,7 +89,7 @@ const (
 
 var tabNames = []string{"通用", "引擎", "麦克风", "输出", "历史"}
 
-// ---- 弹层状态（保留现有模态交互）----
+// ---- 弹层状态 ----
 
 // pickerItem 渠道选择弹层中的一条候选，subtitle 说明该渠道特点。
 type pickerItem struct {
@@ -140,52 +131,6 @@ type configOverlayState struct {
 // micPanelState 麦克风调试面板；nil 表示未打开。
 type micPanelState struct{}
 
-// ---- 按键绑定（供 help 组件展示）----
-
-type keyMap struct {
-	Up, Down, Enter, Left, Right, Save, Logs, Quit key.Binding
-}
-
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.Left, k.Right, k.Save, k.Logs, k.Quit}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding { return [][]key.Binding{k.ShortHelp()} }
-
-var keys = keyMap{
-	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "上移")),
-	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "下移")),
-	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "编辑/进入")),
-	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "上一个分组")),
-	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "下一个分组")),
-	Save:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "保存")),
-	Logs:  key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "展开日志")),
-	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
-}
-
-// ---- list 条目适配 ----
-
-// fieldItem 设置项的 list.Item：title=设置名，description=当前值/提示。
-type fieldItem struct {
-	title string
-	desc  string
-}
-
-func (i fieldItem) Title() string       { return i.title }
-func (i fieldItem) Description() string { return i.desc }
-func (i fieldItem) FilterValue() string { return i.title }
-
-// historyItem 识别历史的 list.Item：title=文本，description=时间与操作提示。
-type historyItem struct {
-	title string
-	desc  string
-	idx   int
-}
-
-func (i historyItem) Title() string       { return i.title }
-func (i historyItem) Description() string { return i.desc }
-func (i historyItem) FilterValue() string { return i.title }
-
 // ---- 主 Model ----
 
 type Model struct {
@@ -202,12 +147,8 @@ type Model struct {
 
 	tab      tabID
 	tabField map[tabID][]field
-	list     list.Model
-	help     help.Model
-
-	editing      bool
-	editOriginal string // fString 编辑前的值（esc 恢复）
-	input        textinput.Model
+	cursor   int
+	editing  bool
 
 	picker        *pickerState
 	configOverlay *configOverlayState
@@ -215,29 +156,14 @@ type Model struct {
 }
 
 func New(cfg *config.Config) *Model {
-	li := list.New(nil, list.NewDefaultDelegate(), 0, 0)
-	li.SetShowTitle(false)
-	li.SetShowStatusBar(false)
-	li.SetShowHelp(false)
-	li.SetFilteringEnabled(false)
-	li.SetShowPagination(false)
-
-	ti := textinput.New()
-	ti.Placeholder = "输入新值…"
-	ti.CharLimit = 128
-	ti.Cursor.Blink = false
-
-	m := &Model{
+	return &Model{
 		cfg:      cfg,
 		tabField: buildTabFields(cfg),
-		list:     li,
-		help:     help.New(),
-		input:    ti,
 		logs:     make([]string, 0, 100),
 		showLogs: true,
 		tab:      tabGeneral,
+		cursor:   0,
 	}
-	return m
 }
 
 // ---- 字段构建（按 tab 分组）----
@@ -246,7 +172,6 @@ func New(cfg *config.Config) *Model {
 func buildTabFields(cfg *config.Config) map[tabID][]field {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
-	engines := asrcfg.Types()
 
 	general := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
@@ -274,7 +199,6 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 	}
 
-	_ = engines
 	return map[tabID][]field{
 		tabGeneral: general,
 		tabEngine:  engineTab,
@@ -349,8 +273,6 @@ func idxOf(opts []string, v string) int {
 	return 0
 }
 
-// ---- list 数据刷新 ----
-
 // currentFields 返回当前 tab 的设置字段（历史 tab 返回 nil）。
 func (m *Model) currentFields() []field {
 	if m.tab == tabHistory {
@@ -359,79 +281,12 @@ func (m *Model) currentFields() []field {
 	return m.tabField[m.tab]
 }
 
-// selectedField 返回 list 当前选中项对应的字段。
-func (m *Model) selectedField() *field {
-	fs := m.currentFields()
-	i := m.list.Index()
-	if i < 0 || i >= len(fs) {
-		return nil
+// currentEngine 返回当前选中的引擎。
+func (m *Model) currentEngine() string {
+	if m.cfg != nil && m.cfg.Voice.Engine != "" {
+		return m.cfg.Voice.Engine
 	}
-	return &fs[i]
-}
-
-// refreshItems 按当前 tab 重建 list 条目（设置值变化后调用）。
-func (m *Model) refreshItems() {
-	if m.tab == tabHistory {
-		m.refreshHistoryItems()
-		return
-	}
-	fs := m.currentFields()
-	items := make([]list.Item, len(fs))
-	for i := range fs {
-		f := &fs[i]
-		items[i] = fieldItem{
-			title: strings.Repeat("  ", f.indent) + f.label,
-			desc:  m.fieldValue(f),
-		}
-	}
-	m.list.SetItems(items)
-}
-
-func (m *Model) refreshHistoryItems() {
-	hist := voice.History()
-	items := make([]list.Item, len(hist))
-	for i, e := range hist {
-		items[i] = historyItem{
-			title: truncateText(e.Text, 60),
-			desc:  "   " + e.Time.Format("15:04:05") + "  ·  回车复制到剪贴板",
-			idx:   i,
-		}
-	}
-	m.list.SetItems(items)
-}
-
-// fieldValue 渲染字段当前值（list 的 description 行）。
-func (m *Model) fieldValue(f *field) string {
-	switch f.fType {
-	case fString:
-		v := f.input.Value()
-		if v == "" {
-			return dStyle.Render("（空）")
-		}
-		if f.key == "ec.api_key" || f.key == "ec.access_key" {
-			if len(v) > 6 {
-				v = v[:6] + "***"
-			}
-		}
-		return v
-	case fToggle:
-		if f.boolVal {
-			return aStyle.Render("● 开")
-		}
-		return dStyle.Render("○ 关")
-	case fSelect:
-		return vStyle.Render(f.selectValue())
-	case fAction:
-		switch f.key {
-		case "engine":
-			return vStyle.Render(m.cfg.Voice.Engine) + dStyle.Render("（回车选择）")
-		case "mic_test":
-			return dStyle.Render("回车进入（当前增益 " + fmt.Sprintf("%d", voice.GetMicGain()) + "）")
-		default:
-			return dStyle.Render("回车进入")
-		}
-	}
-	return ""
+	return asrcfg.DefaultEngine
 }
 
 // ---- 生命周期 ----
@@ -444,20 +299,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h, m.ready = msg.Width, msg.Height, true
-		m.list.SetWidth(msg.Width - 4)
-		m.list.SetHeight(msg.Height - 11)
-		m.help.Width = msg.Width - 4
-		m.refreshItems()
-		return m, nil
 	case tea.KeyMsg:
 		return m, m.handleKey(msg)
 	case backendMsg:
 		m.info = hotkey.ProviderInfo(msg)
 	case refreshMsg:
-		// 历史 tab 与状态区需要持续刷新
-		if m.tab == tabHistory && len(m.list.Items()) != len(voice.History()) {
-			m.refreshHistoryItems()
-		}
 		return m, tickRefresh()
 	case devMsg:
 		if msg.Error != nil {
@@ -483,116 +329,120 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleMicPanelKey(k)
 	}
 
-	// 编辑态
-	if m.editing {
-		f := m.selectedField()
-		if f == nil {
-			m.editing = false
-			return nil
+	// 历史 tab：列表选择与复制
+	if m.tab == tabHistory {
+		hist := voice.History()
+		switch k {
+		case "j", "down":
+			if m.cursor < len(hist)-1 {
+				m.cursor++
+			}
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "enter":
+			if m.cursor >= 0 && m.cursor < len(hist) {
+				if err := voice.CopyHistoryEntry(m.cursor); err != nil {
+					m.logf("❌ 复制失败: %s", err)
+				} else {
+					m.logf("📋 已复制: %s", truncateText(hist[m.cursor].Text, 60))
+				}
+			}
+		case "left":
+			m.switchTab((tabHistory + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
+		case "right":
+			m.switchTab((tabHistory + 1) % tabID(len(tabNames)))
+		case "q", "ctrl+c":
+			return tea.Quit
+		case "s":
+			m.save()
+		case "L":
+			m.logExpanded = !m.logExpanded
 		}
-		switch {
-		case k == "esc":
-			if f.fType == fString {
-				f.input.SetValue(m.editOriginal)
-			}
+		return nil
+	}
+
+	// 设置 tab：编辑态
+	fs := m.currentFields()
+	if m.editing && m.cursor >= 0 && m.cursor < len(fs) {
+		f := &fs[m.cursor]
+		switch k {
+		case "esc":
 			m.editing = false
-			m.input.Blur()
-			m.refreshItems()
+			f.input.Blur()
 			return nil
-		case k == "enter":
-			if f.fType == fString {
-				f.input.SetValue(m.input.Value())
-			}
+		case "enter":
 			m.editing = false
-			m.input.Blur()
-			m.refreshItems()
+			f.input.Blur()
 			return nil
 		}
 		switch f.fType {
-		case fString:
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return cmd
 		case fSelect:
 			switch k {
 			case "j", "down", "k", "up", "left", "right":
 				f.optIdx = (f.optIdx + 1) % len(f.opts)
 			}
-			m.refreshItems()
-			return nil
-		}
-		return nil
-	}
-
-	// 历史 tab：回车复制
-	if m.tab == tabHistory {
-		switch {
-		case key.Matches(msg, keys.Enter):
-			items := voice.History()
-			i := m.list.Index()
-			if i >= 0 && i < len(items) {
-				if err := voice.CopyHistoryEntry(i); err != nil {
-					m.logf("❌ 复制失败: %s", err)
-				} else {
-					m.logf("📋 已复制: %s", truncateText(items[i].Text, 60))
+		case fToggle:
+			switch k {
+			case " ":
+				f.boolVal = !f.boolVal
+			case "j", "down", "k", "up":
+				m.editing = false
+				m.cursor++
+				if m.cursor >= len(fs) {
+					m.cursor = 0
 				}
 			}
-			return nil
-		case key.Matches(msg, keys.Left):
-			m.switchTab((tabHistory + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
-			return nil
-		case key.Matches(msg, keys.Right):
-			m.switchTab((tabHistory + 1) % tabID(len(tabNames)))
-			return nil
+		case fString:
+			var cmd tea.Cmd
+			f.input, cmd = f.input.Update(msg)
+			return cmd
 		}
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		return cmd
+		return nil
 	}
 
 	// 导航态
 	switch {
-	case key.Matches(msg, keys.Quit):
+	case k == "q" || k == "ctrl+c":
 		return tea.Quit
-	case key.Matches(msg, keys.Save):
+	case k == "s":
 		m.save()
 		return nil
-	case key.Matches(msg, keys.Left):
-		m.switchTab((m.tab + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
-		return nil
-	case key.Matches(msg, keys.Right):
-		m.switchTab((m.tab + 1) % tabID(len(tabNames)))
-		return nil
-	case key.Matches(msg, keys.Logs):
-		m.logExpanded = !m.logExpanded
-		return nil
-	case len(k) == 1 && k[0] >= '1' && k[0] <= '5':
-		m.switchTab(tabID(k[0] - '1'))
-		return nil
-	case key.Matches(msg, keys.Enter):
-		f := m.selectedField()
-		if f == nil {
+	case k == "e" || k == "i" || k == "enter":
+		if len(fs) == 0 {
 			return nil
 		}
+		f := &fs[m.cursor]
 		switch f.fType {
 		case fAction:
 			m.triggerAction(f.key)
 		case fToggle:
 			f.boolVal = !f.boolVal
-			m.refreshItems()
-		case fString:
+		default: // fString / fSelect
 			m.editing = true
-			m.editOriginal = f.input.Value()
-			m.input.SetValue(f.input.Value())
-			m.input.Focus()
-		case fSelect:
-			m.editing = true
+			if f.fType == fString {
+				f.input.Focus()
+			}
 		}
-		return nil
+	case k == "j" || k == "down":
+		if m.cursor < len(fs)-1 {
+			m.cursor++
+		}
+	case k == "k" || k == "up":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case k == "left":
+		m.switchTab((m.tab + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
+	case k == "right":
+		m.switchTab((m.tab + 1) % tabID(len(tabNames)))
+	case k == "L":
+		m.logExpanded = !m.logExpanded
+	case len(k) == 1 && k[0] >= '1' && k[0] <= '5':
+		m.switchTab(tabID(k[0] - '1'))
 	}
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return cmd
+	return nil
 }
 
 func (m *Model) switchTab(t tabID) {
@@ -601,8 +451,10 @@ func (m *Model) switchTab(t tabID) {
 	}
 	m.tab = t
 	m.editing = false
-	m.input.Blur()
-	m.refreshItems()
+	m.cursor = 0
+	if fs := m.currentFields(); len(fs) > 0 {
+		// 保持光标在合法范围
+	}
 }
 
 // triggerAction 处理 fAction 入口：打开对应弹层/面板。
@@ -616,14 +468,6 @@ func (m *Model) triggerAction(key string) {
 		voice.StartMicTest()
 		m.micPanel = &micPanelState{}
 	}
-}
-
-// currentEngine 返回当前选中的引擎。
-func (m *Model) currentEngine() string {
-	if m.cfg != nil && m.cfg.Voice.Engine != "" {
-		return m.cfg.Voice.Engine
-	}
-	return asrcfg.DefaultEngine
 }
 
 // ---- 保存 ----
@@ -740,7 +584,6 @@ func (m *Model) View() string {
 	if !m.ready {
 		return "loading..."
 	}
-	m.refreshItems()
 	base := m.renderBase()
 	if m.picker == nil && m.configOverlay == nil && m.micPanel == nil {
 		return base
@@ -766,17 +609,10 @@ func (m *Model) renderBase() string {
 	b.WriteString("  " + m.renderVoiceStatus() + "\n")
 	b.WriteString("  " + m.renderVoiceStats() + "\n\n")
 
-	if m.editing {
-		if f := m.selectedField(); f != nil {
-			b.WriteString(lStyle.Render(f.label+": ") + "\n")
-			b.WriteString("  " + m.input.View() + "\n")
-			b.WriteString(dStyle.Render("  enter 确认 · esc 取消") + "\n")
-		}
-	} else if m.tab == tabHistory && len(voice.History()) == 0 {
-		// 历史为空：多行中文提示（触发条件 + 内存特性）
-		b.WriteString(m.renderHistoryEmpty())
+	if m.tab == tabHistory {
+		b.WriteString(m.renderHistory())
 	} else {
-		b.WriteString(m.list.View() + "\n")
+		b.WriteString(m.renderFields())
 	}
 
 	if m.showLogs {
@@ -803,7 +639,49 @@ func (m *Model) renderBase() string {
 		}
 	}
 
-	b.WriteString(m.help.View(keys) + "\n")
+	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | ←/→ 或 1-5 分组 | s 保存 | L 日志 | q 退出"))
+	return b.String()
+}
+
+// renderFields 渲染当前 tab 的设置字段（单行 label: value）。
+func (m *Model) renderFields() string {
+	fs := m.currentFields()
+	var b strings.Builder
+	for i, f := range fs {
+		marker := "  "
+		if i == m.cursor {
+			if m.editing {
+				marker = aStyle.Render("▶ ")
+			} else {
+				marker = aStyle.Render("▸ ")
+			}
+		}
+		line := marker + strings.Repeat("  ", f.indent) + lStyle.Render(f.label+": ") + m.renderField(i, f)
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+// renderHistory 渲染历史 tab：空提示或可复制的条目列表。
+func (m *Model) renderHistory() string {
+	hist := voice.History()
+	if len(hist) == 0 {
+		return m.renderHistoryEmpty()
+	}
+	if m.cursor >= len(hist) {
+		m.cursor = len(hist) - 1
+	}
+	var b strings.Builder
+	for i, e := range hist {
+		marker := "  "
+		if i == m.cursor {
+			marker = aStyle.Render("▸ ")
+		}
+		text := truncateText(e.Text, 60)
+		ts := e.Time.Format("15:04:05")
+		b.WriteString(marker + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
+	}
+	b.WriteString(dStyle.Render("  j/k 选择 · enter 复制到剪贴板") + "\n")
 	return b.String()
 }
 
@@ -821,31 +699,46 @@ func (m *Model) renderHistoryEmpty() string {
 	return dStyle.Render(msg) + "\n"
 }
 
-// overlayOn 把模态浮层垂直居中覆盖在 base 之上：用浮层行替换主内容对应行，
-// 主内容整体保持原位（不因弹层出现而被挤高）。
-func overlayOn(base, overlay string, screenH int) string {
-	baseLines := strings.Split(base, "\n")
-	ovLines := strings.Split(overlay, "\n")
-	if screenH > 0 {
-		for len(baseLines) < screenH {
-			baseLines = append(baseLines, "")
+// renderField 渲染单个字段的值（单行样式）。
+func (m *Model) renderField(i int, f field) string {
+	editing := m.editing && m.cursor == i
+	switch f.fType {
+	case fString:
+		v := f.input.Value()
+		if v == "" {
+			return dStyle.Render("（空）")
 		}
-	}
-	start := 0
-	if screenH > len(ovLines) {
-		start = (screenH - len(ovLines)) / 2
-	}
-	for i, line := range ovLines {
-		idx := start + i
-		if idx < 0 || idx >= len(baseLines) {
-			break
+		if (f.key == "ec.api_key" || f.key == "ec.access_key") && !editing && len(v) > 6 {
+			v = v[:6] + "***"
 		}
-		baseLines[idx] = line
+		if editing {
+			return f.input.View()
+		}
+		return vStyle.Render(v)
+	case fToggle:
+		if f.boolVal {
+			return aStyle.Render("● 开") + "  " + dStyle.Render("(空格)")
+		}
+		return dStyle.Render("○ 关  (空格)")
+	case fSelect:
+		v := f.opts[f.optIdx]
+		if editing {
+			return aStyle.Render("[" + v + " ▲▼]")
+		}
+		return vStyle.Render(v)
+	case fAction:
+		extra := ""
+		if f.key == "mic_test" {
+			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", voice.GetMicGain()))
+		} else if f.key == "engine" {
+			extra = "  " + vStyle.Render(m.currentEngine())
+		}
+		return aStyle.Render("▶ ") + vStyle.Render("进入") + extra
 	}
-	return strings.Join(baseLines, "\n")
+	return ""
 }
 
-// tabBar 渲染 tab 分组栏（bubbles 无 tab 组件，手写；当前 tab 高亮且保留数字键提示）。
+// tabBar 渲染 tab 分组栏（当前 tab 高亮且保留数字键提示）。
 func (m *Model) tabBar() string {
 	base := lipgloss.NewStyle().Padding(0, 1)
 	active := base.Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
@@ -963,6 +856,38 @@ func (m *Model) logf(format string, args ...interface{}) {
 	m.logs = append(m.logs, fmt.Sprintf(format, args...))
 }
 
+// overlayOn 把模态浮层垂直居中覆盖在 base 之上：用浮层行替换主内容对应行，
+// 主内容整体保持原位（不因弹层出现而被挤高）。
+// 弹层高度受限（最多 screenH-3 行），起始行保底在标题/tab 之后，避免盖掉界面头部。
+func overlayOn(base, overlay string, screenH int) string {
+	baseLines := strings.Split(base, "\n")
+	ovLines := strings.Split(overlay, "\n")
+	if screenH > 0 {
+		for len(baseLines) < screenH {
+			baseLines = append(baseLines, "")
+		}
+		maxOv := screenH - 3
+		if maxOv > 0 && len(ovLines) > maxOv {
+			ovLines = ovLines[:maxOv]
+		}
+	}
+	start := 0
+	if screenH > len(ovLines) {
+		start = (screenH - len(ovLines)) / 2
+	}
+	if start < 2 {
+		start = 2 // 保底：标题行 + tab 行可见
+	}
+	for i, line := range ovLines {
+		idx := start + i
+		if idx < 0 || idx >= len(baseLines) {
+			break
+		}
+		baseLines[idx] = line
+	}
+	return strings.Join(baseLines, "\n")
+}
+
 // ---- 渠道选择弹层 ----
 
 func (m *Model) openEnginePicker() {
@@ -1004,7 +929,6 @@ func (m *Model) handlePickerKey(k string) tea.Cmd {
 func (m *Model) selectEngine(name string) {
 	m.picker = nil
 	m.cfg.Voice.Engine = name
-	m.refreshItems()
 	m.logf("引擎已切换为 %s", name)
 }
 
