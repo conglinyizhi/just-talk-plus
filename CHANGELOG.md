@@ -4,6 +4,9 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added a microphone debug panel in the TUI: the same recording hotkey triggers a test recording (no ASR), with live peak/RMS level bars, clipping warning, fine-grained gain adjustment (`+`/`-`, persisted), and an adaptive-gain mode that auto-lowers gain on clipping and recovers slowly when quiet (applies to normal recordings too, toggleable via `[voice].auto_gain`).
+- Added an in-memory recognition history (last 10 submitted/copied results) with a TUI panel to re-copy any entry to the clipboard.
+
 - Added copyright headers to source files (new files © conglinyizhi, modified files carry a modified notice), plus `NOTICE` and `THIRD_PARTY_NOTICES` documenting project ownership, maintenance history, and third-party dependency licenses. Maintenance of Just Talk moved from `whoamihappyhacking` to `conglinyizhi`; the project remains GPL-3.0.
 - Renamed the application to Just Talk Plus (in-app TUI title, README, doctor output, and install paths); the binary and config paths keep the `just-talk` name.
 

@@ -15,6 +15,8 @@ It is built for people who want to type less and speak more while coding, chatti
 - Global hotkey recording with `toggle` and `hold` modes.
 - Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
 - Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
+- Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
+- Recognition history panel: the last 10 submitted/copied results are kept in memory and can be re-copied to the clipboard.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
 - TUI configuration for hotkeys, engine, mode, auto-submit, stop delay, hotwords, and related settings.
@@ -154,6 +156,8 @@ Recommended hotkey config:
 [voice]
 mode = "toggle"
 push_to_talk = "Alt+Super"
+gain = 1
+auto_gain = true   # adaptive gain: lower on clipping, recover slowly when quiet
 ```
 
 `Alt+Super` with `toggle` mode is recommended. Press once to start recording, then press again to stop. This avoids hold-mode key conflicts with desktop environments or focused input fields. On Windows, the low-level keyboard hook only observes key edges and never consumes or replays modifiers, so standalone `Alt`, `Super`, and shortcuts such as `Alt+Tab` retain their normal system behavior. Modifier combinations require the exact configured set, and hook fallback state is checked against the unsuppressed physical key state so separate single-key presses cannot be combined into the shortcut.
@@ -210,7 +214,7 @@ api_key = "…"
 # access_key = "…"
 # Access mode:
 model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
-stream_mode = "async"      # stream | nostream | async (default async)
+stream_mode = "async"      # nostream | async (default async; bidirectional + second-pass)
 # resource_id = "volc.bigasr.sauc.duration"  # explicit resource override
 # base_host = "openspeech.bytedance.com"
 ```
@@ -241,6 +245,17 @@ api_key = "sk-…"
 ```
 
 Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; Doubao (`doubao-stream`) is a streaming engine and shows partial results while recording. Set `engine = "null"` to disable recognition.
+
+### Microphone Debug And Recognition History
+
+Select "麦克风调试" in the TUI main form and press Enter to open the debug panel:
+
+- Press the **same recording hotkey** to start/stop a test recording (microphone only; no ASR, no submit)
+- Live peak/RMS level bars and clipping warning
+- `+` / `-` fine-grained gain adjustment (1-100, applied live and persisted)
+- Space toggles adaptive gain (lower on clipping, recover slowly when quiet)
+
+The "历史记录" panel shows the last 10 successfully submitted/copied results; `j`/`k` to select, Enter to re-copy to the clipboard, `esc` to exit.
 
 
 ## Changelog

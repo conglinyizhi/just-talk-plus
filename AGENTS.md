@@ -70,6 +70,7 @@ The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 - Hotkeys: register in `Plugin.Init()`, never `Start()` (late registration drops events). Keep provider event loops and hotkey handlers free of blocking work.
 - Recording stop is split from hotkey handling: handlers update state fast; recorder stop, final audio send, ASR final wait, clipboard, auto-submit run in background finish work. Debug logs say which stage a stop is waiting on.
 - Dispatch recognized text exactly once per user-stopped session; when changing ASR result handling check both `Final()` and `Done()` paths.
+- The microphone debug panel routes the recording hotkey into a test recording (no ASR) while active; the shared `AutoGain` (adaptive gain) applies to both test and normal recordings and analyzes post-gain PCM. Successful text output is recorded into the in-memory history (`history.go`).
 - TUI mode must not write logs to stdout/stderr (corrupts the Bubble Tea layout); `voice.SetOutput(io.Discard)` is intentional.
 - Prefer existing package boundaries and platform-specific build tags. Keep doctor output short and actionable.
 - README is bilingual (`README.md` + `README.en.md`); update `CHANGELOG.md` for user-visible changes.
