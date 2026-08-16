@@ -233,10 +233,10 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 		{label: "删除中文间空格", key: "remove_cjk_space", help: "删中文↔中文间空格（如「你好 世界」→「你好世界」）；默认关；与「自动空格」互不影响", fType: fToggle, boolVal: vc.RemoveCJKSpace},
 		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）", fType: fToggle, boolVal: vc.AutoSpace},
-		{label: "自动上屏", key: "auto_submit", help: "识别后模拟粘贴到当前输入框（上屏与复制行为）", fType: fToggle, boolVal: vc.AutoSubmit},
-		{label: "复制到剪贴板", key: "write_clipboard", help: "识别结果写入剪贴板（独立行为，可与上屏同开）", fType: fToggle, boolVal: vc.WriteClipboard},
-		{label: "上屏后还原剪贴板", key: "restore_clipboard", help: "上屏成功后还原原内容，尽量不污染剪贴板历史", fType: fToggle, boolVal: vc.RestoreClipboard},
-		{label: "上屏失败不写入", key: "no_clipboard_on_fail", help: "上屏失败时也还原原内容，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail},
+		{label: "自动上屏", key: "auto_submit", help: "识别后模拟粘贴到当前输入框", fType: fToggle, boolVal: vc.AutoSubmit},
+		{label: "复制到剪贴板", key: "write_clipboard", help: "识别结果写入剪贴板（可与上屏同开）", fType: fToggle, boolVal: vc.WriteClipboard, indent: 1},
+		{label: "上屏后还原剪贴板", key: "restore_clipboard", help: "上屏成功后还原原内容，尽量不污染剪贴板历史", fType: fToggle, boolVal: vc.RestoreClipboard, indent: 1},
+		{label: "上屏失败不写入", key: "no_clipboard_on_fail", help: "上屏失败时也还原原内容，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail, indent: 1},
 	}
 
 	return map[tabID][]field{

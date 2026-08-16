@@ -89,10 +89,13 @@ func TestBuildTabFields(t *testing.T) {
 	if f := fieldByKey(m, "omit_trailing_all"); f.indent != 1 {
 		t.Fatalf("omit_trailing_all indent = %d", f.indent)
 	}
-	// 上屏与复制行为：四个平级选项，无缩进嵌套
-	for _, key := range []string{"auto_submit", "write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
-		if f := fieldByKey(m, key); f.indent != 0 {
-			t.Fatalf("%s indent = %d, want 0 (flat)", key, f.indent)
+	// 上屏与复制行为：自动上屏为主项，其余三个为其子项（缩进 1）
+	if f := fieldByKey(m, "auto_submit"); f.indent != 0 {
+		t.Fatalf("auto_submit indent = %d, want 0", f.indent)
+	}
+	for _, key := range []string{"write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
+		if f := fieldByKey(m, key); f.indent != 1 {
+			t.Fatalf("%s indent = %d, want 1 (sub of 自动上屏)", key, f.indent)
 		}
 	}
 }

@@ -47,6 +47,9 @@ import (
 const (
 	uinputDev  = "/dev/uinput"
 	keyDelayMs = 15
+	// pasteSettleDelay 模拟粘贴后等待目标应用读取剪贴板的时间。
+	// 过早返回会让调用方立刻恢复剪贴板，应用实际粘到的是被还原的旧内容。
+	pasteSettleDelay = 300 * time.Millisecond
 )
 
 func isWaylandSession() bool {
@@ -84,7 +87,7 @@ func pasteX11(text string, logger *slog.Logger) error {
 		return fmt.Errorf("simulate paste: %w", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(pasteSettleDelay)
 	primaryCmd.Process.Kill()
 	primaryCmd.Wait()
 
@@ -116,6 +119,9 @@ func pasteWayland(text string, logger *slog.Logger) error {
 	if err := simulatePaste(); err != nil {
 		return fmt.Errorf("simulate paste: %w", err)
 	}
+
+	// 与 X11 路径一致：给目标应用留出读取剪贴板的时间。
+	time.Sleep(pasteSettleDelay)
 
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil

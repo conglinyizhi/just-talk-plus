@@ -4,7 +4,9 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
-- Refactored submit/clipboard options from nested toggles into **four flat, independent behaviors** (Output tab): 自动上屏 (`auto_submit`), 复制到剪贴板 (`write_clipboard`), 上屏后还原剪贴板 (`restore_clipboard`), 上屏失败不写入 (`no_clipboard_on_fail`). After each recognition the output layer runs the enabled actions in combination (autotype first — its temporary clipboard write is restored or marked sensitive — then copy), instead of the previous master/sub/sub-sub nesting. `auto_submit` moved from the General tab to the Output tab; the session-level `autoSubmit` plumbing was removed (dispatch reads config directly). The clipboard (and clipboard-manager history) is never touched by the recognized text unless 复制到剪贴板 is enabled.
+- Fixed an autotype bug where the submitted text was the **previous** utterance's content: Wayland's `pasteWayland` returned immediately after simulating paste, so the output layer restored the clipboard before the target app had read it — the app then pasted the restored (old) content. Both X11 and Wayland now wait `pasteSettleDelay` (300ms) after the paste, and the output dispatch is serialized with a mutex so two consecutive recordings can no longer interleave clipboard writes.
+
+- Grouped the submit/copy options under 自动上屏 on the Output tab: 复制到剪贴板 (`write_clipboard`), 上屏后还原剪贴板 (`restore_clipboard`) and 上屏失败不写入 (`no_clipboard_on_fail`) are now indented sub-options of `auto_submit` instead of flat siblings.
 
 - Linux/Wayland autotype now writes the temporary clipboard with the sensitive marker (`wl-copy --sensitive`, i.e. `x-kde-passwordManagerHint: secret`), so Klipper and CopyQ 8.0+ silently ignore it — the recognition text no longer pollutes clipboard-manager history while pasting still works normally. Detects wl-copy ≥ 2.2 and falls back gracefully on older versions; X11 keeps the existing "save → paste → restore" behavior (xclip cannot attach the marker). README now documents setting up CopyQ as the clipboard manager.
 

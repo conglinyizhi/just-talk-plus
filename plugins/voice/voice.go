@@ -46,6 +46,7 @@ var TUILog func(string)
 var TUILogBuf []string
 var tuilogMu sync.Mutex
 var outputMu sync.Mutex
+var dispatchMu sync.Mutex // 输出流程串行：避免两次识别的上屏/还原并发覆盖剪贴板
 var outputWriter io.Writer = os.Stdout
 var tuiStatus = TUIVoiceStatus{State: "idle", UpdatedAt: time.Now()}
 var tuiStatusMu sync.Mutex
@@ -890,6 +891,11 @@ func (p *VoicePlugin) dispatchTextOutput(text string) {
 		text = autoSpaceCJK(text)
 	}
 	go func() {
+		// 输出流程串行执行：同一时刻只有一次识别的上屏/复制/还原在操作剪贴板，
+		// 避免连续两次录音的 goroutine 并发覆盖剪贴板导致上屏错乱（粘到上一步内容）。
+		dispatchMu.Lock()
+		defer dispatchMu.Unlock()
+
 		// 「上屏与复制」行为组合，按平级选项依次执行：
 		//   1. 自动上屏：临时写剪贴板 → 模拟粘贴
 		//      - 成功后：restore_clipboard 开启 → 还原上屏前的剪贴板
