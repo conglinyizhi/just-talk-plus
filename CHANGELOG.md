@@ -4,6 +4,7 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added a DashScope (Qianwen AI platform) Fun-ASR realtime streaming engine (`dashscope`) over the official WebSocket API (`wss://dashscope.aliyuncs.com/api-ws/v1/inference/`): live partial results while recording, Bearer-token auth via `api_key`, configurable `model` / `sample_rate` / `base_url` / `language` in `[voice.engine_config]`. 8k models (e.g. `fun-asr-flash-8k-realtime`) only accept 8000 Hz audio, so the engine auto-downsamples the recorder's 16 kHz PCM 2:1 and defaults `sample_rate` to 8000 for them. Docs: https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime
 - Reworked the TUI main view onto the charmbracelet component library: settings are grouped into tabs (General / Engine / Microphone / Output / History) rendered by `list` with title/description rows, string fields edit via `textinput`, and the key help bar is generated from bindings (`help`). The history view is now a tab whose entries can be copied with Enter. Vertical height only depends on the largest tab, so adding settings no longer stretches the screen.
 
 - Added trailing-punctuation omission processed uniformly before output: the master toggle `omit_trailing_punct` strips a trailing Chinese period "。", with two sub-options (`omit_trailing_all` to strip all trailing punctuation, `omit_trailing_ascii` to additionally strip ASCII `.` `!` `?`) shown indented under it in the TUI.

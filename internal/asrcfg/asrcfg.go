@@ -16,6 +16,7 @@ import (
 	"github.com/c/just-talk-go/internal/speech"
 
 	_ "github.com/c/just-talk-go/internal/speech/auralwise"
+	_ "github.com/c/just-talk-go/internal/speech/dashscope"
 	_ "github.com/c/just-talk-go/internal/speech/doubao"
 	_ "github.com/c/just-talk-go/internal/speech/openai"
 )
@@ -25,7 +26,7 @@ const DefaultEngine = "doubao-stream"
 
 // userEngines 面向用户的引擎类型，与 README / doctor 文案保持一致。
 // null 是内部兜底（Build 空类型 / 显式 "null" 时返回），不列在候选里。
-var userEngines = []string{"doubao-stream", "auralwise", "openai"}
+var userEngines = []string{"doubao-stream", "auralwise", "openai", "dashscope"}
 
 // Types 面向用户的引擎类型（排序），供 TUI/设置页选择。
 func Types() []string {

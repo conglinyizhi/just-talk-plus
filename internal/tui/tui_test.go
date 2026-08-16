@@ -532,16 +532,24 @@ func TestChannelURLOnOwnLine(t *testing.T) {
 	if strings.Contains(openai.subtitle, "qianwenai") {
 		t.Fatalf("subtitle should not embed the long URL: %q", openai.subtitle)
 	}
-	// 渲染：URL 单独成行且完整（未换行）
+	// 渲染：URL 单独成行且完整（未换行），每个渠道的 URL 都完整出现
 	m := readyModel(config.Default())
 	m.openEnginePicker()
 	out := m.renderPicker()
 	lines := strings.Split(out, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "qianwenai.com") {
-			if !strings.Contains(line, fullURL) {
-				t.Fatalf("URL wrapped/split: %q", line)
+	for _, it := range engineChannels {
+		if it.url == "" {
+			continue
+		}
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, it.url) {
+				found = true
+				break
 			}
+		}
+		if !found {
+			t.Fatalf("channel %q URL wrapped/split or missing: %q", it.name, it.url)
 		}
 	}
 }

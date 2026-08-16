@@ -14,7 +14,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 
 - 全局快捷键录音，支持 `toggle` 和 `hold` 两种模式。
 - 语音热键限定为适合作为全局快捷键的按键：支持纯修饰键、功能键、Tab、CapsLock、方向键和导航键等；不支持字母、数字、标点、空格等普通字符键。
-- 多语音引擎可选：豆包（火山引擎）流式 ASR（默认，边录边识别）、AuralWise 批处理转写、OpenAI 兼容 Whisper 接口（可指向本地 whisper / Groq 等端点）。
+- 多语音引擎可选：豆包（火山引擎）流式 ASR（默认，边录边识别）、千问 DashScope Fun-ASR 实时流式（8k 模型自动降采样）、AuralWise 批处理转写、OpenAI 兼容 Whisper 接口（可指向本地 whisper / Groq 等端点）。
 - 麦克风调试面板：同一录音热键触发测试录音（不进识别），实时显示峰值/有效电平与削波，细粒度调整增益（`+`/`-`），并可切换自适应增益（爆音自动降低、安静后缓慢恢复）。
 - 识别历史面板：最近 10 条上屏/复制结果保存在内存，可选中重新复制到剪贴板。
 - 句尾标点省略：输出前统一处理，主开关省略句尾句号「。」，可扩展为切断句尾所有符号或额外省略英文 `.` `!` `?`。
@@ -248,7 +248,21 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；豆包（doubao-stream）为流式引擎，识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+千问（DashScope）Fun-ASR 实时流式识别（WebSocket，边录边出字）。文档见 [实时语音识别](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime)：
+
+```toml
+[voice]
+engine = "dashscope"
+
+[voice.engine_config]
+api_key = "sk-…"        # DASHSCOPE_API_KEY
+# model = "fun-asr-realtime"            # 8k 模型（如 fun-asr-flash-8k-realtime）自动降采样到 8000 Hz
+# sample_rate = "16000"                 # 8000 | 16000
+# base_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
+# language = "zh-CN"
+```
+
+批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 ### 麦克风调试与识别历史
 

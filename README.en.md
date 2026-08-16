@@ -14,7 +14,7 @@ It is built for people who want to type less and speak more while coding, chatti
 
 - Global hotkey recording with `toggle` and `hold` modes.
 - Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
-- Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
+- Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), Qianwen DashScope Fun-ASR realtime streaming (8k models auto-downsampled), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
 - Recognition history panel: the last 10 submitted/copied results are kept in memory and can be re-copied to the clipboard.
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
@@ -248,7 +248,21 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; Doubao (`doubao-stream`) is a streaming engine and shows partial results while recording. Set `engine = "null"` to disable recognition.
+Qianwen (DashScope) Fun-ASR realtime streaming recognition (WebSocket, live partial results). Docs: [Realtime ASR](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime):
+
+```toml
+[voice]
+engine = "dashscope"
+
+[voice.engine_config]
+api_key = "sk-…"        # DASHSCOPE_API_KEY
+# model = "fun-asr-realtime"            # 8k models (e.g. fun-asr-flash-8k-realtime) downsample to 8000 Hz automatically
+# sample_rate = "16000"                 # 8000 | 16000
+# base_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
+# language = "zh-CN"
+```
+
+Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 
 ### Microphone Debug And Recognition History
 

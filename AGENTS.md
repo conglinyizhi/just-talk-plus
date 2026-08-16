@@ -43,7 +43,7 @@ Startup: `cmd/just-talk/main.go` → `config.Load` → `doctor.Run` → `hotkey.
 - `engine/`: plugin lifecycle, config reload.
 - `plugins/voice/`: recorder, ASR sessions, hotkey behavior, clipboard/auto-submit dispatch, stats.
 - `plugins/overlay/`: recording status capsule.
-- `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai`.
+- `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai` / `dashscope`.
 - `internal/asrcfg/`: builds an engine from `config.VoiceConfig`; the single place importing engine packages (registers them).
 - `internal/autotype/`, `internal/clipboard/`, `internal/doctor/`, `internal/tui/` (Bubble Tea UI on the charmbracelet component library: tab-grouped settings via `list`, `textinput` editing, `help` key bar; channel picker/config and mic-debug are modal overlays).
 
@@ -52,7 +52,7 @@ Startup: `cmd/just-talk/main.go` → `config.Load` → `doctor.Run` → `hotkey.
 The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 
 - Selection: `[voice].engine` (default `doubao-stream`) + `[voice].engine_config`; legacy `app_key`/`access_key`/`resource_id` are Doubao-only shortcuts.
-- Canonical types: `doubao-stream`, `auralwise`, `openai`. Do not add aliases (removed on purpose).
+- Canonical types: `doubao-stream`, `auralwise`, `openai`, `dashscope`. Do not add aliases (removed on purpose).
 - `null` is the internal fallback only; never list it in the TUI channel picker.
 - Streaming engines implement `speech.StreamingEngine`; batch-only engines are wrapped by `speech.BatchSession` (buffers PCM, `Transcribe` at stop; the plugin waits longer for them).
 - Adding an engine: `speech.Register` in the package init → blank import in `internal/asrcfg` → add to `asrcfg.Types()` (`userEngines`) and the TUI `engineChannels` → update the bilingual README. Match the recorder's 16 kHz 16-bit mono PCM.

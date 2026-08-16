@@ -121,6 +121,11 @@ var engineChannels = []pickerItem{
 		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点",
 		url:      "https://www.qianwenai.com/models?search=asr",
 	},
+	{
+		name:     "dashscope",
+		subtitle: "千问 Fun-ASR 实时流式，边录边出字；8k 模型自动降采样",
+		url:      "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime",
+	},
 }
 
 // configOverlayState 渠道配置二级弹层；nil 表示未打开。
@@ -186,7 +191,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	}
 
 	engineTab := []field{
-		{label: "引擎", key: "engine", help: "回车选择渠道；doubao-stream 流式 / auralwise、openai 批处理", fType: fAction},
+		{label: "引擎", key: "engine", help: "回车选择渠道；doubao-stream / dashscope 流式，auralwise / openai 批处理", fType: fAction},
 		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
 	}
 
@@ -246,6 +251,19 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "API Key", key: "ec.api_key", help: "必填（sk-…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.openai.com/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 whisper-1", fType: fString, input: ti(ec["model"])},
+		}
+	case "dashscope":
+		rateOpts := []string{"16000", "8000"}
+		rateDefault := "16000"
+		if strings.Contains(def(ec["model"], "fun-asr-realtime"), "8k") {
+			rateDefault = "8000"
+		}
+		return []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（sk-…，DASHSCOPE_API_KEY）", fType: fString, input: ti(ec["api_key"])},
+			{label: "模型", key: "ec.model", help: "默认 fun-asr-realtime；8k 模型自动降采样", fType: fString, input: ti(ec["model"])},
+			{label: "采样率", key: "ec.sample_rate", help: "8k 模型须为 8000", fType: fSelect, opts: rateOpts, optIdx: idxOf(rateOpts, def(ec["sample_rate"], rateDefault))},
+			{label: "Base URL", key: "ec.base_url", help: "默认 wss://dashscope.aliyuncs.com/api-ws/v1/inference/", fType: fString, input: ti(ec["base_url"])},
+			{label: "语言", key: "ec.language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(ec["language"])},
 		}
 	default: // doubao-stream
 		mvOpts := []string{"1.0 (bigasr)", "2.0 (seedasr)"}
