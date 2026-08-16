@@ -285,6 +285,21 @@ Select "麦克风调试" in the TUI main form and press Enter to open the debug 
 
 The "历史记录" panel shows the last 10 successfully submitted/copied results; `j`/`k` to select, Enter to re-copy to the clipboard, `esc` to exit.
 
+### Working With Clipboard Managers (Klipper / CopyQ)
+
+Autotype must borrow the clipboard (write → simulate paste), which normally leaves a recognition-text entry in clipboard history (Klipper, CopyQ, etc.). To keep your clipboard history clean, Just Talk Plus writes the temporary clipboard as **sensitive content** on Linux/Wayland (`wl-copy --sensitive`, i.e. the `x-kde-passwordManagerHint: secret` format):
+
+- **Klipper** and **CopyQ 8.0+** recognize the marker and **silently ignore** it: not stored, not shown, not inserted into history;
+- pasting still works normally (the text itself is unaffected) — only the clipboard manager skips recording it.
+
+To enable:
+
+1. Install CopyQ (Arch: `sudo pacman -S copyq`, similar elsewhere) and enable "Start automatically" (or copy `copyq.desktop` to `~/.config/autostart/`);
+2. CopyQ takes over clipboard history once running; Klipper does not need to be uninstalled (it is tiny and often pulled in by the desktop metapackage) — if you want to avoid duplicate history, uncheck Klipper under "System Settings → Startup and Shutdown → Autostart";
+3. The history shortcut changes from Klipper's `Ctrl+Alt+V` to CopyQ's (default `Ctrl+Alt+C`, customizable in CopyQ settings).
+
+> Note: `xclip` on X11 cannot attach the sensitive marker, so X11 autotype still restores the original clipboard via "save → paste → restore", but a clipboard manager may briefly record one entry; `wl-copy --sensitive` requires wl-clipboard ≥ 2.2 (present in current mainstream distributions).
+
 
 ## Changelog
 

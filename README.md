@@ -286,6 +286,21 @@ TUI 主界面选择「麦克风调试」回车进入调试面板：
 
 「历史记录」面板展示最近 10 条成功上屏/复制的识别结果，`j`/`k` 选择、回车重新复制到剪贴板，`esc` 退出。
 
+### 与剪贴板管理器（Klipper / CopyQ）配合
+
+自动上屏在机制上需要「写剪贴板 → 模拟粘贴」，会在剪贴板历史（Klipper、CopyQ 等）留下一条识别文本记录。为了不污染剪贴板历史，Just Talk Plus 在 Linux/Wayland 上以**敏感内容**方式写入临时剪贴板（`wl-copy --sensitive`，即 `x-kde-passwordManagerHint: secret`）：
+
+- **Klipper** 与 **CopyQ 8.0+** 识别该标记后**静默忽略**：不存储、不显示、不进入历史；
+- 上屏仍可正常粘贴（文本本身不受影响），只是剪贴板管理器不记录。
+
+启用方式：
+
+1. 安装 CopyQ（Arch：`sudo pacman -S copyq`，其他发行版同理），并勾选「启动时自动运行」（或复制 `copyq.desktop` 到 `~/.config/autostart/`）；
+2. CopyQ 启动后接管剪贴板历史；Klipper 无需卸载（它很小且可能被桌面元包依赖），若想避免双份历史可在「系统设置 → 开机与关机 → 自动启动」里取消 Klipper；
+3. 剪贴板历史快捷键由 Klipper 的 `Ctrl+Alt+V` 换成 CopyQ 的（默认 `Ctrl+Alt+C`，可在 CopyQ 设置中自定义）。
+
+> 说明：X11 会话下 `xclip` 不支持该敏感标记，X11 上屏仍通过「保存→粘贴→恢复」尽量还原剪贴板内容，但剪贴板管理器可能仍短暂记录一条；`wl-copy --sensitive` 需要 wl-clipboard ≥ 2.2（当前主流发行版均已包含）。
+
 
 ## 更新日志
 

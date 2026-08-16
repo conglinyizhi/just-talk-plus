@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bendahl/uinput"
@@ -96,11 +97,17 @@ func pasteX11(text string, logger *slog.Logger) error {
 }
 
 func pasteWayland(text string, logger *slog.Logger) error {
-	if err := pipeToCmd(text, "wl-copy", "--type", "text/plain;charset=utf-8"); err != nil {
+	// --sensitive（wl-clipboard ≥2.2）：同时 offer x-kde-passwordManagerHint，
+	// Klipper 与 CopyQ 8.0+ 会把该内容视为敏感并跳过历史记录，
+	// 减少上屏临时写入对剪贴板历史（剪贴板管理器）的污染。
+	sensitiveArgs := buildWaylandCopyArgs(wlCopySupportsSensitive())
+	args := append([]string{"wl-copy"}, sensitiveArgs...)
+	if err := pipeToCmd(text, args...); err != nil {
 		return fmt.Errorf("set Wayland clipboard: %w", err)
 	}
 	if !isKDEPlasma() {
-		if err := pipeToCmd(text, "wl-copy", "--primary", "--type", "text/plain;charset=utf-8"); err != nil {
+		pargs := append([]string{"wl-copy", "--primary"}, sensitiveArgs...)
+		if err := pipeToCmd(text, pargs...); err != nil {
 			return fmt.Errorf("set Wayland primary selection: %w", err)
 		}
 	}
@@ -113,6 +120,30 @@ func pasteWayland(text string, logger *slog.Logger) error {
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil
 }
+
+// buildWaylandCopyArgs 构造 wl-copy 参数：支持 --sensitive 时以它开头，
+// 并始终指定 text/plain 类型（内容本身不受影响，仅附加敏感提示）。
+func buildWaylandCopyArgs(sensitive bool) []string {
+	args := []string{"--type", "text/plain;charset=utf-8"}
+	if sensitive {
+		args = append([]string{"--sensitive"}, args...)
+	}
+	return args
+}
+
+// wlCopySupportsSensitive 检测 wl-copy 是否支持 --sensitive（wl-clipboard ≥2.2），结果缓存。
+func wlCopySupportsSensitive() bool {
+	sensitiveOnce.Do(func() {
+		out, err := exec.Command("wl-copy", "--help").Output()
+		sensitiveOK = err == nil && strings.Contains(string(out), "--sensitive")
+	})
+	return sensitiveOK
+}
+
+var (
+	sensitiveOnce sync.Once
+	sensitiveOK   bool
+)
 
 func runClipboard(args ...string) (string, error) {
 	cmd := exec.Command(args[0], args[1:]...)
