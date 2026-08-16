@@ -18,6 +18,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
 - Recognition history panel: the last 10 submitted/copied results are kept in memory and can be re-copied to the clipboard.
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
+- CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
 - Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Microphone / Output / History), so more settings never stretch the screen height.
@@ -162,6 +163,7 @@ auto_gain = true   # adaptive gain: lower on clipping, recover slowly when quiet
 omit_trailing_punct = false  # strip trailing "。" before output (master toggle)
 # omit_trailing_all = false  # sub: strip all trailing punctuation (incl. ASCII)
 # omit_trailing_ascii = false  # sub: additionally strip ASCII . ! ?
+# remove_cjk_space = false  # drop spaces between CJK characters (pauses recognized as gaps); keep spaces between CJK and Latin/digits
 ```
 
 `Alt+Super` with `toggle` mode is recommended. Press once to start recording, then press again to stop. This avoids hold-mode key conflicts with desktop environments or focused input fields. On Windows, the low-level keyboard hook only observes key edges and never consumes or replays modifiers, so standalone `Alt`, `Super`, and shortcuts such as `Alt+Tab` retain their normal system behavior. Modifier combinations require the exact configured set, and hook fallback state is checked against the unsuppressed physical key state so separate single-key presses cannot be combined into the shortcut.

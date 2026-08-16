@@ -62,7 +62,7 @@ func TestBuildTabFields(t *testing.T) {
 		}
 	}
 	output := tabKeys(m.tabField[tabOutput])
-	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii"} {
+	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space"} {
 		if !output[want] {
 			t.Fatalf("output tab missing %q: %v", want, output)
 		}

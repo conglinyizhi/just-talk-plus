@@ -51,6 +51,9 @@ type VoiceConfig struct {
 	OmitTrailingAll bool `toml:"omit_trailing_all"`
 	// 副设置（依赖主开关）：额外省略英文半角 . ! ?。
 	OmitTrailingASCII bool `toml:"omit_trailing_ascii"`
+	// RemoveCJKSpace 删除中文与中文之间的空格（如"你好 世界"→"你好世界"）。
+	// 中文与英文/数字之间的空格保留（排版惯例）。
+	RemoveCJKSpace bool `toml:"remove_cjk_space"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`
 	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。

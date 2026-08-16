@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added an output post-processing option `remove_cjk_space` (TUI: Output tab "删除中文间空格"): drops spaces between two CJK characters — gaps that speech pauses get recognized as, where no punctuation fits — while keeping spaces between CJK and Latin letters or digits per typographic convention. Applied before submit/copy, same as trailing-punctuation omission.
+
 - Navigation now follows vim conventions and arrow keys work everywhere: `j`/`k` or `↑`/`↓` move the cursor in the main form, history list and every overlay; `h`/`l` or `←`/`→` switch tab groups (also cycling select options while editing). The bottom help bar and each overlay's hint line spell out both key sets.
 
 - The "相关链接" overlay now also lists Doubao resources (official docs and the new speech console). The Qianwen ASR model catalog link (qwen3-asr-flash-realtime 等) moved under the DashScope channel where it belongs — the OpenAI channel keeps no links since that catalog is not OpenAI-compatible.

@@ -230,6 +230,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "句尾标点省略", key: "omit_trailing_punct", help: "上屏/复制前省略句尾句号「。」", fType: fToggle, boolVal: vc.OmitTrailingPunct},
 		{label: "切断所有符号", key: "omit_trailing_all", help: "句尾所有标点一并省略（含英文）", fType: fToggle, boolVal: vc.OmitTrailingAll, indent: 1},
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
+		{label: "删除中文间空格", key: "remove_cjk_space", help: "删掉中文与中文之间的空格（思考停顿），中英/中数间空格保留", fType: fToggle, boolVal: vc.RemoveCJKSpace},
 	}
 
 	return map[tabID][]field{
@@ -554,6 +555,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.OmitTrailingAll = f.boolVal
 			case "omit_trailing_ascii":
 				vc.OmitTrailingASCII = f.boolVal
+			case "remove_cjk_space":
+				vc.RemoveCJKSpace = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 			case "gain":
