@@ -895,10 +895,12 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 	}
 	go func() {
 		if autoSubmit {
-			// 上屏依赖剪贴板（写→模拟粘贴）；开启恢复时先保存原内容，
-			// 上屏成功后还原，避免覆盖用户已复制的内容（X11 路径内部已有此逻辑）。
+			// 自动上屏：机制上必须「写剪贴板 → 模拟粘贴」。
+			// 主开关 write_clipboard 关闭或子开关 restore_clipboard 开启时，
+			// 上屏成功后把原内容还原，尽量不污染剪贴板历史；
+			// 上屏失败时文本留在剪贴板作为兜底（用户可手动粘贴）。
 			var origClipboard string
-			restore := vc.RestoreClipboard
+			restore := vc.WriteClipboard == false || vc.RestoreClipboard
 			if restore {
 				if cb, err := clipboard.New(); err == nil {
 					if s, err := cb.Get(); err == nil {
@@ -908,8 +910,10 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			}
 			if err := autotype.Paste(text, p.logger); err != nil {
 				pout("❌ 上屏失败: %v", err)
+				if vc.WriteClipboard {
+					pout("📋 已复制到剪贴板")
+				}
 			} else {
-				pout("📋 已复制到剪贴板")
 				pout("✅ 已上屏")
 				recordHistory(text)
 				if restore {
@@ -919,6 +923,12 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			return
 		}
 
+		// 非上屏（仅复制）：主开关关闭时完全不写剪贴板。
+		if !vc.WriteClipboard {
+			p.logger.Debug("text output: clipboard write disabled", "text_len", len(text))
+			recordHistory(text)
+			return
+		}
 		p.logger.Debug("text output: writing clipboard", "text_len", len(text))
 		if err := writeClipboard(text); err != nil {
 			pout("❌ 复制到剪贴板失败: %v", err)
