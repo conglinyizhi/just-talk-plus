@@ -79,3 +79,45 @@ func TestCleanCJKSpace(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoSpaceCJK(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"pure zh untouched", "你好世界", "你好世界"},
+		{"pure en untouched", "hello world", "hello world"},
+
+		// 中文与英文之间补空格
+		{"zh-en", "在LeanCloud上", "在 LeanCloud 上"},
+		{"en-zh", "使用GitHub登录", "使用 GitHub 登录"},
+		{"zh-en-zh", "围绕AVObject进行", "围绕 AVObject 进行"},
+		{"already spaced kept", "在 LeanCloud 上", "在 LeanCloud 上"},
+
+		// 中文与数字之间补空格
+		{"zh-digit", "花了5000元", "花了 5000 元"},
+		{"digit-zh", "有15个", "有 15 个"},
+		{"user scenario K3", "而且 K3刚发布，他们不可能直接跨个大版本直接发 K4吧", "而且 K3 刚发布，他们不可能直接跨个大版本直接发 K4 吧"},
+		{"k model spaced", "K3 刚发布", "K3 刚发布"},
+		{"degree kept tight", "角度为90°的角", "角度为 90° 的角"},
+		{"percent kept tight", "有15%的CPU提升", "有 15% 的 CPU 提升"},
+
+		// 全角标点两侧去空格
+		{"punct left space", "iPhone ，好开心！", "iPhone，好开心！"},
+		{"punct right space", "iPhone， 好开心！", "iPhone，好开心！"},
+		{"punct both", "他说「喵」 了哎！", "他说「喵」了哎！"},
+
+		// 全角数字转半角
+		{"fullwidth digits", "这个蛋糕只卖１０００元", "这个蛋糕只卖 1000 元"},
+
+		// 混合
+		{"mixed", "新MacBook Pro有15%的CPU性能提升。", "新 MacBook Pro 有 15% 的 CPU 性能提升。"},
+	}
+	for _, c := range cases {
+		if got := autoSpaceCJK(c.in); got != c.want {
+			t.Fatalf("%s: autoSpaceCJK(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}

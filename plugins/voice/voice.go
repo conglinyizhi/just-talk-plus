@@ -884,11 +884,14 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 }
 
 func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
-	// 输出层统一处理：省略句尾标点、删除中文间空格（上屏/复制前，含历史记录）
+	// 输出层统一处理：省略句尾标点、删除中文间空格、中文排版自动空格（上屏/复制前，含历史记录）
 	vc := p.cfg.Load().Voice
 	text = cleanTrailingPunct(text, vc)
 	if vc.RemoveCJKSpace {
 		text = cleanCJKSpace(text)
+	}
+	if vc.AutoSpace {
+		text = autoSpaceCJK(text)
 	}
 	go func() {
 		if autoSubmit {

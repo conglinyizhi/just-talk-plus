@@ -54,6 +54,11 @@ type VoiceConfig struct {
 	// RemoveCJKSpace 删除中文与中文之间的空格（如"你好 世界"→"你好世界"）。
 	// 中文与英文/数字之间的空格保留（排版惯例）。
 	RemoveCJKSpace bool `toml:"remove_cjk_space"`
+	// AutoSpace 按中文排版规范自动处理空格：
+	//   - 中文与英文之间补空格（如"在LeanCloud上"→"在 LeanCloud 上"）
+	//   - 中文与数字之间补空格（如"花了5000元"→"花了 5000 元"）
+	//   - 全角标点与两侧字符之间不留空格（如"iPhone ，好开心"→"iPhone，好开心"）
+	AutoSpace bool `toml:"auto_space"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`
 	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。
@@ -107,7 +112,7 @@ func Default() *Config {
 	return &Config{
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
-			Language: "zh-CN", AutoSubmit: true, AutoGain: true,
+			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			Engine: "doubao-stream",
 		},
 		Overlay: OverlayConfig{

@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added CJK typographic auto-spacing (`auto_space`, on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters or digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces adjacent to full-width punctuation, and convert full-width digits to half-width. Applied in the same output post-processing pass, before submit/copy and history.
+
 - Toggle fields no longer show a "(空格)" hint or accept space to switch — they flip directly with Enter in the main form (space had become a dead key since toggles don't enter edit mode). Applies to every toggle across all tabs.
 
 - Added an output post-processing option `remove_cjk_space` (TUI: Output tab "删除中文间空格"): drops spaces between two CJK characters — gaps that speech pauses get recognized as, where no punctuation fits — while keeping spaces between CJK and Latin letters or digits per typographic convention. Applied before submit/copy, same as trailing-punctuation omission.
