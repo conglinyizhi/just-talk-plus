@@ -115,6 +115,14 @@ type configOverlayState struct {
 	editing bool
 }
 
+// micPanelState 麦克风调试面板；nil 表示未打开。
+type micPanelState struct{}
+
+// historyPanelState 识别历史面板；nil 表示未打开。
+type historyPanelState struct {
+	idx int
+}
+
 type Model struct {
 	w, h          int
 	ready         bool
@@ -132,6 +140,8 @@ type Model struct {
 	logExpanded   bool
 	picker        *pickerState        // 渠道选择弹层；nil = 未打开
 	configOverlay *configOverlayState // 渠道配置二级弹层；nil = 未打开
+	micPanel      *micPanelState      // 麦克风调试面板；nil = 未打开
+	historyPanel  *historyPanelState  // 识别历史面板；nil = 未打开
 }
 
 func New(cfg *config.Config) *Model {
@@ -150,6 +160,8 @@ func buildFields(cfg *config.Config) []field {
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "引擎", key: "engine", help: "回车打开渠道选择；doubao-stream 流式 / auralwise、openai 批处理", fType: fSelect, opts: engines, optIdx: idxOf(engines, vc.Engine)},
 		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
+		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整", fType: fAction},
+		{label: "历史记录", key: "history", help: "回车查看最近识别结果，可选中复制到剪贴板", fType: fAction},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
@@ -197,9 +209,14 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 	default: // doubao-stream
 		mvOpts := []string{"1.0 (bigasr)", "2.0 (seedasr)"}
 		mvVals := []string{"1.0", "2.0"}
-		smOpts := []string{"async", "stream", "nostream"}
+		smOpts := []string{"async", "nostream"}
+		// 未显式设置 model_version 时，新版 api_key 默认 2.0（seedasr），旧版凭据默认 1.0
+		mvDefault := "1.0"
+		if ec["api_key"] != "" {
+			mvDefault = "2.0"
+		}
 		return []field{
-			{label: "模型版本", key: "ec.model_version", help: "1.0=bigasr 旧资源 / 2.0=seedasr 新资源", fType: fSelect, opts: mvOpts, optVals: mvVals, optIdx: idxOf(mvVals, def(ec["model_version"], "1.0"))},
+			{label: "模型版本", key: "ec.model_version", help: "1.0=bigasr 旧资源 / 2.0=seedasr 新资源", fType: fSelect, opts: mvOpts, optVals: mvVals, optIdx: idxOf(mvVals, def(ec["model_version"], mvDefault))},
 			{label: "流式模式", key: "ec.stream_mode", help: "默认 async", fType: fSelect, opts: smOpts, optIdx: idxOf(smOpts, def(ec["stream_mode"], "async"))},
 			{label: "API Key(新版)", key: "ec.api_key", help: "新版控制台 X-Api-Key；与下方旧版凭据二选一", fType: fString, input: ti(ec["api_key"])},
 			{label: "App ID(旧版)", key: "ec.app_id", help: "旧版控制台 App ID（无 api_key 时使用）", fType: fString, input: ti(get("app_id"))},
@@ -322,12 +339,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
 
-	// 弹层打开时，所有按键交给弹层处理（渠道选择 / 渠道配置）
+	// 弹层/面板打开时，所有按键交给对应组件处理
 	if m.picker != nil {
 		return m.handlePickerKey(k)
 	}
 	if m.configOverlay != nil {
 		return m.handleConfigOverlayKey(msg)
+	}
+	if m.micPanel != nil {
+		return m.handleMicPanelKey(k)
+	}
+	if m.historyPanel != nil {
+		return m.handleHistoryPanelKey(k)
 	}
 
 	// Editing a field
@@ -392,6 +415,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			case "channel_config": // 渠道配置入口：打开二级弹层
 				m.openChannelConfig()
+				return nil
+			case "mic_test": // 麦克风调试面板
+				voice.StartMicTest()
+				m.micPanel = &micPanelState{}
+				return nil
+			case "history": // 识别历史面板
+				m.historyPanel = &historyPanelState{}
 				return nil
 			}
 		}
@@ -670,6 +700,198 @@ func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) strin
 	return ""
 }
 
+// ---- 麦克风调试面板 ----
+
+// handleMicPanelKey 面板按键：+/- 细粒度调增益，空格切换自适应增益，esc 退出。
+// 测试录音由同一全局录音热键触发（voice 插件侧处理）。
+func (m *Model) handleMicPanelKey(k string) tea.Cmd {
+	switch k {
+	case "+", "=":
+		voice.SetMicGain(voice.MicTestLevel().Gain + 2)
+	case "-", "_":
+		voice.SetMicGain(voice.MicTestLevel().Gain - 2)
+	case " ":
+		voice.SetMicAutoGain(!voice.MicTestLevel().AutoGain)
+	case "esc", "q":
+		voice.StopMicTest()
+		m.micPanel = nil
+	}
+	return nil
+}
+
+// renderMicPanel 渲染麦克风调试面板（实时电平条 + 增益）。
+func (m *Model) renderMicPanel() string {
+	lvl := voice.MicTestLevel()
+	width := 60
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	barW := width - 12
+	if barW < 20 {
+		barW = 20
+	}
+	peakBar := renderLevelBar(lvl.Peak, barW)
+	rmsBar := renderLevelBar(lvl.RMS, barW)
+	state := "待机（按录音热键开始测试）"
+	if voice.MicTestTesting() {
+		state = "测试中（按录音热键停止）"
+	}
+	ag := "○ 关"
+	if lvl.AutoGain {
+		ag = "● 开"
+	}
+	clipMark := ""
+	if lvl.Clipping {
+		clipMark = eStyle.Render(" ⚠ 削波！")
+	}
+
+	lines := []string{
+		" " + lStyle.Render("🎤 麦克风调试"),
+		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak) + clipMark,
+		"  有效: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
+		"  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )"),
+		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
+		"  状态: " + vStyle.Render(state),
+		"",
+		" " + dStyle.Render("+/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+// renderLevelBar 按 0..1 电平绘制字符条。
+func renderLevelBar(level float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if level < 0 {
+		level = 0
+	}
+	if level > 1 {
+		level = 1
+	}
+	filled := int(level*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
+// ---- 识别历史面板 ----
+
+// handleHistoryPanelKey 面板按键：j/k 选择，回车复制到剪贴板，esc 退出。
+func (m *Model) handleHistoryPanelKey(k string) tea.Cmd {
+	p := m.historyPanel
+	items := voice.History()
+	switch k {
+	case "j", "down":
+		if p.idx < len(items)-1 {
+			p.idx++
+		}
+	case "k", "up":
+		if p.idx > 0 {
+			p.idx--
+		}
+	case "enter":
+		if len(items) == 0 || p.idx >= len(items) {
+			return nil
+		}
+		if err := voice.CopyHistoryEntry(p.idx); err != nil {
+			m.logf("❌ 复制失败: %s", err)
+		} else {
+			m.logf("📋 已复制: %s", truncateText(items[p.idx].Text, 60))
+		}
+	case "esc", "q":
+		m.historyPanel = nil
+	}
+	return nil
+}
+
+// renderHistoryPanel 渲染识别历史面板（最近结果列表，可选中复制）。
+func (m *Model) renderHistoryPanel() string {
+	items := voice.History()
+	width := 64
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	inner := width - 4
+	if inner < 40 {
+		inner = 40
+	}
+	lines := []string{" " + lStyle.Render("📋 历史记录（最近 "+itoa(len(items))+" 条）")}
+	if len(items) == 0 {
+		lines = append(lines, "  "+dStyle.Render("暂无识别结果"))
+	} else {
+		if m.historyPanel.idx >= len(items) {
+			m.historyPanel.idx = len(items) - 1
+		}
+		for i, it := range items {
+			text := truncateText(it.Text, inner-14)
+			ts := it.Time.Format("15:04:05")
+			if i == m.historyPanel.idx {
+				lines = append(lines, aStyle.Render("▸ ")+vStyle.Render(text)+dStyle.Render("  "+ts))
+			} else {
+				lines = append(lines, "  "+vStyle.Render(text)+dStyle.Render("  "+ts))
+			}
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 选择  回车复制到剪贴板  esc 退出"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+// truncateText 截断文本到指定显示宽度（含中文宽字符）。
+func truncateText(s string, maxW int) string {
+	w := 0
+	for i, r := range s {
+		cw := 1
+		if r > 0x7F {
+			cw = 2
+		}
+		if w+cw > maxW {
+			return s[:i] + "…"
+		}
+		w += cw
+	}
+	return s
+}
+
+func itoa(n int) string { return fmt.Sprintf("%d", n) }
+
 // renderPicker 渲染渠道选择浮层（水平居中，subtitle 固定宽度自动换行）。
 func (m *Model) renderPicker() string {
 	p := m.picker
@@ -859,6 +1081,10 @@ func (m *Model) View() string {
 		b.WriteString("\n" + m.renderPicker())
 	} else if m.configOverlay != nil {
 		b.WriteString("\n" + m.renderConfigOverlay())
+	} else if m.micPanel != nil {
+		b.WriteString("\n" + m.renderMicPanel())
+	} else if m.historyPanel != nil {
+		b.WriteString("\n" + m.renderHistoryPanel())
 	}
 	return b.String()
 }

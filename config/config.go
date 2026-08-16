@@ -41,6 +41,7 @@ type VoiceConfig struct {
 	PushToTalk  string `toml:"push_to_talk"`
 	Device      string `toml:"device"`
 	Gain        int    `toml:"gain"`
+	AutoGain    bool   `toml:"auto_gain"` // 自适应增益：爆音自动降低、安静恢复
 	StopDelayMs int    `toml:"stop_delay_ms"`
 	Language    string `toml:"language"`
 	AutoSubmit  bool   `toml:"auto_submit"`
@@ -59,7 +60,7 @@ func Default() *Config {
 	return &Config{
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
-			Language: "zh-CN", AutoSubmit: true,
+			Language: "zh-CN", AutoSubmit: true, AutoGain: true,
 			Engine: "doubao-stream",
 		},
 		Overlay: OverlayConfig{

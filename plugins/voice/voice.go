@@ -304,6 +304,7 @@ func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.logger = env.Logger()
 	p.cfg = env.Config()
 	loadTUIStats()
+	setupMicTest(p.logger, env.Config().Voice.Device, env.Config().Voice.Gain, env.Config().Voice.AutoGain)
 	return p.registerFromConfig(env.Config())
 }
 
@@ -436,6 +437,13 @@ func (p *VoicePlugin) eventLoop(ctx context.Context) {
 
 func (p *VoicePlugin) handleHotkey(evt hotkey.Event) {
 	markTUIHandled(evt)
+	// 麦克风调试面板打开时，同一热键只触发测试录音（不进 ASR）。
+	if MicTestActive() {
+		if evt.Type == hotkey.KeyDown {
+			toggleMicTest()
+		}
+		return
+	}
 	p.mu.Lock()
 	mode, rec, stopping := p.mode, p.recording, p.stopping
 	p.mu.Unlock()
@@ -880,6 +888,7 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			} else {
 				pout("📋 已复制到剪贴板")
 				pout("✅ 已上屏")
+				recordHistory(text)
 			}
 			return
 		}
@@ -889,6 +898,7 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 			pout("❌ 复制到剪贴板失败: %v", err)
 		} else {
 			pout("📋 已复制到剪贴板")
+			recordHistory(text)
 		}
 	}()
 }
@@ -1073,6 +1083,11 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client spe
 		}
 		n, err := rec.Read(buf)
 		if n > 0 {
+			// 自适应增益：分析实际电平，按需调整麦克风增益（细粒度）
+			peak, rms := analyzePCM(buf[:n])
+			if micTest.autoGain.Process(peak, rms, time.Now()) {
+				rec.SetGain(micTest.autoGain.Gain())
+			}
 			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
 			sendErr := client.SendAudio(sendCtx, buf[:n], false)
 			sendCancel()

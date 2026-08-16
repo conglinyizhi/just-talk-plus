@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/c/just-talk-go/config"
+	"github.com/c/just-talk-go/plugins/voice"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -455,5 +456,81 @@ func TestChannelConfigEntryBelowEngineField(t *testing.T) {
 	// 渠道配置入口紧跟引擎字段之后
 	if configIdx != engineIdx+1 {
 		t.Fatalf("channel_config at %d, engine at %d; want immediately after", configIdx, engineIdx)
+	}
+}
+
+func TestMicPanelRender(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	m.w, m.h = 100, 40
+	m.micPanel = &micPanelState{}
+	out := m.renderMicPanel()
+	if out == "" || !strings.Contains(out, "麦克风调试") {
+		t.Fatalf("mic panel render:\n%s", out)
+	}
+}
+
+func TestMicPanelKeys(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	m.micPanel = &micPanelState{}
+	voice.StartMicTest() // 模拟面板打开（Init 未跑，触发惰性初始化）
+	voice.SetMicGain(10)
+	m.handleMicPanelKey("+")
+	if got := voice.MicTestLevel().Gain; got != 12 {
+		t.Fatalf("gain=%d, want 12", got)
+	}
+	m.handleMicPanelKey("-")
+	if got := voice.MicTestLevel().Gain; got != 10 {
+		t.Fatalf("gain=%d, want 10", got)
+	}
+	before := voice.MicTestLevel().AutoGain
+	m.handleMicPanelKey(" ")
+	if got := voice.MicTestLevel().AutoGain; got == before {
+		t.Fatal("auto gain toggle failed")
+	}
+	m.handleMicPanelKey("esc")
+	if m.micPanel != nil {
+		t.Fatal("panel should close on esc")
+	}
+	if voice.MicTestActive() {
+		t.Fatal("mic test should stop")
+	}
+}
+
+func TestHistoryPanelRenderEmpty(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	m.w, m.h = 100, 40
+	m.historyPanel = &historyPanelState{}
+	out := m.renderHistoryPanel()
+	if out == "" || !strings.Contains(out, "历史记录") {
+		t.Fatalf("history panel render:\n%s", out)
+	}
+}
+
+func TestHistoryPanelKeysEmpty(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	m.historyPanel = &historyPanelState{}
+	// 空历史下按键不 panic
+	m.handleHistoryPanelKey("j")
+	m.handleHistoryPanelKey("k")
+	m.handleHistoryPanelKey("enter")
+	m.handleHistoryPanelKey("esc")
+	if m.historyPanel != nil {
+		t.Fatal("panel should close on esc")
+	}
+}
+
+func TestRenderLevelBar(t *testing.T) {
+	if got := renderLevelBar(0, 5); got != "░░░░░" {
+		t.Fatalf("zero: %q", got)
+	}
+	if got := renderLevelBar(1, 5); got != "█████" {
+		t.Fatalf("full: %q", got)
+	}
+	if got := renderLevelBar(0.5, 4); got != "██░░" {
+		t.Fatalf("half: %q", got)
 	}
 }
