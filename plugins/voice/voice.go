@@ -895,12 +895,26 @@ func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
 	}
 	go func() {
 		if autoSubmit {
+			// 上屏依赖剪贴板（写→模拟粘贴）；开启恢复时先保存原内容，
+			// 上屏成功后还原，避免覆盖用户已复制的内容（X11 路径内部已有此逻辑）。
+			var origClipboard string
+			restore := vc.RestoreClipboard
+			if restore {
+				if cb, err := clipboard.New(); err == nil {
+					if s, err := cb.Get(); err == nil {
+						origClipboard = s
+					}
+				}
+			}
 			if err := autotype.Paste(text, p.logger); err != nil {
 				pout("❌ 上屏失败: %v", err)
 			} else {
 				pout("📋 已复制到剪贴板")
 				pout("✅ 已上屏")
 				recordHistory(text)
+				if restore {
+					restoreClipboard(origClipboard, p.logger)
+				}
 			}
 			return
 		}
@@ -1126,4 +1140,21 @@ func writeClipboard(text string) error {
 		return err
 	}
 	return cb.Set(text)
+}
+
+// restoreClipboard 上屏后恢复剪贴板原内容（尽力而为，失败只记日志）。
+func restoreClipboard(orig string, logger *slog.Logger) {
+	if orig == "" {
+		return // 原剪贴板为空，无需恢复
+	}
+	cb, err := clipboard.New()
+	if err != nil {
+		logger.Debug("restore clipboard: init failed", "error", err)
+		return
+	}
+	if err := cb.Set(orig); err != nil {
+		logger.Debug("restore clipboard: set failed", "error", err)
+		return
+	}
+	logger.Debug("clipboard restored after autotype")
 }

@@ -59,6 +59,8 @@ type VoiceConfig struct {
 	//   - 中文与数字之间补空格（如"花了5000元"→"花了 5000 元"）
 	//   - 全角标点与两侧字符之间不留空格（如"iPhone ，好开心"→"iPhone，好开心"）
 	AutoSpace bool `toml:"auto_space"`
+	// RestoreClipboard 自动上屏成功后恢复剪贴板原内容，不覆盖用户已复制的内容。
+	RestoreClipboard bool `toml:"restore_clipboard"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`
 	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。
@@ -113,7 +115,8 @@ func Default() *Config {
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
-			Engine: "doubao-stream",
+			RestoreClipboard: true,
+			Engine:           "doubao-stream",
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

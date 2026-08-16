@@ -234,6 +234,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 		{label: "删除中文间空格", key: "remove_cjk_space", help: "删中文↔中文间空格（如「你好 世界」→「你好世界」）；默认关；与「自动空格」互不影响", fType: fToggle, boolVal: vc.RemoveCJKSpace},
 		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）", fType: fToggle, boolVal: vc.AutoSpace},
+		{label: "上屏后恢复剪贴板", key: "restore_clipboard", help: "自动上屏成功后还原剪贴板原内容，不覆盖已复制的内容", fType: fToggle, boolVal: vc.RestoreClipboard},
 	}
 
 	return map[tabID][]field{
@@ -561,6 +562,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.RemoveCJKSpace = f.boolVal
 			case "auto_space":
 				vc.AutoSpace = f.boolVal
+			case "restore_clipboard":
+				vc.RestoreClipboard = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 			case "auto_gain":

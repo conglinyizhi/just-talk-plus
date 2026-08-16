@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Added "上屏后恢复剪贴板" (`restore_clipboard`, on by default): autotype pastes via the clipboard, so after a successful submit the original clipboard content is restored, preventing your copied text from being overwritten. (X11 already did this internally; now it applies on all platforms via the output layer, with a reliable success callback from `autotype.Paste`.)
+
 - Renamed the "麦克风" tab to "输入" (tab order unchanged — Engine stays second, as ASR engines matter more than input settings).
 
 - Removed the standalone "设备" field from the Microphone tab too — device selection now lives exclusively in the mic debug panel (`[`/`]` to cycle). Previously the tab field was a snapshot that could drift out of sync with the panel's persisted choice; with a single place to switch devices that linkage problem is gone.
