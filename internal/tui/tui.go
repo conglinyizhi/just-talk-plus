@@ -92,11 +92,26 @@ var tabNames = []string{"通用", "引擎", "麦克风", "输出", "历史"}
 // ---- 弹层状态 ----
 
 // pickerItem 渠道选择弹层中的一条候选，subtitle 说明该渠道特点。
-// url 为可选的外部链接：单独成行展示（不换行），便于终端点击。
 type pickerItem struct {
 	name     string
 	subtitle string
-	url      string
+}
+
+// docLink 渠道文档/相关链接：渠道配置弹层内浏览，回车用系统浏览器打开。
+// 与渠道选择弹层分开维护，避免长 URL 挤占候选排版。
+type docLink struct {
+	name string
+	url  string
+}
+
+// engineLinks 各渠道的可选链接（与 README / doctor 文案保持一致）。
+var engineLinks = map[string][]docLink{
+	"openai": {
+		{name: "QianwenAI 模型库（搜索 asr）", url: "https://www.qianwenai.com/models?search=asr"},
+	},
+	"dashscope": {
+		{name: "千问实时语音识别文档", url: "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime"},
+	},
 }
 
 // pickerState 渠道选择弹层状态；nil 表示未打开。
@@ -119,12 +134,10 @@ var engineChannels = []pickerItem{
 	{
 		name:     "openai",
 		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点",
-		url:      "https://www.qianwenai.com/models?search=asr",
 	},
 	{
 		name:     "dashscope",
 		subtitle: "千问 Fun-ASR 实时流式，边录边出字；8k 模型自动降采样",
-		url:      "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime",
 	},
 }
 
@@ -134,6 +147,13 @@ type configOverlayState struct {
 	fields  []field
 	cursor  int
 	editing bool
+}
+
+// linkPickerState 渠道配置内的「相关链接」子页面；nil 表示未打开。
+type linkPickerState struct {
+	title string
+	items []docLink
+	idx   int
 }
 
 // micPanelState 麦克风调试面板；nil 表示未打开。
@@ -160,6 +180,7 @@ type Model struct {
 
 	picker        *pickerState
 	configOverlay *configOverlayState
+	linkPicker    *linkPickerState
 	micPanel      *micPanelState
 }
 
@@ -239,15 +260,16 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 		return v
 	}
 
+	var fields []field
 	switch asrcfg.EngineType(vc) {
 	case "auralwise":
-		return []field{
+		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（asr_…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.auralwise.cn/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "Optimize", key: "ec.optimize", help: "auto | true | false", fType: fSelect, opts: []string{"auto", "true", "false"}, optIdx: idxOf([]string{"auto", "true", "false"}, def(ec["optimize"], "auto"))},
 		}
 	case "openai":
-		return []field{
+		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（sk-…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.openai.com/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 whisper-1", fType: fString, input: ti(ec["model"])},
@@ -258,7 +280,7 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 		if strings.Contains(def(ec["model"], "fun-asr-realtime"), "8k") {
 			rateDefault = "8000"
 		}
-		return []field{
+		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（sk-…，DASHSCOPE_API_KEY）", fType: fString, input: ti(ec["api_key"])},
 			{label: "模型", key: "ec.model", help: "默认 fun-asr-realtime；8k 模型自动降采样", fType: fString, input: ti(ec["model"])},
 			{label: "采样率", key: "ec.sample_rate", help: "8k 模型须为 8000", fType: fSelect, opts: rateOpts, optIdx: idxOf(rateOpts, def(ec["sample_rate"], rateDefault))},
@@ -273,7 +295,7 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 		if ec["api_key"] != "" {
 			mvDefault = "2.0"
 		}
-		return []field{
+		fields = []field{
 			{label: "模型版本", key: "ec.model_version", help: "1.0=bigasr 旧资源 / 2.0=seedasr 新资源", fType: fSelect, opts: mvOpts, optVals: mvVals, optIdx: idxOf(mvVals, def(ec["model_version"], mvDefault))},
 			{label: "流式模式", key: "ec.stream_mode", help: "默认 async", fType: fSelect, opts: smOpts, optIdx: idxOf(smOpts, def(ec["stream_mode"], "async"))},
 			{label: "API Key(新版)", key: "ec.api_key", help: "新版控制台 X-Api-Key；与下方旧版凭据二选一", fType: fString, input: ti(ec["api_key"])},
@@ -283,6 +305,11 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 		}
 	}
+	// 该引擎有文档/相关链接时追加一个二级入口（子页面浏览 + 浏览器打开）
+	if links := engineLinks[asrcfg.EngineType(vc)]; len(links) > 0 {
+		fields = append(fields, field{label: "相关链接", key: "links", help: "回车浏览并打开官方文档", fType: fAction})
+	}
+	return fields
 }
 
 func idxOf(opts []string, v string) int {
@@ -332,6 +359,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.devices = msg.Devices
 		}
+	case linkOpenFailedMsg:
+		m.logf("❌ 打开链接失败: %s", msg.err)
 	}
 	return m, nil
 }
@@ -340,6 +369,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	k := msg.String()
 
 	// 弹层/面板优先
+	if m.linkPicker != nil {
+		return m.handleLinkPickerKey(k)
+	}
 	if m.picker != nil {
 		return m.handlePickerKey(k)
 	}
@@ -488,6 +520,8 @@ func (m *Model) triggerAction(key string) {
 	case "mic_test":
 		voice.StartMicTest()
 		m.micPanel = &micPanelState{}
+	case "links":
+		m.openLinkPicker()
 	}
 }
 
@@ -606,7 +640,7 @@ func (m *Model) View() string {
 		return "loading..."
 	}
 	base := m.renderBase()
-	if m.picker == nil && m.configOverlay == nil && m.micPanel == nil {
+	if m.picker == nil && m.configOverlay == nil && m.linkPicker == nil && m.micPanel == nil {
 		// 无弹层：键位帮助行固定在屏幕最底部
 		return pinBottom(base, m.helpLine(), m.h)
 	}
@@ -614,6 +648,8 @@ func (m *Model) View() string {
 	switch {
 	case m.picker != nil:
 		overlay = m.renderPicker()
+	case m.linkPicker != nil:
+		overlay = m.renderLinkPicker()
 	case m.configOverlay != nil:
 		overlay = m.renderConfigOverlay()
 	case m.micPanel != nil:
@@ -991,7 +1027,6 @@ func (m *Model) renderPicker() string {
 		inner = 30
 	}
 	subStyle := dStyle.Width(inner - 2)
-	urlStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
 
 	var lines []string
 	lines = append(lines, " "+lStyle.Render(p.title))
@@ -1002,13 +1037,115 @@ func (m *Model) renderPicker() string {
 			lines = append(lines, "  "+vStyle.Render(it.name))
 		}
 		lines = append(lines, subStyle.Render("    "+it.subtitle))
-		if it.url != "" {
-			// URL 单独一行、不强制换行，保证终端可完整点击
-			lines = append(lines, urlStyle.Render("    "+it.url))
-		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
+}
+
+// ---- 相关链接子页面 ----
+
+// openLinkPicker 打开当前引擎的「相关链接」子页面（渠道配置内的二级弹层）。
+func (m *Model) openLinkPicker() {
+	engine := m.currentEngine()
+	links := engineLinks[engine]
+	if len(links) == 0 {
+		return
+	}
+	m.linkPicker = &linkPickerState{
+		title: fmt.Sprintf("[%s] 相关链接", engine),
+		items: links,
+		idx:   0,
+	}
+}
+
+func (m *Model) handleLinkPickerKey(k string) tea.Cmd {
+	p := m.linkPicker
+	if p == nil {
+		return nil
+	}
+	switch k {
+	case "j", "down", "tab":
+		p.idx++
+		if p.idx >= len(p.items) {
+			p.idx = 0
+		}
+	case "k", "up", "shift+tab":
+		p.idx--
+		if p.idx < 0 {
+			p.idx = len(p.items) - 1
+		}
+	case "enter":
+		item := p.items[p.idx]
+		m.logf("🔗 正在打开: %s", item.name)
+		return openLinkCmd(item.url)
+	case "esc", "q", "ctrl+c":
+		m.linkPicker = nil
+	}
+	return nil
+}
+
+// openLinkCmd 用系统默认浏览器打开链接（异步，不阻塞 TUI）。
+func openLinkCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		if err := openURL(url); err != nil {
+			return linkOpenFailedMsg{url: url, err: err}
+		}
+		return nil
+	}
+}
+
+// linkOpenFailedMsg 打开链接失败的消息。
+type linkOpenFailedMsg struct {
+	url string
+	err error
+}
+
+func (m *Model) renderLinkPicker() string {
+	p := m.linkPicker
+	if p == nil {
+		return ""
+	}
+	width := 72
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+	inner := width - 4
+	if inner < 30 {
+		inner = 30
+	}
+	subStyle := dStyle.Width(inner - 2)
+
+	var lines []string
+	lines = append(lines, " "+lStyle.Render(p.title))
+	for i, it := range p.items {
+		if i == p.idx {
+			lines = append(lines, aStyle.Render("▸ "+it.name))
+		} else {
+			lines = append(lines, "  "+vStyle.Render(it.name))
+		}
+		lines = append(lines, subStyle.Render("    "+it.url))
+	}
+	lines = append(lines, "")
+	lines = append(lines, " "+dStyle.Render("j/k 选择  回车浏览器打开  esc 返回"))
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1083,6 +1220,10 @@ func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			ov.cursor = len(ov.fields) - 1
 		}
 	case "e", "i", "enter":
+		if ov.fields[ov.cursor].fType == fAction {
+			m.triggerAction(ov.fields[ov.cursor].key)
+			return nil
+		}
 		ov.editing = true
 		if ov.fields[ov.cursor].fType == fString {
 			ov.fields[ov.cursor].input.Focus()
@@ -1196,6 +1337,8 @@ func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) strin
 			return aStyle.Render("[" + v + " ▲▼]")
 		}
 		return vStyle.Render(v)
+	case fAction:
+		return aStyle.Render("▶ 回车进入")
 	}
 	return ""
 }

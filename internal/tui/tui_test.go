@@ -11,6 +11,7 @@ import (
 
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/plugins/voice"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -513,43 +514,88 @@ func TestViewHelpPinnedToBottom(t *testing.T) {
 	}
 }
 
-func TestChannelURLOnOwnLine(t *testing.T) {
-	// openai 渠道：URL 在独立 url 字段，描述不含长链接
-	var openai *pickerItem
-	for i := range engineChannels {
-		if engineChannels[i].name == "openai" {
-			openai = &engineChannels[i]
-			break
+func TestChannelLinksSeparateFromPicker(t *testing.T) {
+	// 渠道选择弹层不内嵌长 URL（避免排版与蓝线下划线问题），链接单独维护在 engineLinks
+	out := mustRenderPicker()
+	for _, it := range engineChannels {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, "http") {
+				t.Fatalf("channel %q picker embeds a URL: %q", it.name, line)
+			}
 		}
 	}
-	if openai == nil {
-		t.Fatal("openai channel missing")
+	if len(engineLinks["openai"]) == 0 || engineLinks["openai"][0].url != "https://www.qianwenai.com/models?search=asr" {
+		t.Fatalf("openai links = %+v", engineLinks["openai"])
 	}
-	const fullURL = "https://www.qianwenai.com/models?search=asr"
-	if openai.url != fullURL {
-		t.Fatalf("url = %q", openai.url)
+	if len(engineLinks["dashscope"]) == 0 || engineLinks["dashscope"][0].url != "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime" {
+		t.Fatalf("dashscope links = %+v", engineLinks["dashscope"])
 	}
-	if strings.Contains(openai.subtitle, "qianwenai") {
-		t.Fatalf("subtitle should not embed the long URL: %q", openai.subtitle)
-	}
-	// 渲染：URL 单独成行且完整（未换行），每个渠道的 URL 都完整出现
+}
+
+func mustRenderPicker() string {
 	m := readyModel(config.Default())
 	m.openEnginePicker()
-	out := m.renderPicker()
-	lines := strings.Split(out, "\n")
-	for _, it := range engineChannels {
-		if it.url == "" {
-			continue
-		}
+	return m.renderPicker()
+}
+
+func TestChannelConfigHasLinksEntry(t *testing.T) {
+	// openai / dashscope 渠道配置弹层带「相关链接」二级入口，doubao 无链接不显示
+	for _, engine := range []string{"openai", "dashscope"} {
+		cfg := config.Default()
+		cfg.Voice.Engine = engine
+		ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+		fields := channelConfigFields(cfg.Voice, ti)
 		found := false
-		for _, line := range lines {
-			if strings.Contains(line, it.url) {
+		for _, f := range fields {
+			if f.key == "links" && f.fType == fAction {
 				found = true
-				break
 			}
 		}
 		if !found {
-			t.Fatalf("channel %q URL wrapped/split or missing: %q", it.name, it.url)
+			t.Fatalf("engine %q channel config missing links entry: %+v", engine, fields)
 		}
+	}
+	cfg := config.Default()
+	cfg.Voice.Engine = "doubao-stream"
+	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
+	for _, f := range channelConfigFields(cfg.Voice, ti) {
+		if f.key == "links" {
+			t.Fatal("doubao-stream should not have a links entry")
+		}
+	}
+}
+
+func TestLinkPickerNavigateAndRender(t *testing.T) {
+	m := readyModel(config.Default())
+	m.cfg.Voice.Engine = "openai"
+	m.openChannelConfig()
+	// 定位到 links 字段并触发
+	for i, f := range m.configOverlay.fields {
+		if f.key == "links" {
+			m.configOverlay.cursor = i
+			break
+		}
+	}
+	m.triggerAction("links")
+	if m.linkPicker == nil {
+		t.Fatal("link picker not opened")
+	}
+	if len(m.linkPicker.items) != 1 || m.linkPicker.items[0].name == "" {
+		t.Fatalf("link items = %+v", m.linkPicker.items)
+	}
+	out := m.renderLinkPicker()
+	if !strings.Contains(out, "相关链接") || !strings.Contains(out, m.linkPicker.items[0].name) {
+		t.Fatalf("link picker render missing content:\n%s", out)
+	}
+	// 回车应发起打开命令（不报错）
+	cmd := m.handleLinkPickerKey("enter")
+	if cmd == nil {
+		t.Fatal("enter on link should return a command")
+	}
+	// esc 返回渠道配置
+	m.linkPicker = &linkPickerState{title: "t", items: m.linkPicker.items, idx: 0}
+	m.handleLinkPickerKey("esc")
+	if m.linkPicker != nil {
+		t.Fatal("esc should close link picker")
 	}
 }
