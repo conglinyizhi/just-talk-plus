@@ -56,10 +56,13 @@ func TestBuildTabFields(t *testing.T) {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
-	for _, want := range []string{"mic_test", "device", "gain", "auto_gain"} {
+	for _, want := range []string{"mic_test", "device", "auto_gain"} {
 		if !mic[want] {
 			t.Fatalf("mic tab missing %q: %v", want, mic)
 		}
+	}
+	if mic["gain"] {
+		t.Fatal("mic tab should not have a standalone gain field (use the debug panel)")
 	}
 	output := tabKeys(m.tabField[tabOutput])
 	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space"} {
@@ -512,7 +515,6 @@ func TestApplyFieldsTo(t *testing.T) {
 	fieldByKey(m, "language").input.SetValue("ja-JP")
 	fieldByKey(m, "auto_submit").boolVal = false
 	fieldByKey(m, "omit_trailing_punct").boolVal = true
-	fieldByKey(m, "gain").input.SetValue("42")
 
 	next := *cfg
 	m.applyFieldsTo(&next)
@@ -525,9 +527,6 @@ func TestApplyFieldsTo(t *testing.T) {
 	if !next.Voice.OmitTrailingPunct {
 		t.Fatal("omit_trailing_punct should be true")
 	}
-	if next.Voice.Gain != 42 {
-		t.Fatalf("gain = %d", next.Voice.Gain)
-	}
 }
 
 // ---- 字段值渲染 ----
@@ -538,17 +537,11 @@ func TestFieldValue(t *testing.T) {
 	if !strings.Contains(out, "自动上屏:") || !strings.Contains(out, "● 开") {
 		t.Fatalf("fields render:\n%s", out)
 	}
-	// 麦克风调试入口显示增益（与「增益」字段同源 = 配置基准值）
+	// 麦克风 tab：正常渲染（独立「增益」字段已移除，见 TestBuildTabFields）
 	m.switchTab(tabMic)
 	out = m.renderFields()
-	if !strings.Contains(out, "增益:") {
-		t.Fatalf("mic_test entry should show gain:\n%s", out)
-	}
-	// 配置增益=7 时入口显示 7（不再显示自适应实时值，避免与字段不一致）
-	m.cfg.Voice.Gain = 7
-	out = m.renderFields()
-	if !strings.Contains(out, "增益: 7") {
-		t.Fatalf("mic_test entry should show configured gain:\n%s", out)
+	if !strings.Contains(out, "麦克风调试:") || !strings.Contains(out, "自适应增益:") {
+		t.Fatalf("mic tab render:\n%s", out)
 	}
 }
 

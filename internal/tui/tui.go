@@ -228,7 +228,6 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	mic := []field{
 		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
 		{label: "设备", key: "device", help: "录音设备；自动 = 系统默认（设备列表加载后可选）", fType: fSelect, opts: []string{"自动"}, optVals: []string{""}, optIdx: 0},
-		{label: "增益", key: "gain", help: "1-100，细粒度；调试面板内可实时调整", fType: fString, input: ti(fmt.Sprintf("%d", vc.Gain))},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 	}
 
@@ -599,11 +598,6 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.AutoSpace = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
-			case "gain":
-				fmt.Sscanf(f.input.Value(), "%d", &vc.Gain)
-				if vc.Gain < 1 {
-					vc.Gain = 1
-				}
 			case "auto_gain":
 				vc.AutoGain = f.boolVal
 			}
@@ -861,10 +855,7 @@ func (m *Model) renderField(i int, f field) string {
 		return vStyle.Render(v)
 	case fAction:
 		extra := ""
-		if f.key == "mic_test" {
-			// 与「增益」字段同源（配置基准值）；自适应增益的实时值在调试面板内查看
-			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", m.cfg.Voice.Gain))
-		} else if f.key == "engine" {
+		if f.key == "engine" {
 			extra = "  " + vStyle.Render(m.currentEngine())
 		}
 		return aStyle.Render("▶ ") + vStyle.Render("进入") + extra
