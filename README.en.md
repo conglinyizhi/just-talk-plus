@@ -273,6 +273,7 @@ Batch engines (auralwise / openai) transcribe the whole recording after you stop
 Select "麦克风调试" in the TUI main form and press Enter to open the debug panel:
 
 - Press the **same recording hotkey** to start/stop a test recording (microphone only; no ASR, no submit)
+- `[` / `]` (or `h`/`l`, `k`/`j`) cycles recording devices (including "自动 = system default"); switching stops the test and persists to `[voice].device`. The "设备" field on the Microphone tab also lets you pick a device directly (the device list is auto-detected)
 - Live peak/RMS level bars and clipping warning
 - `+` / `-` fine-grained gain adjustment (1-100, applied live and persisted)
 - Space toggles adaptive gain (lower on clipping, recover slowly when quiet)

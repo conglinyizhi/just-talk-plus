@@ -160,7 +160,10 @@ type linkPickerState struct {
 }
 
 // micPanelState 麦克风调试面板；nil 表示未打开。
-type micPanelState struct{}
+// devIdx 当前设备在 m.devices 中的下标；-1 = 自动（系统默认）。
+type micPanelState struct {
+	devIdx int
+}
 
 // ---- 主 Model ----
 
@@ -188,7 +191,7 @@ type Model struct {
 }
 
 func New(cfg *config.Config) *Model {
-	return &Model{
+	m := &Model{
 		cfg:      cfg,
 		tabField: buildTabFields(cfg),
 		logs:     make([]string, 0, 100),
@@ -196,6 +199,8 @@ func New(cfg *config.Config) *Model {
 		tab:      tabGeneral,
 		cursor:   0,
 	}
+	m.refreshDeviceField()
+	return m
 }
 
 // ---- 字段构建（按 tab 分组）----
@@ -221,7 +226,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	}
 
 	mic := []field{
-		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整", fType: fAction},
+		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
+		{label: "设备", key: "device", help: "录音设备；自动 = 系统默认（设备列表加载后可选）", fType: fSelect, opts: []string{"自动"}, optVals: []string{""}, optIdx: 0},
 		{label: "增益", key: "gain", help: "1-100，细粒度；调试面板内可实时调整", fType: fString, input: ti(fmt.Sprintf("%d", vc.Gain))},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 	}
@@ -328,6 +334,35 @@ func idxOf(opts []string, v string) int {
 	return 0
 }
 
+// refreshDeviceField 用最新设备列表刷新「设备」字段的选项，并定位当前配置的设备。
+// 设备列表异步加载（fetchDevices），首次到达与配置变化时调用。
+func (m *Model) refreshDeviceField() {
+	fs := m.tabField[tabMic]
+	for i := range fs {
+		if fs[i].key != "device" {
+			continue
+		}
+		opts := []string{"自动"}
+		vals := []string{""}
+		opts = append(opts, m.devices...)
+		vals = append(vals, m.devices...)
+		fs[i].opts = opts
+		fs[i].optVals = vals
+		cur := m.cfg.Voice.Device
+		idx := 0
+		if cur != "" {
+			for j, d := range m.devices {
+				if d == cur {
+					idx = j + 1
+					break
+				}
+			}
+		}
+		fs[i].optIdx = idx
+		return
+	}
+}
+
 // currentFields 返回当前 tab 的设置字段（历史 tab 返回 nil）。
 func (m *Model) currentFields() []field {
 	if m.tab == tabHistory {
@@ -366,6 +401,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.devices = msg.Devices
 		}
+		m.refreshDeviceField()
 	case linkOpenFailedMsg:
 		m.logf("❌ 打开链接失败: %s", msg.err)
 	}
@@ -525,7 +561,7 @@ func (m *Model) triggerAction(key string) {
 		m.openChannelConfig()
 	case "mic_test":
 		voice.StartMicTest()
-		m.micPanel = &micPanelState{}
+		m.micPanel = &micPanelState{devIdx: m.deviceIndex(voice.MicTestDevice())}
 	case "doc_links":
 		m.openLinkPicker()
 	}
@@ -549,6 +585,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.Language = f.input.Value()
 			case "auto_submit":
 				vc.AutoSubmit = f.boolVal
+			case "device":
+				vc.Device = f.selectValue()
 			case "omit_trailing_punct":
 				vc.OmitTrailingPunct = f.boolVal
 			case "omit_trailing_all":
@@ -1380,11 +1418,49 @@ func (m *Model) handleMicPanelKey(k string) tea.Cmd {
 		voice.SetMicGain(voice.MicTestLevel().Gain - 2)
 	case " ":
 		voice.SetMicAutoGain(!voice.MicTestLevel().AutoGain)
+	case "]", "l", "j", "down":
+		m.switchPanelDevice(+1)
+	case "[", "h", "k", "up":
+		m.switchPanelDevice(-1)
 	case "esc", "q":
 		voice.StopMicTest()
 		m.micPanel = nil
 	}
 	return nil
+}
+
+// deviceIndex 返回设备在 m.devices 中的下标；空（自动）或未找到返回 -1。
+func (m *Model) deviceIndex(dev string) int {
+	for i, d := range m.devices {
+		if d == dev {
+			return i
+		}
+	}
+	return -1
+}
+
+// switchPanelDevice 在调试面板内切换录音设备（dir=±1 循环；-1 档 = 自动）。
+// 切换会停止当前测试录音并持久化到配置。
+func (m *Model) switchPanelDevice(dir int) {
+	if m.micPanel == nil {
+		return
+	}
+	if len(m.devices) == 0 {
+		m.logf("⚠️  未检测到可用录音设备")
+		return
+	}
+	// 档位：0..len(devices) 对应 自动 + 各设备
+	steps := len(m.devices) + 1
+	slot := m.micPanel.devIdx + 1 + dir // 0 = 自动
+	slot = ((slot % steps) + steps) % steps
+	dev := ""
+	if slot > 0 {
+		dev = m.devices[slot-1]
+	}
+	voice.SetMicTestDevice(dev)
+	m.micPanel.devIdx = slot - 1
+	m.refreshDeviceField()
+	m.logf("🎤 录音设备: %s", displayDeviceName(dev))
 }
 
 func (m *Model) renderMicPanel() string {
@@ -1414,13 +1490,14 @@ func (m *Model) renderMicPanel() string {
 
 	lines := []string{
 		" " + lStyle.Render("🎤 麦克风调试"),
+		"  设备: " + vStyle.Render(displayDeviceName(voice.MicTestDevice())) + dStyle.Render("  ( [ ] 切换，自动 = 系统默认 )"),
 		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak) + clipMark,
 		"  有效: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
 		"  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )"),
 		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
 		"  状态: " + vStyle.Render(state),
 		"",
-		" " + dStyle.Render("+/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),
+		" " + dStyle.Render("[ ] 设备  |  +/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1473,6 +1550,14 @@ func truncateText(s string, maxW int) string {
 		w += cw
 	}
 	return s
+}
+
+// displayDeviceName 设备显示名；空（自动）显示「自动」。
+func displayDeviceName(dev string) string {
+	if dev == "" {
+		return "自动"
+	}
+	return dev
 }
 
 func SetProviderInfo(info hotkey.ProviderInfo) tea.Cmd {

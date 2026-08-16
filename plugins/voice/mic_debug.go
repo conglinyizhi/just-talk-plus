@@ -133,6 +133,27 @@ func SetMicGain(g int) {
 	}
 }
 
+// MicTestDevice 返回当前调试用录音设备（"" = 自动/默认）。
+func MicTestDevice() string {
+	micTest.mu.Lock()
+	defer micTest.mu.Unlock()
+	return micTest.device
+}
+
+// SetMicTestDevice 切换调试与正式录音设备：停止当前测试录音、
+// 更新设备并持久化到 [voice].device（配置引用存在时）。
+func SetMicTestDevice(dev string) {
+	stopMicTestRecording()
+	micTest.mu.Lock()
+	micTest.device = dev
+	cfg := micTest.cfg
+	micTest.mu.Unlock()
+	if cfg != nil {
+		cfg.Voice.Device = dev
+		_ = config.Save(cfg)
+	}
+}
+
 // SetMicAutoGain 开/关自适应增益。
 func SetMicAutoGain(on bool) {
 	ensureAutoGain()

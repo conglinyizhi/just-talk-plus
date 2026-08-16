@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- The Microphone tab now has a "设备" field that lets you pick the recording device (auto-detected list, "自动" = system default), and the mic debug panel shows the current device and switches it with `[`/`]` (or `h`/`l`, `k`/`j`) — switching stops the running test and persists to `[voice].device`. Useful when you are not sure which microphone works.
+
 - Added CJK typographic auto-spacing (`auto_space`, on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters or digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces adjacent to full-width punctuation, and convert full-width digits to half-width. Applied in the same output post-processing pass, before submit/copy and history.
 
 - Toggle fields no longer show a "(空格)" hint or accept space to switch — they flip directly with Enter in the main form (space had become a dead key since toggles don't enter edit mode). Applies to every toggle across all tabs.

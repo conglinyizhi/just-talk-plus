@@ -56,7 +56,7 @@ func TestBuildTabFields(t *testing.T) {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
-	for _, want := range []string{"mic_test", "gain", "auto_gain"} {
+	for _, want := range []string{"mic_test", "device", "gain", "auto_gain"} {
 		if !mic[want] {
 			t.Fatalf("mic tab missing %q: %v", want, mic)
 		}
@@ -419,6 +419,89 @@ func TestRenderMicPanel(t *testing.T) {
 	if out == "" || !strings.Contains(out, "麦克风调试") {
 		t.Fatalf("mic panel render:\n%s", out)
 	}
+	// 面板显示设备行与切换提示
+	if !strings.Contains(out, "设备") || !strings.Contains(out, "[ ]") {
+		t.Fatalf("mic panel missing device switcher:\n%s", out)
+	}
+}
+
+func TestDeviceFieldRefresh(t *testing.T) {
+	m := readyModel(config.Default())
+	// 初始：只有「自动」
+	f := fieldByKey(m, "device")
+	if len(f.opts) != 1 || f.opts[0] != "自动" {
+		t.Fatalf("initial device opts = %v", f.opts)
+	}
+	// 设备列表到达
+	m.devices = []string{"设备A", "设备B"}
+	m.refreshDeviceField()
+	f = fieldByKey(m, "device")
+	if len(f.opts) != 3 || f.opts[1] != "设备A" || f.opts[2] != "设备B" {
+		t.Fatalf("refreshed device opts = %v", f.opts)
+	}
+	if f.optIdx != 0 {
+		t.Fatalf("default optIdx = %d, want 0 (自动)", f.optIdx)
+	}
+	// 配置了设备 → 定位到对应项
+	m.cfg.Voice.Device = "设备B"
+	m.refreshDeviceField()
+	f = fieldByKey(m, "device")
+	if f.optIdx != 2 {
+		t.Fatalf("configured device optIdx = %d, want 2", f.optIdx)
+	}
+	// 写回：选中的设备值写进配置
+	f.optIdx = 1
+	next := *m.cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.Device != "设备A" {
+		t.Fatalf("device written = %q, want 设备A", next.Voice.Device)
+	}
+	// 自动 → 空
+	f.optIdx = 0
+	next = *m.cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.Device != "" {
+		t.Fatalf("auto device written = %q, want empty", next.Voice.Device)
+	}
+}
+
+func TestSwitchPanelDevice(t *testing.T) {
+	m := readyModel(config.Default())
+	m.devices = []string{"设备A", "设备B"}
+	m.micPanel = &micPanelState{devIdx: -1} // 自动
+	// ] → 设备A
+	m.switchPanelDevice(+1)
+	if got := voice.MicTestDevice(); got != "设备A" {
+		t.Fatalf("device after ] = %q, want 设备A", got)
+	}
+	if m.micPanel.devIdx != 0 {
+		t.Fatalf("devIdx = %d, want 0", m.micPanel.devIdx)
+	}
+	// ] → 设备B
+	m.switchPanelDevice(+1)
+	if got := voice.MicTestDevice(); got != "设备B" {
+		t.Fatalf("device after second ] = %q, want 设备B", got)
+	}
+	// ] → 回绕到自动
+	m.switchPanelDevice(+1)
+	if got := voice.MicTestDevice(); got != "" {
+		t.Fatalf("device after wrap = %q, want auto", got)
+	}
+	// 无设备时切换不崩溃
+	m.devices = nil
+	m.switchPanelDevice(+1)
+	// 面板键位：] 与 [ 触发切换
+	m.devices = []string{"设备A", "设备B"}
+	m.micPanel.devIdx = -1
+	m.handleMicPanelKey("]")
+	if got := voice.MicTestDevice(); got != "设备A" {
+		t.Fatalf("panel key ] device = %q, want 设备A", got)
+	}
+	m.handleMicPanelKey("[")
+	if got := voice.MicTestDevice(); got != "" {
+		t.Fatalf("panel key [ device = %q, want auto", got)
+	}
+	voice.SetMicTestDevice("")
 }
 
 // ---- 字段值写回 ----
