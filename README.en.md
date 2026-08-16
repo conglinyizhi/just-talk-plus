@@ -192,7 +192,7 @@ On Windows, `Win` and `Super` both refer to the Windows logo key. If recording i
 
 ### Speech Engines
 
-The `engine` key under `[voice]` selects the ASR engine, and `[voice.engine_config]` holds engine-specific settings (key-value pairs). The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description (Doubao lets you pick the 1.0 / 2.0 model version afterwards); the main form keeps only common settings, while all channel-specific options (credentials, model version, hotwords, etc.) live in a second-level "channel config" overlay (Enter to open, `s` to save, `esc` to cancel), all persisted into `engine_config`. The legacy flat fields `app_key` / `access_key` / `resource_id` remain as a shortcut for Doubao legacy credentials.
+The `engine` key under `[voice]` selects the ASR engine, and each engine keeps its own private settings under `[voice.engine_configs.<engine>]` (e.g. `[voice.engine_configs.openai]`), so you can store credentials for several channels at once without them overwriting each other. The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description; the "engine config" overlay (Enter to open, `s` to save, `esc` to cancel) edits the current engine's credentials and settings and persists them into `engine_configs.<engine>`; the "related links" overlay lists documentation links for all engines and opens one in the browser with Enter. The legacy flat `engine_config` and `app_key` / `access_key` / `resource_id` fields remain as compatibility shortcuts for migration reads.
 
 #### Doubao (Volcano Engine) Streaming ASR
 
@@ -210,7 +210,7 @@ Credentials: use `api_key` with the `X-Api-Key` from the new console, or `app_id
 engine = "doubao-stream"
 language = "zh-CN"
 
-[voice.engine_config]
+[voice.engine_configs.doubao-stream]
 # New console credentials
 api_key = "…"
 # Or legacy credentials:
@@ -229,7 +229,7 @@ AuralWise async task transcription (whole-recording recognition, no public URL r
 [voice]
 engine = "auralwise"
 
-[voice.engine_config]
+[voice.engine_configs.auralwise]
 api_key = "asr_…"
 # base_url = "https://api.auralwise.cn/v1"
 # optimize = "auto"          # auto | true | false
@@ -242,7 +242,7 @@ OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, et
 [voice]
 engine = "openai"
 
-[voice.engine_config]
+[voice.engine_configs.openai]
 api_key = "sk-…"
 # base_url = "https://api.openai.com/v1"   # point at any compatible endpoint
 # model = "whisper-1"
@@ -254,7 +254,7 @@ Qianwen (DashScope) Fun-ASR realtime streaming recognition (WebSocket, live part
 [voice]
 engine = "dashscope"
 
-[voice.engine_config]
+[voice.engine_configs.dashscope]
 api_key = "sk-…"        # DASHSCOPE_API_KEY
 # model = "fun-asr-realtime"            # 8k models (e.g. fun-asr-flash-8k-realtime) downsample to 8000 Hz automatically
 # sample_rate = "16000"                 # 8000 | 16000

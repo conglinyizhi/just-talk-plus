@@ -200,3 +200,32 @@ func TestConfigMapNewAPIKeySkipsLegacyFields(t *testing.T) {
 		t.Fatalf("legacy merge broken: %v", m2)
 	}
 }
+
+func TestConfigMapPerEngineWins(t *testing.T) {
+	// engine_configs[engine] 优先于旧平铺 engine_config（分组存储迁移后）
+	m := ConfigMap(config.VoiceConfig{
+		Engine: "openai",
+		EngineConfig: map[string]string{
+			"api_key": "legacy-flat",
+		},
+		EngineConfigs: map[string]map[string]string{
+			"openai": {"api_key": "per-engine"},
+		},
+	})
+	if m["api_key"] != "per-engine" {
+		t.Fatalf("api_key = %q, want per-engine value", m["api_key"])
+	}
+}
+
+func TestConfigMapFallsBackToFlatForUnconfiguredEngine(t *testing.T) {
+	// 引擎尚无分组配置时回退旧平铺 engine_config（迁移读取）
+	m := ConfigMap(config.VoiceConfig{
+		Engine: "auralwise",
+		EngineConfig: map[string]string{
+			"api_key": "flat-key",
+		},
+	})
+	if m["api_key"] != "flat-key" {
+		t.Fatalf("api_key = %q, want flat fallback", m["api_key"])
+	}
+}

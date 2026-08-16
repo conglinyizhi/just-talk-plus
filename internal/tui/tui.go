@@ -7,8 +7,8 @@
 // Package tui 提供 Just Talk Plus 的 Bubble Tea 配置界面。
 //
 // 布局为 tab 分组（通用/引擎/麦克风/输出/历史），每个 tab 内是单行字段表单
-// （label: value），垂直高度只取决于单组字段数。渠道选择、渠道配置、麦克风
-// 调试为模态弹层，屏幕居中覆盖主内容（保留标题与 tab 行可见）。
+// （label: value），垂直高度只取决于单组字段数。渠道选择、引擎配置、相关链接、
+// 麦克风调试为模态弹层，屏幕居中覆盖主内容（保留标题与 tab 行可见）。
 package tui
 
 import (
@@ -97,7 +97,7 @@ type pickerItem struct {
 	subtitle string
 }
 
-// docLink 渠道文档/相关链接：渠道配置弹层内浏览，回车用系统浏览器打开。
+// docLink 引擎文档/相关链接：相关链接弹层内浏览，回车用系统浏览器打开。
 // 与渠道选择弹层分开维护，避免长 URL 挤占候选排版。
 type docLink struct {
 	name string
@@ -125,7 +125,7 @@ type pickerState struct {
 var engineChannels = []pickerItem{
 	{
 		name:     "doubao-stream",
-		subtitle: "火山引擎流式 ASR，边录边出字，支持热词；选定后可在渠道配置中选择模型版本（1.0 / 2.0）",
+		subtitle: "火山引擎流式 ASR，边录边出字，支持热词；选定后可在引擎配置中选择模型版本（1.0 / 2.0）",
 	},
 	{
 		name:     "auralwise",
@@ -141,7 +141,7 @@ var engineChannels = []pickerItem{
 	},
 }
 
-// configOverlayState 渠道配置二级弹层；nil 表示未打开。
+// configOverlayState 引擎配置二级弹层；nil 表示未打开。
 type configOverlayState struct {
 	title   string
 	fields  []field
@@ -149,7 +149,7 @@ type configOverlayState struct {
 	editing bool
 }
 
-// linkPickerState 渠道配置内的「相关链接」子页面；nil 表示未打开。
+// linkPickerState 「相关链接」弹层；nil 表示未打开。
 type linkPickerState struct {
 	title string
 	items []docLink
@@ -213,7 +213,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 
 	engineTab := []field{
 		{label: "引擎", key: "engine", help: "回车选择渠道；doubao-stream / dashscope 流式，auralwise / openai 批处理", fType: fAction},
-		{label: "渠道配置", key: "channel_config", help: "回车进入 [引擎名] 渠道配置（凭据、模型版本等）", fType: fAction},
+		{label: "引擎配置", key: "engine_config", help: "回车进入 [引擎名] 引擎配置（凭据、模型等，各引擎独立保存）", fType: fAction},
+		{label: "相关链接", key: "doc_links", help: "回车查看全部引擎的文档与链接，回车浏览器打开", fType: fAction},
 	}
 
 	mic := []field{
@@ -236,9 +237,14 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	}
 }
 
-// channelConfigFields 构建「渠道配置」弹层里的字段：凭据 + 该引擎的全部专属设置。
+// channelConfigFields 构建「引擎配置」弹层里的字段：凭据 + 该引擎的全部专属设置。
+// 各引擎配置独立保存于 engine_configs[engine]，互不覆盖。
 func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model) []field {
-	ec := vc.EngineConfig
+	engine := asrcfg.EngineType(vc)
+	ec := vc.EngineConfigFor(engine)
+	if ec == nil {
+		ec = map[string]string{}
+	}
 	get := func(name string) string {
 		if v := ec[name]; v != "" {
 			return v
@@ -261,7 +267,7 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 	}
 
 	var fields []field
-	switch asrcfg.EngineType(vc) {
+	switch engine {
 	case "auralwise":
 		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（asr_…）", fType: fString, input: ti(ec["api_key"])},
@@ -304,10 +310,6 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "Base Host", key: "ec.base_host", help: "默认 openspeech.bytedance.com", fType: fString, input: ti(ec["base_host"])},
 			{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
 		}
-	}
-	// 该引擎有文档/相关链接时追加一个二级入口（子页面浏览 + 浏览器打开）
-	if links := engineLinks[asrcfg.EngineType(vc)]; len(links) > 0 {
-		fields = append(fields, field{label: "相关链接", key: "links", help: "回车浏览并打开官方文档", fType: fAction})
 	}
 	return fields
 }
@@ -515,12 +517,12 @@ func (m *Model) triggerAction(key string) {
 	switch key {
 	case "engine":
 		m.openEnginePicker()
-	case "channel_config":
+	case "engine_config":
 		m.openChannelConfig()
 	case "mic_test":
 		voice.StartMicTest()
 		m.micPanel = &micPanelState{}
-	case "links":
+	case "doc_links":
 		m.openLinkPicker()
 	}
 }
@@ -1063,15 +1065,25 @@ func (m *Model) renderPicker() string {
 
 // ---- 相关链接子页面 ----
 
-// openLinkPicker 打开当前引擎的「相关链接」子页面（渠道配置内的二级弹层）。
+// allDocLinks 汇总全部引擎的链接，供「相关链接」弹层展示（不依赖当前所选引擎）。
+func allDocLinks() []docLink {
+	var links []docLink
+	for _, name := range asrcfg.Types() {
+		for _, l := range engineLinks[name] {
+			links = append(links, docLink{name: fmt.Sprintf("[%s] %s", name, l.name), url: l.url})
+		}
+	}
+	return links
+}
+
+// openLinkPicker 打开「相关链接」弹层：展示全部引擎的文档链接，回车浏览器打开。
 func (m *Model) openLinkPicker() {
-	engine := m.currentEngine()
-	links := engineLinks[engine]
+	links := allDocLinks()
 	if len(links) == 0 {
 		return
 	}
 	m.linkPicker = &linkPickerState{
-		title: fmt.Sprintf("[%s] 相关链接", engine),
+		title: "相关链接",
 		items: links,
 		idx:   0,
 	}
@@ -1167,7 +1179,7 @@ func (m *Model) renderLinkPicker() string {
 	return strings.Join(bl, "\n")
 }
 
-// ---- 渠道配置二级弹层 ----
+// ---- 引擎配置二级弹层 ----
 
 func (m *Model) openChannelConfig() {
 	engine := m.currentEngine()
@@ -1175,7 +1187,7 @@ func (m *Model) openChannelConfig() {
 	vc.Engine = engine
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 	m.configOverlay = &configOverlayState{
-		title:  fmt.Sprintf("[%s] 渠道配置", engine),
+		title:  fmt.Sprintf("[%s] 引擎配置", engine),
 		fields: channelConfigFields(vc, ti),
 		cursor: 0,
 	}
@@ -1239,9 +1251,9 @@ func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) saveChannelConfig() {
 	m.applyConfigOverlay()
 	if err := config.Save(m.cfg); err != nil {
-		m.logf("❌ 渠道配置保存失败: %s", err)
+		m.logf("❌ 引擎配置保存失败: %s", err)
 	} else {
-		m.logf("✅ 渠道配置已保存")
+		m.logf("✅ 引擎配置已保存")
 	}
 }
 
@@ -1251,8 +1263,14 @@ func (m *Model) applyConfigOverlay() {
 		return
 	}
 	vc := &m.cfg.Voice
-	if vc.EngineConfig == nil {
-		vc.EngineConfig = map[string]string{}
+	engine := asrcfg.EngineType(*vc)
+	ec := vc.EngineConfigs[engine]
+	if ec == nil {
+		ec = map[string]string{}
+		if vc.EngineConfigs == nil {
+			vc.EngineConfigs = map[string]map[string]string{}
+		}
+		vc.EngineConfigs[engine] = ec
 	}
 	for _, f := range ov.fields {
 		switch {
@@ -1265,9 +1283,9 @@ func (m *Model) applyConfigOverlay() {
 				val = f.selectValue()
 			}
 			if val == "" {
-				delete(vc.EngineConfig, name)
+				delete(ec, name)
 			} else {
-				vc.EngineConfig[name] = val
+				ec[name] = val
 			}
 		}
 	}

@@ -51,15 +51,53 @@ type VoiceConfig struct {
 	OmitTrailingAll bool `toml:"omit_trailing_all"`
 	// 副设置（依赖主开关）：额外省略英文半角 . ! ?。
 	OmitTrailingASCII bool `toml:"omit_trailing_ascii"`
-	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | null。
+	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`
-	// EngineConfig 引擎私有配置（api_key、base_url、model 等），键值对。
+	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。
+	// 每个引擎一套，互不覆盖，可同时保存多个渠道的凭据。
+	EngineConfigs map[string]map[string]string `toml:"engine_configs"`
+	// EngineConfig 旧版平铺引擎配置（未按引擎分组）；仅作为读取兜底与迁移来源。
 	EngineConfig map[string]string `toml:"engine_config"`
 	// 以下为 doubao 旧版平铺字段，向后兼容；新配置建议写入 engine_config。
 	AppKey     string   `toml:"app_key"`
 	AccessKey  string   `toml:"access_key"`
 	ResourceID string   `toml:"resource_id"`
 	Hotwords   []string `toml:"hotwords"`
+}
+
+// EngineConfigFor 返回指定引擎的私有配置：优先 engine_configs[engine]，
+// 旧版平铺 engine_config 作为回退（迁移来源）。nil 表示该引擎未配置。
+func (vc VoiceConfig) EngineConfigFor(engine string) map[string]string {
+	if per, ok := vc.EngineConfigs[engine]; ok {
+		return per
+	}
+	if vc.EngineConfig != nil && len(vc.EngineConfig) > 0 {
+		return vc.EngineConfig
+	}
+	return nil
+}
+
+// SetEngineConfig 写入指定引擎的私有配置；返回是否发生了变更。
+// 写入后旧版平铺 engine_config 不再更新（迁移到分组存储）。
+func (vc *VoiceConfig) SetEngineConfig(engine string, cfg map[string]string) bool {
+	if vc.EngineConfigs == nil {
+		vc.EngineConfigs = map[string]map[string]string{}
+	}
+	old := vc.EngineConfigs[engine]
+	vc.EngineConfigs[engine] = cfg
+	return !equalStringMap(old, cfg)
+}
+
+func equalStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func Default() *Config {

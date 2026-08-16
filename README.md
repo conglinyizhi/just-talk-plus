@@ -192,7 +192,7 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 ### 语音引擎
 
-`[voice]` 下的 `engine` 选择识别引擎，`[voice.engine_config]` 存放引擎私有配置（键值对）。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；主表单只保留公共设置，全部渠道专属配置（凭据、模型版本、热词等）收在「渠道配置」二级弹层（按回车进入、`s` 保存、`esc` 取消），保存后写入 `engine_config`；`app_key` / `access_key` / `resource_id` 三个旧版平铺字段仍作为豆包旧凭据的兼容写法保留。
+`[voice]` 下的 `engine` 选择识别引擎，每个引擎的私有配置单独存放于 `[voice.engine_configs.<engine>]`（如 `[voice.engine_configs.openai]`），可同时保存多个渠道的凭据、互不覆盖。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；「引擎配置」二级弹层（按回车进入、`s` 保存、`esc` 取消）编辑当前引擎的凭据与专属设置，保存后写入 `engine_configs.<engine>`；「相关链接」弹层汇总全部引擎的文档链接，回车用浏览器打开。旧版平铺 `engine_config` 与 `app_key` / `access_key` / `resource_id` 字段仍作为迁移读取的兼容写法保留。
 
 #### 豆包（火山引擎）流式 ASR
 
@@ -210,7 +210,7 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 engine = "doubao-stream"
 language = "zh-CN"
 
-[voice.engine_config]
+[voice.engine_configs.doubao-stream]
 # 新版控制台凭据
 api_key = "…"
 # 或用旧版凭据：
@@ -229,7 +229,7 @@ AuralWise 异步任务转写（整段录音识别，无需公网 URL）：
 [voice]
 engine = "auralwise"
 
-[voice.engine_config]
+[voice.engine_configs.auralwise]
 api_key = "asr_…"
 # base_url = "https://api.auralwise.cn/v1"
 # optimize = "auto"          # auto | true | false
@@ -242,7 +242,7 @@ OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）�
 [voice]
 engine = "openai"
 
-[voice.engine_config]
+[voice.engine_configs.openai]
 api_key = "sk-…"
 # base_url = "https://api.openai.com/v1"   # 可指向兼容端点
 # model = "whisper-1"
@@ -254,7 +254,7 @@ api_key = "sk-…"
 [voice]
 engine = "dashscope"
 
-[voice.engine_config]
+[voice.engine_configs.dashscope]
 api_key = "sk-…"        # DASHSCOPE_API_KEY
 # model = "fun-asr-realtime"            # 8k 模型（如 fun-asr-flash-8k-realtime）自动降采样到 8000 Hz
 # sample_rate = "16000"                 # 8000 | 16000

@@ -11,7 +11,6 @@ import (
 
 	"github.com/c/just-talk-go/config"
 	"github.com/c/just-talk-go/plugins/voice"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -53,7 +52,7 @@ func TestBuildTabFields(t *testing.T) {
 		}
 	}
 	engineTab := tabKeys(m.tabField[tabEngine])
-	if !engineTab["engine"] || !engineTab["channel_config"] {
+	if !engineTab["engine"] || !engineTab["engine_config"] || !engineTab["doc_links"] {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
@@ -192,11 +191,16 @@ func TestTriggerAction(t *testing.T) {
 				t.Fatal("engine enter should open picker")
 			}
 			m.picker = nil
-		case "channel_config":
+		case "engine_config":
 			if m.configOverlay == nil {
-				t.Fatal("channel_config enter should open overlay")
+				t.Fatal("engine_config enter should open overlay")
 			}
 			m.configOverlay = nil
+		case "doc_links":
+			if m.linkPicker == nil {
+				t.Fatal("doc_links enter should open link picker")
+			}
+			m.linkPicker = nil
 		}
 	}
 	m.switchTab(tabMic)
@@ -272,7 +276,7 @@ func TestConfigOverlayFlow(t *testing.T) {
 	if m.configOverlay == nil {
 		t.Fatal("overlay should open")
 	}
-	if m.configOverlay.title != "[doubao-stream] 渠道配置" {
+	if m.configOverlay.title != "[doubao-stream] 引擎配置" {
 		t.Fatalf("title = %q", m.configOverlay.title)
 	}
 	ov := m.configOverlay
@@ -287,8 +291,42 @@ func TestConfigOverlayFlow(t *testing.T) {
 	if m.configOverlay != nil {
 		t.Fatal("overlay should close")
 	}
-	if got := cfg.Voice.EngineConfig["model_version"]; got != "2.0" {
+	if got := cfg.Voice.EngineConfigs["doubao-stream"]["model_version"]; got != "2.0" {
 		t.Fatalf("model_version = %q", got)
+	}
+}
+
+func TestEngineConfigPerEngineIsolation(t *testing.T) {
+	// 不同引擎的配置互不覆盖：doubao 的 key 与 openai 的 key 独立保存
+	cfg := config.Default()
+	m := readyModel(cfg)
+
+	// 配置 doubao
+	m.openChannelConfig() // currentEngine = doubao-stream
+	m.applyConfigOverlay()
+	if cfg.Voice.EngineConfigs["doubao-stream"] == nil {
+		t.Fatal("doubao config not initialized")
+	}
+
+	// 切到 openai 并保存空配置：doubao 的配置应保持
+	cfg.Voice.Engine = "openai"
+	m = readyModel(cfg)
+	m.openChannelConfig()
+	m.applyConfigOverlay()
+	if cfg.Voice.EngineConfigs["doubao-stream"] == nil {
+		t.Fatal("switching engine lost doubao config")
+	}
+	if _, ok := cfg.Voice.EngineConfigs["openai"]; !ok {
+		t.Fatal("openai config should be initialized independently")
+	}
+	// 两个 map 是不同对象（写入互不影响）
+	cfg.Voice.EngineConfigs["openai"]["api_key"] = "sk-openai"
+	cfg.Voice.EngineConfigs["doubao-stream"]["model_version"] = "2.0"
+	if cfg.Voice.EngineConfigs["doubao-stream"]["api_key"] == "sk-openai" {
+		t.Fatal("writing openai key leaked into doubao config")
+	}
+	if cfg.Voice.EngineConfigs["openai"]["model_version"] == "2.0" {
+		t.Fatal("writing doubao config leaked into openai config")
 	}
 }
 
@@ -538,53 +576,45 @@ func mustRenderPicker() string {
 	return m.renderPicker()
 }
 
-func TestChannelConfigHasLinksEntry(t *testing.T) {
-	// openai / dashscope 渠道配置弹层带「相关链接」二级入口，doubao 无链接不显示
-	for _, engine := range []string{"openai", "dashscope"} {
-		cfg := config.Default()
-		cfg.Voice.Engine = engine
-		ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
-		fields := channelConfigFields(cfg.Voice, ti)
-		found := false
-		for _, f := range fields {
-			if f.key == "links" && f.fType == fAction {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("engine %q channel config missing links entry: %+v", engine, fields)
+func TestEngineTabDocLinks(t *testing.T) {
+	// 引擎 tab 有「相关链接」主入口（不依赖所选引擎）
+	m := readyModel(config.Default())
+	fs := m.tabField[tabEngine]
+	found := false
+	for _, f := range fs {
+		if f.key == "doc_links" && f.fType == fAction {
+			found = true
 		}
 	}
-	cfg := config.Default()
-	cfg.Voice.Engine = "doubao-stream"
-	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
-	for _, f := range channelConfigFields(cfg.Voice, ti) {
-		if f.key == "links" {
-			t.Fatal("doubao-stream should not have a links entry")
-		}
+	if !found {
+		t.Fatalf("engine tab missing doc_links entry: %+v", fs)
 	}
 }
 
-func TestLinkPickerNavigateAndRender(t *testing.T) {
+func TestLinkPickerShowsAllEngines(t *testing.T) {
 	m := readyModel(config.Default())
-	m.cfg.Voice.Engine = "openai"
-	m.openChannelConfig()
-	// 定位到 links 字段并触发
-	for i, f := range m.configOverlay.fields {
-		if f.key == "links" {
-			m.configOverlay.cursor = i
-			break
-		}
-	}
-	m.triggerAction("links")
+	// 不切换引擎（默认 doubao-stream）也应能看到 openai / dashscope 的链接
+	m.openLinkPicker()
 	if m.linkPicker == nil {
 		t.Fatal("link picker not opened")
 	}
-	if len(m.linkPicker.items) != 1 || m.linkPicker.items[0].name == "" {
-		t.Fatalf("link items = %+v", m.linkPicker.items)
+	if len(m.linkPicker.items) < 2 {
+		t.Fatalf("link items should cover all engines: %+v", m.linkPicker.items)
+	}
+	names := make(map[string]bool, len(m.linkPicker.items))
+	for _, it := range m.linkPicker.items {
+		names[it.name] = true
+	}
+	for _, want := range []string{
+		"[openai] QianwenAI 模型库（搜索 asr）",
+		"[dashscope] 千问实时语音识别文档",
+	} {
+		if !names[want] {
+			t.Fatalf("link picker missing %q: %+v", want, m.linkPicker.items)
+		}
 	}
 	out := m.renderLinkPicker()
-	if !strings.Contains(out, "相关链接") || !strings.Contains(out, m.linkPicker.items[0].name) {
+	if !strings.Contains(out, "相关链接") || !strings.Contains(out, "[dashscope]") {
 		t.Fatalf("link picker render missing content:\n%s", out)
 	}
 	// 回车应发起打开命令（不报错）
@@ -592,8 +622,7 @@ func TestLinkPickerNavigateAndRender(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter on link should return a command")
 	}
-	// esc 返回渠道配置
-	m.linkPicker = &linkPickerState{title: "t", items: m.linkPicker.items, idx: 0}
+	// esc 关闭
 	m.handleLinkPickerKey("esc")
 	if m.linkPicker != nil {
 		t.Fatal("esc should close link picker")

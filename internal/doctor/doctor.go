@@ -126,7 +126,7 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 			Name: "ASR 配置", OK: false, Severity: Warning,
 			Detail: fmt.Sprintf("语音引擎 %q 未配置凭据，请任选 %s 之一配置",
 				asrcfg.EngineType(cfg.Voice), engineChoices()),
-			Fix: "在 " + cfgPath + " 的 [voice].engine 选择引擎，并在 [voice.engine_config] 填写对应 api_key 等凭据。",
+			Fix: "在 " + cfgPath + " 的 [voice].engine 选择引擎，并在 [voice.engine_configs.<引擎>] 填写对应 api_key 等凭据。",
 		}
 	}
 	ok, detail := eng.Available(context.Background())
@@ -135,7 +135,7 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 		return Check{
 			Name: "ASR 配置", OK: false, Severity: Warning,
 			Detail: name + "：" + detail,
-			Fix:    "在 " + cfgPath + " 的 [voice.engine_config] 中填写所需凭据（如 api_key）。",
+			Fix:    "在 " + cfgPath + " 的 [voice.engine_configs.<引擎>] 中填写所需凭据（如 api_key）。",
 		}
 	}
 	return Check{Name: "ASR 配置", OK: true, Severity: Warning, Detail: name + "：" + detail}

@@ -46,16 +46,19 @@ func EngineType(vc config.VoiceConfig) string {
 }
 
 // ConfigMap 把 VoiceConfig 转成引擎配置 map：
-// engine_config 优先，其次共享字段（language），最后旧版平铺字段（doubao app_key 等）。
+// 按引擎分组存储 engine_configs[engine] 优先，其次共享字段（language），
+// 最后旧版平铺字段（doubao app_key 等）。
 func ConfigMap(vc config.VoiceConfig) map[string]string {
-	m := make(map[string]string, len(vc.EngineConfig)+6)
-	for k, v := range vc.EngineConfig {
+	typ := EngineType(vc)
+	per := vc.EngineConfigFor(typ)
+	m := make(map[string]string, len(per)+6)
+	for k, v := range per {
 		m[k] = v
 	}
 	if vc.Language != "" && m["language"] == "" {
 		m["language"] = vc.Language
 	}
-	if EngineType(vc) == "doubao-stream" {
+	if typ == "doubao-stream" {
 		// 新版 api_key 时不合并旧版平铺字段：顶层 resource_id 会钉死 1.0 的 bigasr 资源，
 		// 导致新版 key（通常绑定 2.0/seedasr）握手 403。旧版凭据仍按旧行为合并。
 		if m["api_key"] != "" {
