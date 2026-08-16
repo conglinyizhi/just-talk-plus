@@ -153,7 +153,7 @@ func TestHelpLineShowsVimAndArrows(t *testing.T) {
 func TestTabBarKeepsDigitOnActive(t *testing.T) {
 	m := readyModel(config.Default())
 	out := m.tabBar()
-	for _, want := range []string{"1 通用", "2 引擎", "3 麦克风", "4 输出", "5 历史"} {
+	for _, want := range []string{"1 通用", "2 引擎", "3 输入", "4 输出", "5 历史"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tab bar missing %q: %q", want, out)
 		}

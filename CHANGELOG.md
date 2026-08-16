@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Renamed the "麦克风" tab to "输入" (tab order unchanged — Engine stays second, as ASR engines matter more than input settings).
+
 - Removed the standalone "设备" field from the Microphone tab too — device selection now lives exclusively in the mic debug panel (`[`/`]` to cycle). Previously the tab field was a snapshot that could drift out of sync with the panel's persisted choice; with a single place to switch devices that linkage problem is gone.
 
 - Removed the standalone "增益" field from the Microphone tab — gain is now adjusted exclusively in the mic debug panel (`+`/`-`), which is the single place it is configured.

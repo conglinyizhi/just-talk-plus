@@ -23,7 +23,7 @@ It is built for people who want to type less and speak more while coding, chatti
   - Division of labor: **CJK space cleanup** (off by default) only removes spaces between two CJK characters; **CJK typographic auto-spacing** (on by default) only adds spaces between CJK and Latin letters/digits. They are independent and can be toggled separately.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
-- Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Microphone / Output / History), so more settings never stretch the screen height.
+- Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Input / Output / History), so more settings never stretch the screen height.
 - ASR hotwords (Doubao) for project names, people names, English terms, and domain-specific vocabulary.
 - Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
 

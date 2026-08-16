@@ -6,7 +6,7 @@
 
 // Package tui 提供 Just Talk Plus 的 Bubble Tea 配置界面。
 //
-// 布局为 tab 分组（通用/引擎/麦克风/输出/历史），每个 tab 内是单行字段表单
+// 布局为 tab 分组（通用/引擎/输入/输出/历史），每个 tab 内是单行字段表单
 // （label: value），垂直高度只取决于单组字段数。渠道选择、引擎配置、相关链接、
 // 麦克风调试为模态弹层，屏幕居中覆盖主内容（保留标题与 tab 行可见）。
 package tui
@@ -87,7 +87,7 @@ const (
 	tabHistory
 )
 
-var tabNames = []string{"通用", "引擎", "麦克风", "输出", "历史"}
+var tabNames = []string{"通用", "引擎", "输入", "输出", "历史"}
 
 // ---- 弹层状态 ----
 
