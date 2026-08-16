@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Reworked the TUI main view onto the charmbracelet component library: settings are grouped into tabs (General / Engine / Microphone / Output / History) rendered by `list` with title/description rows, string fields edit via `textinput`, and the key help bar is generated from bindings (`help`). The history view is now a tab whose entries can be copied with Enter. Vertical height only depends on the largest tab, so adding settings no longer stretches the screen.
+
 - Added trailing-punctuation omission processed uniformly before output: the master toggle `omit_trailing_punct` strips a trailing Chinese period "。", with two sub-options (`omit_trailing_all` to strip all trailing punctuation, `omit_trailing_ascii` to additionally strip ASCII `.` `!` `?`) shown indented under it in the TUI.
 
 - Added a microphone debug panel in the TUI: the same recording hotkey triggers a test recording (no ASR), with live peak/RMS level bars, clipping warning, fine-grained gain adjustment (`+`/`-`, persisted), and an adaptive-gain mode that auto-lowers gain on clipping and recovers slowly when quiet (applies to normal recordings too, toggleable via `[voice].auto_gain`).

@@ -45,7 +45,7 @@ Startup: `cmd/just-talk/main.go` → `config.Load` → `doctor.Run` → `hotkey.
 - `plugins/overlay/`: recording status capsule.
 - `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai`.
 - `internal/asrcfg/`: builds an engine from `config.VoiceConfig`; the single place importing engine packages (registers them).
-- `internal/autotype/`, `internal/clipboard/`, `internal/doctor/`, `internal/tui/` (Bubble Tea UI: dynamic engine form + channel picker).
+- `internal/autotype/`, `internal/clipboard/`, `internal/doctor/`, `internal/tui/` (Bubble Tea UI on the charmbracelet component library: tab-grouped settings via `list`, `textinput` editing, `help` key bar; channel picker/config and mic-debug are modal overlays).
 
 ## ASR Engines
 
