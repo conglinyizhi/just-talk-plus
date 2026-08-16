@@ -568,6 +568,12 @@ func TestChannelLinksSeparateFromPicker(t *testing.T) {
 	if len(engineLinks["dashscope"]) == 0 || engineLinks["dashscope"][0].url != "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime" {
 		t.Fatalf("dashscope links = %+v", engineLinks["dashscope"])
 	}
+	// 豆包：官方文档 + 新版控制台
+	db := engineLinks["doubao-stream"]
+	if len(db) < 2 || db[0].url != "https://docs.volcengine.com/docs/6561/1395846?lang=zh" ||
+		db[1].url != "https://console-embedded.volcengine.com/speech/new/setting/activate" {
+		t.Fatalf("doubao links = %+v", db)
+	}
 }
 
 func mustRenderPicker() string {
@@ -598,7 +604,7 @@ func TestLinkPickerShowsAllEngines(t *testing.T) {
 	if m.linkPicker == nil {
 		t.Fatal("link picker not opened")
 	}
-	if len(m.linkPicker.items) < 2 {
+	if len(m.linkPicker.items) < 4 {
 		t.Fatalf("link items should cover all engines: %+v", m.linkPicker.items)
 	}
 	names := make(map[string]bool, len(m.linkPicker.items))
@@ -606,7 +612,9 @@ func TestLinkPickerShowsAllEngines(t *testing.T) {
 		names[it.name] = true
 	}
 	for _, want := range []string{
-		"[openai] QianwenAI 模型库（搜索 asr）",
+		"[doubao-stream] 豆包官方文档",
+		"[doubao-stream] 豆包新版控制台",
+		"[openai] 千问实时 ASR 模型库",
 		"[dashscope] 千问实时语音识别文档",
 	} {
 		if !names[want] {

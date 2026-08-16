@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- The "相关链接" overlay now also lists Doubao resources (official docs and the new speech console) and renames the OpenAI-channel link to a Qianwen-flavored "千问实时 ASR 模型库" entry (that model catalog belongs to the Qianwen platform, same lineage as DashScope, not OpenAI).
+
 - Engine credentials are now stored per engine (`[voice.engine_configs.<engine>]`) instead of one flat `engine_config`, so you can configure and keep keys for several ASR channels at once and switch between them without re-entering credentials. The TUI "engine config" overlay (renamed from "channel config") edits and persists the current engine's own settings; the legacy flat `engine_config` and `app_key`/`access_key`/`resource_id` fields remain as migration-read compatibility.
 - Moved documentation links out of the channel picker (which previously rendered them as long underlined lines that broke layout) into a "相关链接" entry on the Engine tab: one overlay lists links for all engines (not just the currently selected one), j/k to select and Enter opens the chosen link in the system browser (`xdg-open` / `open` / `rundll32`). Links live in a separate `engineLinks` table so adding one never touches picker layout.
 
