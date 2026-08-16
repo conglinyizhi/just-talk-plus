@@ -562,11 +562,14 @@ func TestChannelLinksSeparateFromPicker(t *testing.T) {
 			}
 		}
 	}
-	if len(engineLinks["openai"]) == 0 || engineLinks["openai"][0].url != "https://www.qianwenai.com/models?search=asr" {
-		t.Fatalf("openai links = %+v", engineLinks["openai"])
+	if len(engineLinks["openai"]) != 0 {
+		t.Fatalf("openai links should be empty (model catalog belongs to dashscope): %+v", engineLinks["openai"])
 	}
-	if len(engineLinks["dashscope"]) == 0 || engineLinks["dashscope"][0].url != "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime" {
-		t.Fatalf("dashscope links = %+v", engineLinks["dashscope"])
+	ds := engineLinks["dashscope"]
+	if len(ds) < 2 ||
+		ds[0].url != "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime" ||
+		ds[1].url != "https://www.qianwenai.com/models?search=asr" {
+		t.Fatalf("dashscope links = %+v", ds)
 	}
 	// 豆包：官方文档 + 新版控制台
 	db := engineLinks["doubao-stream"]
@@ -614,11 +617,16 @@ func TestLinkPickerShowsAllEngines(t *testing.T) {
 	for _, want := range []string{
 		"[doubao-stream] 豆包官方文档",
 		"[doubao-stream] 豆包新版控制台",
-		"[openai] 千问实时 ASR 模型库",
 		"[dashscope] 千问实时语音识别文档",
+		"[dashscope] 千问实时 ASR 模型库",
 	} {
 		if !names[want] {
 			t.Fatalf("link picker missing %q: %+v", want, m.linkPicker.items)
+		}
+	}
+	for _, gone := range []string{"[openai]"} {
+		if names[gone] {
+			t.Fatalf("link picker should not contain %q: %+v", gone, m.linkPicker.items)
 		}
 	}
 	out := m.renderLinkPicker()

@@ -236,7 +236,7 @@ api_key = "asr_…"
 # poll_timeout = "10m"
 ```
 
-OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.). To explore available transcription models, see the [QianwenAI model catalog (search asr)](https://www.qianwenai.com/models?search=asr):
+OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.):
 
 ```toml
 [voice]
@@ -248,7 +248,7 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-Qianwen (DashScope) Fun-ASR realtime streaming recognition (WebSocket, live partial results). Docs: [Realtime ASR](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime):
+Qianwen (DashScope) Fun-ASR realtime streaming recognition (WebSocket, live partial results). Docs: [Realtime ASR](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime). Available ASR models: [Qianwen realtime ASR model catalog (search asr)](https://www.qianwenai.com/models?search=asr):
 
 ```toml
 [voice]

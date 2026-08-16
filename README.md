@@ -236,7 +236,7 @@ api_key = "asr_…"
 # poll_timeout = "10m"
 ```
 
-OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）。想了解可用的转写模型，可以访问 [QianwenAI 模型库（搜索 asr）](https://www.qianwenai.com/models?search=asr) 参考：
+OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）：
 
 ```toml
 [voice]
@@ -248,7 +248,7 @@ api_key = "sk-…"
 # model = "whisper-1"
 ```
 
-千问（DashScope）Fun-ASR 实时流式识别（WebSocket，边录边出字）。文档见 [实时语音识别](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime)：
+千问（DashScope）Fun-ASR 实时流式识别（WebSocket，边录边出字）。文档见 [实时语音识别](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime)，可用的 ASR 模型可参考 [千问实时 ASR 模型库（搜索 asr）](https://www.qianwenai.com/models?search=asr)：
 
 ```toml
 [voice]

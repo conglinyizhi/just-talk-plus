@@ -110,12 +110,10 @@ var engineLinks = map[string][]docLink{
 		{name: "豆包官方文档", url: "https://docs.volcengine.com/docs/6561/1395846?lang=zh"},
 		{name: "豆包新版控制台", url: "https://console-embedded.volcengine.com/speech/new/setting/activate"},
 	},
-	"openai": {
-		// 该渠道的模型库链接属于千问平台（qwen3-asr-flash-realtime 等），与 dashscope 同源，不标 OpenAI
-		{name: "千问实时 ASR 模型库", url: "https://www.qianwenai.com/models?search=asr"},
-	},
 	"dashscope": {
 		{name: "千问实时语音识别文档", url: "https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime"},
+		// 模型库属于千问平台（qwen3-asr-flash-realtime 等模型），归 dashscope 名下，不标 OpenAI
+		{name: "千问实时 ASR 模型库", url: "https://www.qianwenai.com/models?search=asr"},
 	},
 }
 
