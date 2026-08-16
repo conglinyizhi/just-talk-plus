@@ -538,11 +538,17 @@ func TestFieldValue(t *testing.T) {
 	if !strings.Contains(out, "自动上屏:") || !strings.Contains(out, "● 开") {
 		t.Fatalf("fields render:\n%s", out)
 	}
-	// 麦克风调试入口显示增益
+	// 麦克风调试入口显示增益（与「增益」字段同源 = 配置基准值）
 	m.switchTab(tabMic)
 	out = m.renderFields()
 	if !strings.Contains(out, "增益:") {
 		t.Fatalf("mic_test entry should show gain:\n%s", out)
+	}
+	// 配置增益=7 时入口显示 7（不再显示自适应实时值，避免与字段不一致）
+	m.cfg.Voice.Gain = 7
+	out = m.renderFields()
+	if !strings.Contains(out, "增益: 7") {
+		t.Fatalf("mic_test entry should show configured gain:\n%s", out)
 	}
 }
 
@@ -555,11 +561,14 @@ func TestFieldHelpShownUnderCursor(t *testing.T) {
 	if !strings.Contains(out, "· ") || !strings.Contains(out, "省略") {
 		t.Fatalf("help not shown for cursor field:\n%s", out)
 	}
-	// 移到「中文排版自动空格」：其 help 应出现，且与前项互相点名
+	// 移到「中文排版自动空格」：其 help 应出现（不再提及上一项/默认开）
 	m.cursor = 4 // 输出 tab 第 5 项 = auto_space
 	out = m.renderFields()
-	if !strings.Contains(out, "中英/中数间补空格") || !strings.Contains(out, "不删中文间空格") {
+	if !strings.Contains(out, "中英/中数间补空格") {
 		t.Fatalf("auto_space help unclear:\n%s", out)
+	}
+	if strings.Contains(out, "默认开") || strings.Contains(out, "不删中文间空格") {
+		t.Fatalf("auto_space help should not mention default/other option:\n%s", out)
 	}
 	// 删除中文间空格项 help 明确默认关与互不影响
 	m.cursor = 3 // remove_cjk_space

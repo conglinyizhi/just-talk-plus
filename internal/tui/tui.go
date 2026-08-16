@@ -220,8 +220,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	}
 
 	engineTab := []field{
-		{label: "引擎", key: "engine", help: "回车选择渠道；doubao-stream / dashscope 流式，auralwise / openai 批处理", fType: fAction},
-		{label: "引擎配置", key: "engine_config", help: "回车进入 [引擎名] 引擎配置（凭据、模型等，各引擎独立保存）", fType: fAction},
+		{label: "引擎", key: "engine", help: "回车选择渠道", fType: fAction},
+		{label: "引擎配置", key: "engine_config", help: "回车进入当前引擎的配置；各引擎独立保存，互不冲突", fType: fAction},
 		{label: "相关链接", key: "doc_links", help: "回车查看全部引擎的文档与链接，回车浏览器打开", fType: fAction},
 	}
 
@@ -237,7 +237,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "切断所有符号", key: "omit_trailing_all", help: "句尾所有标点一并省略（含英文）", fType: fToggle, boolVal: vc.OmitTrailingAll, indent: 1},
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 		{label: "删除中文间空格", key: "remove_cjk_space", help: "删中文↔中文间空格（如「你好 世界」→「你好世界」）；默认关；与「自动空格」互不影响", fType: fToggle, boolVal: vc.RemoveCJKSpace},
-		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）；默认开；不删中文间空格（由上一项控制）", fType: fToggle, boolVal: vc.AutoSpace},
+		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）", fType: fToggle, boolVal: vc.AutoSpace},
 	}
 
 	return map[tabID][]field{
@@ -862,7 +862,8 @@ func (m *Model) renderField(i int, f field) string {
 	case fAction:
 		extra := ""
 		if f.key == "mic_test" {
-			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", voice.GetMicGain()))
+			// 与「增益」字段同源（配置基准值）；自适应增益的实时值在调试面板内查看
+			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", m.cfg.Voice.Gain))
 		} else if f.key == "engine" {
 			extra = "  " + vStyle.Render(m.currentEngine())
 		}
@@ -1472,7 +1473,7 @@ func (m *Model) switchPanelDevice(dir int) {
 
 func (m *Model) renderMicPanel() string {
 	lvl := voice.MicTestLevel()
-	width := 60
+	width := 84
 	if m.w > 0 && width > m.w-4 {
 		width = m.w - 4
 	}
