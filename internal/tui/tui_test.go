@@ -90,6 +90,61 @@ func TestSwitchTab(t *testing.T) {
 	}
 }
 
+// vim 规范：h 左 / l 右；方向键 ←/→ 等效（j/k/↑/↓ 见字段导航测试）
+func TestVimHLSwitchTab(t *testing.T) {
+	m := readyModel(config.Default())
+	m.switchTab(tabGeneral)
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	if m.tab != tabEngine {
+		t.Fatalf("l = %d, want tabEngine", m.tab)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	if m.tab != tabGeneral {
+		t.Fatalf("h = %d, want tabGeneral", m.tab)
+	}
+	// 方向键等效
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if m.tab != tabEngine {
+		t.Fatalf("right = %d, want tabEngine", m.tab)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.tab != tabGeneral {
+		t.Fatalf("left = %d, want tabGeneral", m.tab)
+	}
+}
+
+func TestVimJLFieldNav(t *testing.T) {
+	m := readyModel(config.Default())
+	m.switchTab(tabGeneral)
+	// 默认光标在第 0 行；j/↓ 下移，k/↑ 上移
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.cursor != 1 {
+		t.Fatalf("j cursor = %d, want 1", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if m.cursor != 2 {
+		t.Fatalf("down cursor = %d, want 2", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	if m.cursor != 1 {
+		t.Fatalf("k cursor = %d, want 1", m.cursor)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if m.cursor != 0 {
+		t.Fatalf("up cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestHelpLineShowsVimAndArrows(t *testing.T) {
+	m := readyModel(config.Default())
+	line := m.helpLine()
+	for _, want := range []string{"j/k", "↑/↓", "h/l", "←/→", "q 退出"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("help line missing %q: %q", want, line)
+		}
+	}
+}
+
 func TestTabBarKeepsDigitOnActive(t *testing.T) {
 	m := readyModel(config.Default())
 	out := m.tabBar()

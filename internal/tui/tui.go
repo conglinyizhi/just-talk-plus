@@ -407,9 +407,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 					m.logf("📋 已复制: %s", truncateText(hist[m.cursor].Text, 60))
 				}
 			}
-		case "left":
+		case "h", "left":
 			m.switchTab((tabHistory + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
-		case "right":
+		case "l", "right":
 			m.switchTab((tabHistory + 1) % tabID(len(tabNames)))
 		case "q", "ctrl+c":
 			return tea.Quit
@@ -491,9 +491,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case k == "left":
+	case k == "h" || k == "left":
 		m.switchTab((m.tab + tabID(len(tabNames)) - 1) % tabID(len(tabNames)))
-	case k == "right":
+	case k == "l" || k == "right":
 		m.switchTab((m.tab + 1) % tabID(len(tabNames)))
 	case k == "L":
 		m.logExpanded = !m.logExpanded
@@ -665,8 +665,9 @@ func (m *Model) View() string {
 }
 
 // helpLine 底部键位帮助行（固定显示在屏幕最后一行）。
+// 导航遵循 vim 规范：h 左 / j 下 / k 上 / l 右；方向键等效。
 func (m *Model) helpLine() string {
-	return hStyle.Render("  j/k 导航 | e 编辑 | ←/→ 或 1-5 分组 | s 保存 | L 日志 | q 退出")
+	return hStyle.Render("  j/k 或 ↑/↓ 选择 · h/l 或 ←/→ 分组 · 1-5 分组 · e 编辑 · s 保存 · L 日志 · q 退出")
 }
 
 // renderBase 渲染主界面（不含模态弹层与底部帮助行）。
@@ -766,7 +767,7 @@ func (m *Model) renderHistory() string {
 		ts := e.Time.Format("15:04:05")
 		b.WriteString(marker + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
 	}
-	b.WriteString(dStyle.Render("  j/k 选择 · enter 复制到剪贴板") + "\n")
+	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · enter 复制到剪贴板") + "\n")
 	return b.String()
 }
 
@@ -1044,7 +1045,7 @@ func (m *Model) renderPicker() string {
 		lines = append(lines, subStyle.Render("    "+it.subtitle))
 	}
 	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
+	lines = append(lines, " "+dStyle.Render("j/k 或 ↑/↓ 选择  回车确认  esc 关闭"))
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1160,7 +1161,7 @@ func (m *Model) renderLinkPicker() string {
 		lines = append(lines, subStyle.Render("    "+it.url))
 	}
 	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 选择  回车浏览器打开  esc 返回"))
+	lines = append(lines, " "+dStyle.Render("j/k 或 ↑/↓ 选择  回车浏览器打开  esc 返回"))
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1213,7 +1214,7 @@ func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		switch f.fType {
 		case fSelect:
 			switch k {
-			case "j", "down", "k", "up", "left", "right":
+			case "j", "down", "k", "up", "h", "l", "left", "right":
 				f.optIdx = (f.optIdx + 1) % len(f.opts)
 			}
 		case fString:
@@ -1318,7 +1319,7 @@ func (m *Model) renderConfigOverlay() string {
 		lines = append(lines, marker+lStyle.Render(f.label+": ")+m.renderOverlayField(i, f, ov))
 	}
 	lines = append(lines, "")
-	lines = append(lines, " "+dStyle.Render("j/k 导航  e 编辑  s 保存  esc 取消"))
+	lines = append(lines, " "+dStyle.Render("j/k 或 ↑/↓ 导航  e 编辑  s 保存  esc 取消"))
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
