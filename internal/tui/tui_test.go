@@ -459,3 +459,89 @@ func TestTruncateText(t *testing.T) {
 		t.Fatalf("short: %q", got)
 	}
 }
+
+func TestPinBottom(t *testing.T) {
+	base := "title\ntab\nfields"
+	footer := "help"
+	out := pinBottom(base, footer, 6)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 6 {
+		t.Fatalf("lines = %d, want 6", len(lines))
+	}
+	// footer 固定在最后一行
+	if lines[5] != footer {
+		t.Fatalf("footer not at bottom: %q", lines[5])
+	}
+	// 内容保留在顶部
+	if lines[0] != "title" || lines[1] != "tab" || lines[2] != "fields" {
+		t.Fatalf("content changed:\n%s", out)
+	}
+}
+
+func TestPinBottomTruncatesContent(t *testing.T) {
+	// 内容超出时优先保留 footer（截断内容）
+	base := "l0\nl1\nl2\nl3\nl4\nl5\nl6"
+	out := pinBottom(base, "help", 5)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 5 {
+		t.Fatalf("lines = %d, want 5", len(lines))
+	}
+	if lines[4] != "help" {
+		t.Fatalf("footer should survive truncation: %q", lines[4])
+	}
+	if lines[0] != "l0" {
+		t.Fatalf("content head lost: %q", lines[0])
+	}
+}
+
+func TestViewHelpPinnedToBottom(t *testing.T) {
+	m := readyModel(config.Default())
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	if len(lines) != m.h {
+		t.Fatalf("view lines = %d, want screen height %d", len(lines), m.h)
+	}
+	if !strings.Contains(lines[len(lines)-1], "q 退出") {
+		t.Fatalf("help line should be pinned at bottom: %q", lines[len(lines)-1])
+	}
+	// 切 tab 后 help 仍在同一行（最后一行）
+	m.switchTab(tabMic)
+	out2 := m.View()
+	lines2 := strings.Split(out2, "\n")
+	if !strings.Contains(lines2[len(lines2)-1], "q 退出") {
+		t.Fatalf("help line moved after tab switch: %q", lines2[len(lines2)-1])
+	}
+}
+
+func TestChannelURLOnOwnLine(t *testing.T) {
+	// openai 渠道：URL 在独立 url 字段，描述不含长链接
+	var openai *pickerItem
+	for i := range engineChannels {
+		if engineChannels[i].name == "openai" {
+			openai = &engineChannels[i]
+			break
+		}
+	}
+	if openai == nil {
+		t.Fatal("openai channel missing")
+	}
+	const fullURL = "https://www.qianwenai.com/models?search=asr"
+	if openai.url != fullURL {
+		t.Fatalf("url = %q", openai.url)
+	}
+	if strings.Contains(openai.subtitle, "qianwenai") {
+		t.Fatalf("subtitle should not embed the long URL: %q", openai.subtitle)
+	}
+	// 渲染：URL 单独成行且完整（未换行）
+	m := readyModel(config.Default())
+	m.openEnginePicker()
+	out := m.renderPicker()
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "qianwenai.com") {
+			if !strings.Contains(line, fullURL) {
+				t.Fatalf("URL wrapped/split: %q", line)
+			}
+		}
+	}
+}

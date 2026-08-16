@@ -33,7 +33,7 @@ var (
 	wStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 	eStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	dStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	hStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).MarginTop(1)
+	hStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 )
 
 type backendMsg hotkey.ProviderInfo
@@ -92,9 +92,11 @@ var tabNames = []string{"通用", "引擎", "麦克风", "输出", "历史"}
 // ---- 弹层状态 ----
 
 // pickerItem 渠道选择弹层中的一条候选，subtitle 说明该渠道特点。
+// url 为可选的外部链接：单独成行展示（不换行），便于终端点击。
 type pickerItem struct {
 	name     string
 	subtitle string
+	url      string
 }
 
 // pickerState 渠道选择弹层状态；nil 表示未打开。
@@ -112,11 +114,12 @@ var engineChannels = []pickerItem{
 	},
 	{
 		name:     "auralwise",
-		subtitle: "异步任务转写，整段识别，无需公网 URL",
+		subtitle: "异步任务转写，整段识别",
 	},
 	{
 		name:     "openai",
-		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点；了解更多模型：https://www.qianwenai.com/models?search=asr",
+		subtitle: "兼容 Whisper 接口，可指向本地 / 第三方端点",
+		url:      "https://www.qianwenai.com/models?search=asr",
 	},
 }
 
@@ -586,7 +589,8 @@ func (m *Model) View() string {
 	}
 	base := m.renderBase()
 	if m.picker == nil && m.configOverlay == nil && m.micPanel == nil {
-		return base
+		// 无弹层：键位帮助行固定在屏幕最底部
+		return pinBottom(base, m.helpLine(), m.h)
 	}
 	var overlay string
 	switch {
@@ -597,10 +601,16 @@ func (m *Model) View() string {
 	case m.micPanel != nil:
 		overlay = m.renderMicPanel()
 	}
+	// 有弹层：弹层为模态，覆盖主内容（含帮助行），自含按键提示
 	return overlayOn(base, overlay, m.h)
 }
 
-// renderBase 渲染主界面（不含模态弹层）。
+// helpLine 底部键位帮助行（固定显示在屏幕最后一行）。
+func (m *Model) helpLine() string {
+	return hStyle.Render("  j/k 导航 | e 编辑 | ←/→ 或 1-5 分组 | s 保存 | L 日志 | q 退出")
+}
+
+// renderBase 渲染主界面（不含模态弹层与底部帮助行）。
 func (m *Model) renderBase() string {
 	var b strings.Builder
 	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk Plus") + "\n")
@@ -638,9 +648,25 @@ func (m *Model) renderBase() string {
 			}
 		}
 	}
-
-	b.WriteString(hStyle.Render("  j/k 导航 | e 编辑 | ←/→ 或 1-5 分组 | s 保存 | L 日志 | q 退出"))
 	return b.String()
+}
+
+// pinBottom 把 footer 固定在屏幕最后一行：主内容补空行到 screenH-1 行，
+// 最后一行写 footer。内容超出时优先保留 footer（超出的内容被终端截断）。
+func pinBottom(base, footer string, screenH int) string {
+	base = strings.TrimSuffix(base, "\n")
+	lines := strings.Split(base, "\n")
+	if screenH > 0 {
+		contentMax := screenH - 1
+		if len(lines) > contentMax {
+			lines = lines[:contentMax]
+		}
+		for len(lines) < contentMax {
+			lines = append(lines, "")
+		}
+		lines = append(lines, footer)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderFields 渲染当前 tab 的设置字段（单行 label: value）。
@@ -860,6 +886,7 @@ func (m *Model) logf(format string, args ...interface{}) {
 // 主内容整体保持原位（不因弹层出现而被挤高）。
 // 弹层高度受限（最多 screenH-3 行），起始行保底在标题/tab 之后，避免盖掉界面头部。
 func overlayOn(base, overlay string, screenH int) string {
+	base = strings.TrimSuffix(base, "\n")
 	baseLines := strings.Split(base, "\n")
 	ovLines := strings.Split(overlay, "\n")
 	if screenH > 0 {
@@ -937,7 +964,7 @@ func (m *Model) renderPicker() string {
 	if p == nil {
 		return ""
 	}
-	width := 64
+	width := 80
 	if m.w > 0 && width > m.w-4 {
 		width = m.w - 4
 	}
@@ -946,6 +973,7 @@ func (m *Model) renderPicker() string {
 		inner = 30
 	}
 	subStyle := dStyle.Width(inner - 2)
+	urlStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
 
 	var lines []string
 	lines = append(lines, " "+lStyle.Render(p.title))
@@ -956,6 +984,10 @@ func (m *Model) renderPicker() string {
 			lines = append(lines, "  "+vStyle.Render(it.name))
 		}
 		lines = append(lines, subStyle.Render("    "+it.subtitle))
+		if it.url != "" {
+			// URL 单独一行、不强制换行，保证终端可完整点击
+			lines = append(lines, urlStyle.Render("    "+it.url))
+		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, " "+dStyle.Render("j/k 选择  回车确认  esc 关闭"))
