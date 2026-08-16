@@ -26,6 +26,17 @@ func fieldByKey(m *Model, key string) *field {
 	return nil
 }
 
+// fieldIndex 返回指定 key 在所在 tab 字段列表中的下标（按当前 tab 查找）。
+func fieldIndex(m *Model, key string) int {
+	fs := m.tabField[m.tab]
+	for i := range fs {
+		if fs[i].key == key {
+			return i
+		}
+	}
+	return 0
+}
+
 func tabKeys(fs []field) map[string]bool {
 	keys := make(map[string]bool, len(fs))
 	for _, f := range fs {
@@ -46,10 +57,13 @@ func TestBuildTabFields(t *testing.T) {
 	m := New(config.Default())
 
 	general := tabKeys(m.tabField[tabGeneral])
-	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "auto_submit", "stop_delay_ms"} {
+	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms"} {
 		if !general[want] {
 			t.Fatalf("general missing %q: %v", want, general)
 		}
+	}
+	if general["auto_submit"] {
+		t.Fatal("auto_submit moved to Output tab (上屏与复制行为)")
 	}
 	engineTab := tabKeys(m.tabField[tabEngine])
 	if !engineTab["engine"] || !engineTab["engine_config"] || !engineTab["doc_links"] {
@@ -67,7 +81,7 @@ func TestBuildTabFields(t *testing.T) {
 		}
 	}
 	output := tabKeys(m.tabField[tabOutput])
-	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space", "write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
+	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space", "auto_submit", "write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
 		if !output[want] {
 			t.Fatalf("output tab missing %q: %v", want, output)
 		}
@@ -75,15 +89,11 @@ func TestBuildTabFields(t *testing.T) {
 	if f := fieldByKey(m, "omit_trailing_all"); f.indent != 1 {
 		t.Fatalf("omit_trailing_all indent = %d", f.indent)
 	}
-	// 剪贴板选项三级缩进：写入剪贴板(0) → 上屏后不动(1) → 上屏失败也不写(2)
-	if f := fieldByKey(m, "write_clipboard"); f.indent != 0 {
-		t.Fatalf("write_clipboard indent = %d", f.indent)
-	}
-	if f := fieldByKey(m, "restore_clipboard"); f.indent != 1 {
-		t.Fatalf("restore_clipboard indent = %d", f.indent)
-	}
-	if f := fieldByKey(m, "no_clipboard_on_fail"); f.indent != 2 {
-		t.Fatalf("no_clipboard_on_fail indent = %d", f.indent)
+	// 上屏与复制行为：四个平级选项，无缩进嵌套
+	for _, key := range []string{"auto_submit", "write_clipboard", "restore_clipboard", "no_clipboard_on_fail"} {
+		if f := fieldByKey(m, key); f.indent != 0 {
+			t.Fatalf("%s indent = %d, want 0 (flat)", key, f.indent)
+		}
 	}
 }
 
@@ -212,10 +222,9 @@ func TestFieldEditingString(t *testing.T) {
 
 func TestFieldEditingToggle(t *testing.T) {
 	m := readyModel(config.Default())
-	// 自动上屏是第 5 个字段
-	for m.cursor < 4 {
-		m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	}
+	// auto_submit 在输出 tab（上屏与复制行为组）
+	m.switchTab(tabOutput)
+	m.cursor = fieldIndex(m, "auto_submit")
 	f := fieldByKey(m, "auto_submit")
 	before := f.boolVal
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -505,6 +514,9 @@ func TestApplyFieldsTo(t *testing.T) {
 
 func TestFieldValue(t *testing.T) {
 	m := readyModel(config.Default())
+	// 输出 tab：上屏与复制行为开关（默认 auto_submit 开 → ● 开）
+	m.switchTab(tabOutput)
+	m.cursor = fieldIndex(m, "auto_submit")
 	out := m.renderFields()
 	if !strings.Contains(out, "自动上屏:") || !strings.Contains(out, "● 开") {
 		t.Fatalf("fields render:\n%s", out)

@@ -44,7 +44,6 @@ type VoiceConfig struct {
 	AutoGain    bool   `toml:"auto_gain"` // 自适应增益：爆音自动降低、安静恢复
 	StopDelayMs int    `toml:"stop_delay_ms"`
 	Language    string `toml:"language"`
-	AutoSubmit  bool   `toml:"auto_submit"`
 	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
 	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
 	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
@@ -59,14 +58,13 @@ type VoiceConfig struct {
 	//   - 中文与数字之间补空格（如"花了5000元"→"花了 5000 元"）
 	//   - 全角标点与两侧字符之间不留空格（如"iPhone ，好开心"→"iPhone，好开心"）
 	AutoSpace bool `toml:"auto_space"`
-	// WriteClipboard 识别完成后是否写入剪贴板（主开关）。
-	// 关闭后识别结果不写剪贴板（减少污染剪贴板历史）；自动上屏仍需临时借用剪贴板。
+	// 上屏与复制行为（平级独立开关，识别完成后按组合执行）：
+	AutoSubmit bool `toml:"auto_submit"`
+	// WriteClipboard 复制到剪贴板：识别结果写入剪贴板（独立行为，可与上屏同开）。
 	WriteClipboard bool `toml:"write_clipboard"`
-	// RestoreClipboard 子选项（依赖 WriteClipboard）：自动上屏成功后尽量不操作剪贴板，
-	// 把上屏前保存的原内容还原；上屏失败时文本留在剪贴板作为兜底。
+	// RestoreClipboard 上屏后还原剪贴板：上屏成功后还原原内容，尽量不污染剪贴板历史。
 	RestoreClipboard bool `toml:"restore_clipboard"`
-	// NoClipboardOnFail 二级子选项：上屏失败时也不写入剪贴板（原内容保持还原），
-	// 仅在 write_clipboard 与 restore_clipboard 均开启时生效。
+	// NoClipboardOnFail 上屏失败不写入：上屏失败时也还原原内容，识别文本不留在剪贴板。
 	NoClipboardOnFail bool `toml:"no_clipboard_on_fail"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | dashscope | null。
 	Engine string `toml:"engine"`

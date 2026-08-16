@@ -213,7 +213,6 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9；不支持字母数字等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
-		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 	}
 
@@ -234,9 +233,10 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 		{label: "删除中文间空格", key: "remove_cjk_space", help: "删中文↔中文间空格（如「你好 世界」→「你好世界」）；默认关；与「自动空格」互不影响", fType: fToggle, boolVal: vc.RemoveCJKSpace},
 		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）", fType: fToggle, boolVal: vc.AutoSpace},
-		{label: "识别后写入剪贴板", key: "write_clipboard", help: "识别完成后是否写入剪贴板；关闭可减少污染剪贴板历史（上屏仍需临时借用）", fType: fToggle, boolVal: vc.WriteClipboard},
-		{label: "上屏后尽量不动剪贴板", key: "restore_clipboard", help: "上屏成功后还原剪贴板原内容；上屏失败时文本留在剪贴板", fType: fToggle, boolVal: vc.RestoreClipboard, indent: 1},
-		{label: "上屏失败也不写入", key: "no_clipboard_on_fail", help: "上屏失败时同样还原剪贴板，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail, indent: 2},
+		{label: "自动上屏", key: "auto_submit", help: "识别后模拟粘贴到当前输入框（上屏与复制行为）", fType: fToggle, boolVal: vc.AutoSubmit},
+		{label: "复制到剪贴板", key: "write_clipboard", help: "识别结果写入剪贴板（独立行为，可与上屏同开）", fType: fToggle, boolVal: vc.WriteClipboard},
+		{label: "上屏后还原剪贴板", key: "restore_clipboard", help: "上屏成功后还原原内容，尽量不污染剪贴板历史", fType: fToggle, boolVal: vc.RestoreClipboard},
+		{label: "上屏失败不写入", key: "no_clipboard_on_fail", help: "上屏失败时也还原原内容，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail},
 	}
 
 	return map[tabID][]field{

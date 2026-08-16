@@ -21,8 +21,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
 - CJK typographic auto-spacing (on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters/digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces around full-width punctuation, and convert full-width digits to half-width.
   - Division of labor: **CJK space cleanup** (off by default) only removes spaces between two CJK characters; **CJK typographic auto-spacing** (on by default) only adds spaces between CJK and Latin letters/digits. They are independent and can be toggled separately.
-- Clipboard-write master toggle (on by default): with "识别后写入剪贴板" off, recognition results are not written to the clipboard; the "上屏后尽量不动剪贴板" sub-option restores the original content after a successful submit, and the "上屏失败也不写入" sub-sub-option does the same on failure (the text is never left in the clipboard) — together they reduce pollution of your clipboard history (e.g. clipboard managers).
-- Clipboard copy and automatic text submission.
+- Submit & copy behaviors are four flat independent toggles on the Output tab: **autotype** (simulate paste into the focused field), **copy to clipboard** (write the result; can be on together with autotype), **restore clipboard after autotype** (restore the original on success to keep clipboard history clean), and **do not write on autotype failure** (restore the original on failure too, so the text is never left in the clipboard) — executed in combination after each recognition to reduce pollution of your clipboard history (e.g. clipboard managers).
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
 - Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Input / Output / History), so more settings never stretch the screen height.
 - ASR hotwords (Doubao) for project names, people names, English terms, and domain-specific vocabulary.
@@ -168,9 +167,11 @@ omit_trailing_punct = false  # strip trailing "。" before output (master toggle
 # omit_trailing_ascii = false  # sub: additionally strip ASCII . ! ?
 # remove_cjk_space = false  # drop spaces between CJK characters (pauses recognized as gaps); keep spaces between CJK and Latin/digits
 # auto_space = true  # CJK typographic auto-spacing: add space between CJK and Latin/digits, strip space around full-width punctuation, half-width digits
-# write_clipboard = true  # write recognition result to clipboard (master toggle); disable to reduce clipboard-history pollution
-# restore_clipboard = true  # sub: after successful autotype, restore the original clipboard and avoid touching it; on failure the text stays in the clipboard
-# no_clipboard_on_fail = true  # sub-sub: on autotype failure, also skip writing to the clipboard (restore the original; the text is not left in the clipboard)
+# Submit & copy behaviors (flat independent toggles, executed in combination after each recognition):
+# auto_submit = true          # autotype: simulate paste into the focused field
+# write_clipboard = true      # copy to clipboard: write the result (can be on together with autotype)
+# restore_clipboard = true    # restore clipboard after autotype: restore the original on success, keep clipboard history clean
+# no_clipboard_on_fail = true # on autotype failure, also restore the original; the text is not left in the clipboard
 ```
 
 `Alt+Super` with `toggle` mode is recommended. Press once to start recording, then press again to stop. This avoids hold-mode key conflicts with desktop environments or focused input fields. On Windows, the low-level keyboard hook only observes key edges and never consumes or replays modifiers, so standalone `Alt`, `Super`, and shortcuts such as `Alt+Tab` retain their normal system behavior. Modifier combinations require the exact configured set, and hook fallback state is checked against the unsuppressed physical key state so separate single-key presses cannot be combined into the shortcut.
