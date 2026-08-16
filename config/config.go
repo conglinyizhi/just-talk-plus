@@ -45,6 +45,12 @@ type VoiceConfig struct {
 	StopDelayMs int    `toml:"stop_delay_ms"`
 	Language    string `toml:"language"`
 	AutoSubmit  bool   `toml:"auto_submit"`
+	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
+	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
+	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
+	OmitTrailingAll bool `toml:"omit_trailing_all"`
+	// 副设置（依赖主开关）：额外省略英文半角 . ! ?。
+	OmitTrailingASCII bool `toml:"omit_trailing_ascii"`
 	// Engine 语音引擎类型：doubao-stream（默认）| auralwise | openai | null。
 	Engine string `toml:"engine"`
 	// EngineConfig 引擎私有配置（api_key、base_url、model 等），键值对。

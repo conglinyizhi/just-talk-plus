@@ -548,3 +548,40 @@ func TestMicTestEntryShowsGain(t *testing.T) {
 		t.Fatalf("mic test entry should show current gain 25:\n%s", out)
 	}
 }
+
+func TestOmitTrailingFields(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.OmitTrailingPunct = true
+	cfg.Voice.OmitTrailingAll = true
+	m := New(cfg)
+	// 主设置 + 两个缩进副设置
+	f := fieldByKey(m.fields, "omit_trailing_punct")
+	if f == nil || f.fType != fToggle || !f.boolVal || f.indent != 0 {
+		t.Fatalf("omit_trailing_punct field: %+v", f)
+	}
+	all := fieldByKey(m.fields, "omit_trailing_all")
+	if all == nil || all.indent != 1 || !all.boolVal {
+		t.Fatalf("omit_trailing_all field: %+v", all)
+	}
+	ascii := fieldByKey(m.fields, "omit_trailing_ascii")
+	if ascii == nil || ascii.indent != 1 {
+		t.Fatalf("omit_trailing_ascii field: %+v", ascii)
+	}
+	// 渲染层级缩进（副设置在主设置下方缩进）
+	m.w, m.h, m.ready = 100, 40, true
+	out := m.View()
+	mainIdx := strings.Index(out, "句尾标点省略")
+	allIdx := strings.Index(out, "切断所有符号")
+	if mainIdx < 0 || allIdx < 0 || allIdx <= mainIdx {
+		t.Fatalf("field order wrong:\n%s", out)
+	}
+	// 副设置行有缩进空格（indent 渲染为 2 空格）
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "切断所有符号") && !strings.Contains(line, "▸ 切断所有符号") {
+			if !strings.Contains(line, "  切断所有符号") {
+				t.Fatalf("sub setting should be indented: %q", line)
+			}
+		}
+	}
+}

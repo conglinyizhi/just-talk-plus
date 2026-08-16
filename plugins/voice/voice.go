@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -251,7 +252,7 @@ func markTUIHandled(evt hotkey.Event) {
 type VoicePlugin struct {
 	env                    engine.PluginEnv
 	logger                 *slog.Logger
-	cfg                    *config.Config
+	cfg                    atomic.Pointer[config.Config]
 	mu                     sync.Mutex
 	eventOnce              sync.Once
 	events                 chan hotkey.Event
@@ -302,7 +303,7 @@ func (p *VoicePlugin) Version() string { return "0.7.0" }
 func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.env = env
 	p.logger = env.Logger()
-	p.cfg = env.Config()
+	p.cfg.Store(env.Config())
 	loadTUIStats()
 	setupMicTest(p.logger, env.Config(), env.Config().Voice.Gain, env.Config().Voice.AutoGain)
 	return p.registerFromConfig(env.Config())
@@ -331,6 +332,8 @@ func (p *VoicePlugin) Stop() error {
 func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.registerFromConfig(cfg) }
 
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
+	// 同步最新配置：TUI 保存后本进程内立即生效（热键注册之外的所有读取都走 p.cfg）
+	p.cfg.Store(cfg)
 	vc := cfg.Voice
 	if !vc.Enabled {
 		p.mu.Lock()
@@ -539,7 +542,7 @@ func (p *VoicePlugin) startRecording() {
 		pout("⚠️  已经在录音中")
 		return
 	}
-	vc := p.cfg.Voice
+	vc := p.cfg.Load().Voice
 	params := speech.StreamParams{Lang: vc.Language, Hotwords: vc.Hotwords}
 	var rec *Recorder
 	if vc.Device != "" {
@@ -581,7 +584,7 @@ func (p *VoicePlugin) startRecording() {
 // newSession 按引擎能力选择会话：支持流式的引擎直接开流式会话，
 // 只支持批处理的引擎（auralwise / openai / null）由 BatchSession 包装。
 func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams) (speech.StreamSession, speech.Engine, error) {
-	eng, err := asrcfg.Build(p.cfg.Voice)
+	eng, err := asrcfg.Build(p.cfg.Load().Voice)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -881,6 +884,8 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 }
 
 func (p *VoicePlugin) dispatchTextOutput(text string, autoSubmit bool) {
+	// 输出层统一处理：省略句尾标点（上屏/复制前，含历史记录）
+	text = cleanTrailingPunct(text, p.cfg.Load().Voice)
 	go func() {
 		if autoSubmit {
 			if err := autotype.Paste(text, p.logger); err != nil {

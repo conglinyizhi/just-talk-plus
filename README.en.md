@@ -17,6 +17,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
 - Recognition history panel: the last 10 submitted/copied results are kept in memory and can be re-copied to the clipboard.
+- Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
 - TUI configuration for hotkeys, engine, mode, auto-submit, stop delay, hotwords, and related settings.
@@ -158,6 +159,9 @@ mode = "toggle"
 push_to_talk = "Alt+Super"
 gain = 1
 auto_gain = true   # adaptive gain: lower on clipping, recover slowly when quiet
+omit_trailing_punct = false  # strip trailing "。" before output (master toggle)
+# omit_trailing_all = false  # sub: strip all trailing punctuation (incl. ASCII)
+# omit_trailing_ascii = false  # sub: additionally strip ASCII . ! ?
 ```
 
 `Alt+Super` with `toggle` mode is recommended. Press once to start recording, then press again to stop. This avoids hold-mode key conflicts with desktop environments or focused input fields. On Windows, the low-level keyboard hook only observes key edges and never consumes or replays modifiers, so standalone `Alt`, `Super`, and shortcuts such as `Alt+Tab` retain their normal system behavior. Modifier combinations require the exact configured set, and hook fallback state is checked against the unsuppressed physical key state so separate single-key presses cannot be combined into the shortcut.

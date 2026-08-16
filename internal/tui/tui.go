@@ -55,6 +55,7 @@ type field struct {
 	opts    []string
 	optVals []string // select 显示值对应的写入值（缺省 = opts）
 	optIdx  int
+	indent  int // 层级缩进（副设置项依赖主设置项时用，渲染时 label 前加空格）
 }
 
 // selectValue 返回 select 字段当前选中的写入值。
@@ -164,6 +165,9 @@ func buildFields(cfg *config.Config) []field {
 		{label: "历史记录", key: "history", help: "回车查看最近识别结果，可选中复制到剪贴板", fType: fAction},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "自动上屏", key: "auto_submit", help: "识别后自动粘贴", fType: fToggle, boolVal: vc.AutoSubmit},
+		{label: "句尾标点省略", key: "omit_trailing_punct", help: "上屏/复制前省略句尾句号「。」", fType: fToggle, boolVal: vc.OmitTrailingPunct},
+		{label: "切断所有符号", key: "omit_trailing_all", help: "句尾所有标点一并省略（含英文）", fType: fToggle, boolVal: vc.OmitTrailingAll, indent: 1},
+		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 	}
 }
@@ -959,6 +963,12 @@ func (m *Model) save() {
 			vc.Language = f.input.Value()
 		case "auto_submit":
 			vc.AutoSubmit = f.boolVal
+		case "omit_trailing_punct":
+			vc.OmitTrailingPunct = f.boolVal
+		case "omit_trailing_all":
+			vc.OmitTrailingAll = f.boolVal
+		case "omit_trailing_ascii":
+			vc.OmitTrailingASCII = f.boolVal
 		case "stop_delay_ms":
 			fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 		}
@@ -1045,7 +1055,7 @@ func (m *Model) View() string {
 				marker = aStyle.Render("▸ ")
 			}
 		}
-		line := marker + lStyle.Render(f.label+": ") + m.renderField(i, f)
+		line := marker + strings.Repeat("  ", f.indent) + lStyle.Render(f.label+": ") + m.renderField(i, f)
 		if m.helpVisible && f.help != "" {
 			line += " " + dStyle.Render("("+f.help+")")
 		}
