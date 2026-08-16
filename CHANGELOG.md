@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Toggle fields no longer show a "(空格)" hint or accept space to switch — they flip directly with Enter in the main form (space had become a dead key since toggles don't enter edit mode). Applies to every toggle across all tabs.
+
 - Added an output post-processing option `remove_cjk_space` (TUI: Output tab "删除中文间空格"): drops spaces between two CJK characters — gaps that speech pauses get recognized as, where no punctuation fits — while keeping spaces between CJK and Latin letters or digits per typographic convention. Applied before submit/copy, same as trailing-punctuation omission.
 
 - Navigation now follows vim conventions and arrow keys work everywhere: `j`/`k` or `↑`/`↓` move the cursor in the main form, history list and every overlay; `h`/`l` or `←`/`→` switch tab groups (also cycling select options while editing). The bottom help bar and each overlay's hint line spell out both key sets.

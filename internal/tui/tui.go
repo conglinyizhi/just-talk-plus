@@ -439,13 +439,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		switch f.fType {
 		case fSelect:
 			switch k {
-			case "j", "down", "k", "up", "left", "right":
+			case "j", "down", "k", "up", "h", "l", "left", "right":
 				f.optIdx = (f.optIdx + 1) % len(f.opts)
 			}
 		case fToggle:
+			// toggle 在导航态用回车直接切换（不进编辑态）；这里仅处理移动光标
 			switch k {
-			case " ":
-				f.boolVal = !f.boolVal
 			case "j", "down", "k", "up":
 				m.editing = false
 				m.cursor++
@@ -806,9 +805,9 @@ func (m *Model) renderField(i int, f field) string {
 		return vStyle.Render(v)
 	case fToggle:
 		if f.boolVal {
-			return aStyle.Render("● 开") + "  " + dStyle.Render("(空格)")
+			return aStyle.Render("● 开")
 		}
-		return dStyle.Render("○ 关  (空格)")
+		return dStyle.Render("○ 关")
 	case fSelect:
 		v := f.opts[f.optIdx]
 		if editing {
