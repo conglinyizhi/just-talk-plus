@@ -1205,7 +1205,12 @@ func (m *Model) renderField(i int, f field) string {
 		}
 		return vStyle.Render(v)
 	case fAction:
-		return aStyle.Render("▶ ") + vStyle.Render("进入")
+		extra := ""
+		// 麦克风调试入口附带当前增益值，便于不进面板即可确认设置
+		if f.key == "mic_test" {
+			extra = "  " + dStyle.Render("增益:") + " " + wStyle.Render(fmt.Sprintf("%d", voice.GetMicGain()))
+		}
+		return aStyle.Render("▶ ") + vStyle.Render("进入") + extra
 	}
 	return ""
 }

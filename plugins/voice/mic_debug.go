@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/c/just-talk-go/config"
 )
 
 // MicLevel 麦克风实时电平快照（供 TUI 调试面板显示）。
@@ -31,18 +33,20 @@ type micTestState struct {
 	autoGain *AutoGain
 	logger   *slog.Logger
 	device   string
+	cfg      *config.Config // 非 nil 时手动调增益会持久化到配置
 	mu       sync.Mutex
 	level    MicLevel
 }
 
 var micTest micTestState
 
-// setupMicTest 由插件 Init 调用：初始化日志器、设备与自适应增益。
-func setupMicTest(logger *slog.Logger, device string, gain int, autoGainOn bool) {
+// setupMicTest 由插件 Init 调用：初始化日志器、设备、配置引用与自适应增益。
+func setupMicTest(logger *slog.Logger, cfg *config.Config, gain int, autoGainOn bool) {
 	micTest.mu.Lock()
 	defer micTest.mu.Unlock()
 	micTest.logger = logger
-	micTest.device = device
+	micTest.device = cfg.Voice.Device
+	micTest.cfg = cfg
 	if micTest.autoGain == nil {
 		micTest.autoGain = NewAutoGain(autoGainOn, gain)
 	}
@@ -99,12 +103,21 @@ func MicTestLevel() MicLevel {
 	return micTest.level
 }
 
-// SetMicGain 细粒度调整增益（1..100），实时生效并作为自适应增益的新基准。
-func SetMicGain(g int) {
+// GetMicGain 返回当前实际增益（含自适应增益的动态调整）。
+func GetMicGain() int {
 	ensureAutoGain()
 	micTest.mu.Lock()
 	defer micTest.mu.Unlock()
+	return micTest.autoGain.Gain()
+}
+
+// SetMicGain 细粒度调整增益（1..100），实时生效并作为自适应增益的新基准；
+// 配置引用存在时持久化到 [voice].gain。
+func SetMicGain(g int) {
+	ensureAutoGain()
+	micTest.mu.Lock()
 	if !micTest.active {
+		micTest.mu.Unlock()
 		return
 	}
 	micTest.autoGain.SetGain(g)
@@ -112,6 +125,12 @@ func SetMicGain(g int) {
 		micTest.recorder.SetGain(g)
 	}
 	micTest.level.Gain = micTest.autoGain.Gain()
+	cfg := micTest.cfg
+	micTest.mu.Unlock()
+	if cfg != nil {
+		cfg.Voice.Gain = clampGain(g)
+		_ = config.Save(cfg)
+	}
 }
 
 // SetMicAutoGain 开/关自适应增益。

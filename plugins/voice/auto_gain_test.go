@@ -109,3 +109,31 @@ func TestAnalyzePCM(t *testing.T) {
 		t.Fatalf("negative half: peak=%v", peak)
 	}
 }
+
+func TestGetMicGain(t *testing.T) {
+	// 重置全局状态，模拟初始增益
+	micTest.mu.Lock()
+	micTest.active = false
+	micTest.cfg = nil
+	micTest.autoGain = NewAutoGain(false, 7)
+	micTest.mu.Unlock()
+	if got := GetMicGain(); got != 7 {
+		t.Fatalf("gain=%d, want 7", got)
+	}
+	// SetMicGain 在面板关闭时不生效
+	SetMicGain(20)
+	if got := GetMicGain(); got != 7 {
+		t.Fatalf("inactive SetMicGain changed gain: %d", got)
+	}
+	// 面板打开后生效
+	StartMicTest()
+	SetMicGain(20)
+	if got := GetMicGain(); got != 20 {
+		t.Fatalf("gain=%d, want 20", got)
+	}
+	StopMicTest()
+	// 退出面板后增益保留（供入口显示）
+	if got := GetMicGain(); got != 20 {
+		t.Fatalf("gain=%d, want 20 after stop", got)
+	}
+}

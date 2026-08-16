@@ -534,3 +534,17 @@ func TestRenderLevelBar(t *testing.T) {
 		t.Fatalf("half: %q", got)
 	}
 }
+
+func TestMicTestEntryShowsGain(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+	m.w, m.h, m.ready = 100, 40, true
+	// 模拟在调试面板中把增益调到 25（voice 包内状态）
+	voice.StartMicTest()
+	voice.SetMicGain(25)
+	voice.StopMicTest()
+	out := m.View()
+	if !strings.Contains(out, "增益: 25") {
+		t.Fatalf("mic test entry should show current gain 25:\n%s", out)
+	}
+}

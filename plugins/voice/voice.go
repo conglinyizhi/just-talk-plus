@@ -304,7 +304,7 @@ func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.logger = env.Logger()
 	p.cfg = env.Config()
 	loadTUIStats()
-	setupMicTest(p.logger, env.Config().Voice.Device, env.Config().Voice.Gain, env.Config().Voice.AutoGain)
+	setupMicTest(p.logger, env.Config(), env.Config().Voice.Gain, env.Config().Voice.AutoGain)
 	return p.registerFromConfig(env.Config())
 }
 
