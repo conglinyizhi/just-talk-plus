@@ -236,8 +236,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "句尾标点省略", key: "omit_trailing_punct", help: "上屏/复制前省略句尾句号「。」", fType: fToggle, boolVal: vc.OmitTrailingPunct},
 		{label: "切断所有符号", key: "omit_trailing_all", help: "句尾所有标点一并省略（含英文）", fType: fToggle, boolVal: vc.OmitTrailingAll, indent: 1},
 		{label: "英文符号 .!?", key: "omit_trailing_ascii", help: "额外省略英文半角 . ! ?", fType: fToggle, boolVal: vc.OmitTrailingASCII, indent: 1},
-		{label: "删除中文间空格", key: "remove_cjk_space", help: "删掉中文与中文之间的空格（思考停顿），中英/中数间空格保留", fType: fToggle, boolVal: vc.RemoveCJKSpace},
-		{label: "中文排版自动空格", key: "auto_space", help: "按排版规范：中英/中数间补空格，全角标点两侧去空格", fType: fToggle, boolVal: vc.AutoSpace},
+		{label: "删除中文间空格", key: "remove_cjk_space", help: "删中文↔中文间空格（如「你好 世界」→「你好世界」）；默认关；与「自动空格」互不影响", fType: fToggle, boolVal: vc.RemoveCJKSpace},
+		{label: "中文排版自动空格", key: "auto_space", help: "中英/中数间补空格（如「K3刚发布」→「K3 刚发布」）；默认开；不删中文间空格（由上一项控制）", fType: fToggle, boolVal: vc.AutoSpace},
 	}
 
 	return map[tabID][]field{
@@ -772,7 +772,8 @@ func pinBottom(base, footer string, screenH int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderFields 渲染当前 tab 的设置字段（单行 label: value）。
+// renderFields 渲染当前 tab 的设置字段（单行 label: value），
+// 光标所在字段下方附一行灰色帮助说明（f.help）。
 func (m *Model) renderFields() string {
 	fs := m.currentFields()
 	var b strings.Builder
@@ -787,6 +788,9 @@ func (m *Model) renderFields() string {
 		}
 		line := marker + strings.Repeat("  ", f.indent) + lStyle.Render(f.label+": ") + m.renderField(i, f)
 		b.WriteString(line + "\n")
+		if i == m.cursor && f.help != "" {
+			b.WriteString("  " + strings.Repeat("  ", f.indent) + dStyle.Render("· "+f.help) + "\n")
+		}
 	}
 	return b.String()
 }
@@ -1360,6 +1364,9 @@ func (m *Model) renderConfigOverlay() string {
 			}
 		}
 		lines = append(lines, marker+lStyle.Render(f.label+": ")+m.renderOverlayField(i, f, ov))
+		if i == ov.cursor && f.help != "" {
+			lines = append(lines, "  "+dStyle.Render("· "+f.help))
+		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, " "+dStyle.Render("j/k 或 ↑/↓ 导航  e 编辑  s 保存  esc 取消"))

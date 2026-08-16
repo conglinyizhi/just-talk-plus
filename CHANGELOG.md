@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Field help text is now rendered under the cursor field in the main form and the engine-config overlay (it was defined but never displayed). This makes every setting's explanation visible, including the two space options, whose wording now explicitly clarifies their division: **删除中文间空格** (off by default) only drops spaces between two CJK characters, **中文排版自动空格** (on by default) only adds spaces between CJK and Latin/digits — independent and togglable separately.
+
 - The Microphone tab now has a "设备" field that lets you pick the recording device (auto-detected list, "自动" = system default), and the mic debug panel shows the current device and switches it with `[`/`]` (or `h`/`l`, `k`/`j`) — switching stops the running test and persists to `[voice].device`. Useful when you are not sure which microphone works.
 
 - Added CJK typographic auto-spacing (`auto_space`, on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters or digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces adjacent to full-width punctuation, and convert full-width digits to half-width. Applied in the same output post-processing pass, before submit/copy and history.

@@ -20,6 +20,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
 - CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
 - CJK typographic auto-spacing (on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters/digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces around full-width punctuation, and convert full-width digits to half-width.
+  - Division of labor: **CJK space cleanup** (off by default) only removes spaces between two CJK characters; **CJK typographic auto-spacing** (on by default) only adds spaces between CJK and Latin letters/digits. They are independent and can be toggled separately.
 - Clipboard copy and automatic text submission.
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
 - Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Microphone / Output / History), so more settings never stretch the screen height.

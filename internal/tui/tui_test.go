@@ -546,6 +546,35 @@ func TestFieldValue(t *testing.T) {
 	}
 }
 
+func TestFieldHelpShownUnderCursor(t *testing.T) {
+	// 光标所在字段下方显示 help 说明，随光标移动切换
+	m := readyModel(config.Default())
+	m.switchTab(tabOutput)
+	// 默认光标在句尾标点省略
+	out := m.renderFields()
+	if !strings.Contains(out, "· ") || !strings.Contains(out, "省略") {
+		t.Fatalf("help not shown for cursor field:\n%s", out)
+	}
+	// 移到「中文排版自动空格」：其 help 应出现，且与前项互相点名
+	m.cursor = 4 // 输出 tab 第 5 项 = auto_space
+	out = m.renderFields()
+	if !strings.Contains(out, "中英/中数间补空格") || !strings.Contains(out, "不删中文间空格") {
+		t.Fatalf("auto_space help unclear:\n%s", out)
+	}
+	// 删除中文间空格项 help 明确默认关与互不影响
+	m.cursor = 3 // remove_cjk_space
+	out = m.renderFields()
+	if !strings.Contains(out, "默认关") || !strings.Contains(out, "互不影响") {
+		t.Fatalf("remove_cjk_space help unclear:\n%s", out)
+	}
+	// 非光标字段不显示 help
+	m.cursor = 0
+	out = m.renderFields()
+	if strings.Contains(out, "中英/中数间补空格") {
+		t.Fatalf("help should follow cursor only:\n%s", out)
+	}
+}
+
 // ---- 弹层覆盖 ----
 
 func TestOverlayOnCoversInPlace(t *testing.T) {
