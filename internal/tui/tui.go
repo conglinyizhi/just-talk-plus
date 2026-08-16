@@ -191,7 +191,7 @@ type Model struct {
 }
 
 func New(cfg *config.Config) *Model {
-	m := &Model{
+	return &Model{
 		cfg:      cfg,
 		tabField: buildTabFields(cfg),
 		logs:     make([]string, 0, 100),
@@ -199,8 +199,6 @@ func New(cfg *config.Config) *Model {
 		tab:      tabGeneral,
 		cursor:   0,
 	}
-	m.refreshDeviceField()
-	return m
 }
 
 // ---- 字段构建（按 tab 分组）----
@@ -227,7 +225,6 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 
 	mic := []field{
 		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
-		{label: "设备", key: "device", help: "录音设备；自动 = 系统默认（设备列表加载后可选）", fType: fSelect, opts: []string{"自动"}, optVals: []string{""}, optIdx: 0},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 	}
 
@@ -333,35 +330,6 @@ func idxOf(opts []string, v string) int {
 	return 0
 }
 
-// refreshDeviceField 用最新设备列表刷新「设备」字段的选项，并定位当前配置的设备。
-// 设备列表异步加载（fetchDevices），首次到达与配置变化时调用。
-func (m *Model) refreshDeviceField() {
-	fs := m.tabField[tabMic]
-	for i := range fs {
-		if fs[i].key != "device" {
-			continue
-		}
-		opts := []string{"自动"}
-		vals := []string{""}
-		opts = append(opts, m.devices...)
-		vals = append(vals, m.devices...)
-		fs[i].opts = opts
-		fs[i].optVals = vals
-		cur := m.cfg.Voice.Device
-		idx := 0
-		if cur != "" {
-			for j, d := range m.devices {
-				if d == cur {
-					idx = j + 1
-					break
-				}
-			}
-		}
-		fs[i].optIdx = idx
-		return
-	}
-}
-
 // currentFields 返回当前 tab 的设置字段（历史 tab 返回 nil）。
 func (m *Model) currentFields() []field {
 	if m.tab == tabHistory {
@@ -400,7 +368,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.devices = msg.Devices
 		}
-		m.refreshDeviceField()
 	case linkOpenFailedMsg:
 		m.logf("❌ 打开链接失败: %s", msg.err)
 	}
@@ -584,8 +551,6 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.Language = f.input.Value()
 			case "auto_submit":
 				vc.AutoSubmit = f.boolVal
-			case "device":
-				vc.Device = f.selectValue()
 			case "omit_trailing_punct":
 				vc.OmitTrailingPunct = f.boolVal
 			case "omit_trailing_all":
@@ -1458,7 +1423,6 @@ func (m *Model) switchPanelDevice(dir int) {
 	}
 	voice.SetMicTestDevice(dev)
 	m.micPanel.devIdx = slot - 1
-	m.refreshDeviceField()
 	m.logf("🎤 录音设备: %s", displayDeviceName(dev))
 }
 

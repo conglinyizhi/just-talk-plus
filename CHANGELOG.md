@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Removed the standalone "设备" field from the Microphone tab too — device selection now lives exclusively in the mic debug panel (`[`/`]` to cycle). Previously the tab field was a snapshot that could drift out of sync with the panel's persisted choice; with a single place to switch devices that linkage problem is gone.
+
 - Removed the standalone "增益" field from the Microphone tab — gain is now adjusted exclusively in the mic debug panel (`+`/`-`), which is the single place it is configured.
 
 - TUI wording polish: the Engine field help is now just "回车选择渠道"; the engine-config help states each engine's settings are stored independently and never conflict. The "中文排版自动空格" help no longer mentions its default or the sibling option (users see the toggle state directly). The mic debug panel is wider (84 cols) to fit long Linux device names, and the mic-test entry's gain now shows the configured baseline (same source as the "增益" field) instead of the auto-gain live value, so the two no longer disagree.

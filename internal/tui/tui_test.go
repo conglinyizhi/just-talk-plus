@@ -56,13 +56,15 @@ func TestBuildTabFields(t *testing.T) {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
-	for _, want := range []string{"mic_test", "device", "auto_gain"} {
+	for _, want := range []string{"mic_test", "auto_gain"} {
 		if !mic[want] {
 			t.Fatalf("mic tab missing %q: %v", want, mic)
 		}
 	}
-	if mic["gain"] {
-		t.Fatal("mic tab should not have a standalone gain field (use the debug panel)")
+	for _, gone := range []string{"gain", "device"} {
+		if mic[gone] {
+			t.Fatalf("mic tab should not have %q (use the debug panel)", gone)
+		}
 	}
 	output := tabKeys(m.tabField[tabOutput])
 	for _, want := range []string{"omit_trailing_punct", "omit_trailing_all", "omit_trailing_ascii", "remove_cjk_space", "auto_space"} {
@@ -425,46 +427,6 @@ func TestRenderMicPanel(t *testing.T) {
 	// 面板显示设备行与切换提示
 	if !strings.Contains(out, "设备") || !strings.Contains(out, "[ ]") {
 		t.Fatalf("mic panel missing device switcher:\n%s", out)
-	}
-}
-
-func TestDeviceFieldRefresh(t *testing.T) {
-	m := readyModel(config.Default())
-	// 初始：只有「自动」
-	f := fieldByKey(m, "device")
-	if len(f.opts) != 1 || f.opts[0] != "自动" {
-		t.Fatalf("initial device opts = %v", f.opts)
-	}
-	// 设备列表到达
-	m.devices = []string{"设备A", "设备B"}
-	m.refreshDeviceField()
-	f = fieldByKey(m, "device")
-	if len(f.opts) != 3 || f.opts[1] != "设备A" || f.opts[2] != "设备B" {
-		t.Fatalf("refreshed device opts = %v", f.opts)
-	}
-	if f.optIdx != 0 {
-		t.Fatalf("default optIdx = %d, want 0 (自动)", f.optIdx)
-	}
-	// 配置了设备 → 定位到对应项
-	m.cfg.Voice.Device = "设备B"
-	m.refreshDeviceField()
-	f = fieldByKey(m, "device")
-	if f.optIdx != 2 {
-		t.Fatalf("configured device optIdx = %d, want 2", f.optIdx)
-	}
-	// 写回：选中的设备值写进配置
-	f.optIdx = 1
-	next := *m.cfg
-	m.applyFieldsTo(&next)
-	if next.Voice.Device != "设备A" {
-		t.Fatalf("device written = %q, want 设备A", next.Voice.Device)
-	}
-	// 自动 → 空
-	f.optIdx = 0
-	next = *m.cfg
-	m.applyFieldsTo(&next)
-	if next.Voice.Device != "" {
-		t.Fatalf("auto device written = %q, want empty", next.Voice.Device)
 	}
 }
 
