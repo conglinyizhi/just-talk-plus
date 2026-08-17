@@ -28,6 +28,7 @@ func main() {
 	cfgPath := flag.String("config", "", "path to config file")
 	debug := flag.Bool("debug", false, "enable debug plugin")
 	verbose := flag.Bool("verbose", false, "verbose logging")
+	diagnostics := flag.Bool("diagnostics", false, "collect bounded in-memory diagnostics for this run")
 	useTUI := flag.Bool("tui", true, "run with terminal UI")
 	noTUI := flag.Bool("no-tui", false, "run without terminal UI")
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
@@ -54,41 +55,55 @@ func main() {
 		*useTUI = false
 	}
 
-	logLevel := slog.LevelInfo
-	if *verbose {
-		logLevel = slog.LevelDebug
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	loadedConfigPath := *cfgPath
+	if loadedConfigPath == "" {
+		loadedConfigPath = config.FindConfig()
+	}
+	configuredDiagnostics := cfg.Diagnostics.ConsumeStartup()
+	if configuredDiagnostics && cfg.Diagnostics.StartupRuns >= 0 {
+		if err := config.SaveTo(loadedConfigPath, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to update diagnostics setting: %v\n", err)
+		}
+	}
+	diagnosticsEnabled := *diagnostics || configuredDiagnostics
+	cfg.Diagnostics.Active = diagnosticsEnabled
+
+	var logLevel slog.LevelVar
+	logLevel.Set(slog.LevelInfo)
+	if *verbose || diagnosticsEnabled {
+		logLevel.Set(slog.LevelDebug)
 	}
 
-	// TUI keeps a bounded in-memory copy so diagnostics can be exported without
-	// relying on a stale or shared log file.
-	memoryLogs := diag.NewMemoryBuffer()
+	// The writer stays connected so the TUI can enable "this run" diagnostics,
+	// but it stores no bytes until explicitly enabled.
+	memoryLogs := diag.NewDisabledMemoryBuffer()
+	memoryLogs.SetEnabled(diagnosticsEnabled)
 	// Daemon mode: log to stderr + file. TUI mode: file only (stderr corrupts display).
 	logPath := defaultLogPath()
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
 	var logWriter io.Writer
 	if *useTUI {
-		lf, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if lf != nil {
+		if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			logWriter = io.MultiWriter(lf, memoryLogs)
 		} else {
 			logWriter = memoryLogs
 		}
 	} else {
-		lf, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if lf != nil {
-			logWriter = io.MultiWriter(os.Stderr, lf, memoryLogs)
-		} else {
-			logWriter = io.MultiWriter(os.Stderr, memoryLogs)
+		writers := []io.Writer{os.Stderr, memoryLogs}
+		if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			writers = append(writers, lf)
 		}
+		logWriter = io.MultiWriter(writers...)
 	}
-	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: &logLevel}))
 	slog.SetDefault(logger)
-	slog.Info("diagnostics initialized", "pid", os.Getpid(), "executable", os.Args[0], "memory_limit_bytes", 512*1024)
-
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		logger.Error("failed to load config", "error", err)
-		os.Exit(1)
+	if diagnosticsEnabled {
+		slog.Info("diagnostics initialized", "pid", os.Getpid(), "executable", os.Args[0], "memory_limit_bytes", 512*1024)
 	}
 
 	if *backend == "" {
@@ -127,7 +142,7 @@ func main() {
 	}
 
 	if *useTUI {
-		runTUI(eng, cfg, *debug, memoryLogs)
+		runTUI(eng, cfg, *debug, memoryLogs, *verbose, &logLevel)
 	} else {
 		runDaemon(eng)
 	}
@@ -141,12 +156,21 @@ func runDaemon(eng *engine.Engine) {
 	}
 }
 
-func runTUI(eng *engine.Engine, cfg *config.Config, debug bool, memoryLogs *diag.MemoryBuffer) {
+func runTUI(eng *engine.Engine, cfg *config.Config, debug bool, memoryLogs *diag.MemoryBuffer, verbose bool, logLevel *slog.LevelVar) {
 	voice.SetupTUILog()
 	voice.SetOutput(io.Discard)
 	model := tui.New(cfg)
 	model.SetDebug(debug)
 	model.SetDiagnostics(memoryLogs)
+	model.OnDiagnosticsChange = func(enabled bool) {
+		memoryLogs.SetEnabled(enabled)
+		if enabled {
+			logLevel.Set(slog.LevelDebug)
+			slog.Info("diagnostics enabled for current run", "memory_limit_bytes", 512*1024)
+		} else if !verbose {
+			logLevel.Set(slog.LevelInfo)
+		}
+	}
 	model.OnSave = func(c *config.Config) error { return eng.ReloadConfig(c) }
 	go func() {
 		if err := eng.Start(false); err != nil && err != context.Canceled {

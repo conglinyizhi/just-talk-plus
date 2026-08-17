@@ -19,21 +19,50 @@ const maxBytes = 512 * 1024
 
 // MemoryBuffer keeps the latest structured log output in memory.
 type MemoryBuffer struct {
-	mu  sync.Mutex
-	buf []byte
+	mu      sync.Mutex
+	enabled bool
+	buf     []byte
 }
 
 func NewMemoryBuffer() *MemoryBuffer {
-	return &MemoryBuffer{buf: make([]byte, 0, maxBytes)}
+	return &MemoryBuffer{enabled: true, buf: make([]byte, 0, maxBytes)}
+}
+
+// NewDisabledMemoryBuffer creates a lightweight writer that drops log records
+// until diagnostics are explicitly enabled. It does not allocate the snapshot
+// storage while disabled.
+func NewDisabledMemoryBuffer() *MemoryBuffer {
+	return &MemoryBuffer{}
+}
+
+func (b *MemoryBuffer) Enabled() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.enabled
+}
+
+func (b *MemoryBuffer) SetEnabled(enabled bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if enabled && !b.enabled {
+		b.buf = make([]byte, 0, maxBytes)
+	}
+	if !enabled {
+		b.buf = nil
+	}
+	b.enabled = enabled
 }
 
 func (b *MemoryBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.enabled {
+		return len(p), nil
+	}
 	b.buf = append(b.buf, p...)
 	if len(b.buf) > maxBytes {
 		b.buf = append([]byte(nil), b.buf[len(b.buf)-maxBytes:]...)
 	}
-	b.mu.Unlock()
 	return len(p), nil
 }
 

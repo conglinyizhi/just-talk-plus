@@ -27,6 +27,26 @@ func TestMemoryBufferKeepsBoundedSnapshot(t *testing.T) {
 	}
 }
 
+func TestMemoryBufferDisabledDropsAndCanEnable(t *testing.T) {
+	b := NewDisabledMemoryBuffer()
+	if b.Enabled() {
+		t.Fatal("disabled buffer reports enabled")
+	}
+	_, _ = b.Write([]byte("discarded"))
+	if got := b.Snapshot(); len(got) != 0 {
+		t.Fatalf("disabled snapshot=%q, want empty", got)
+	}
+	b.SetEnabled(true)
+	_, _ = b.Write([]byte("kept"))
+	if got := string(b.Snapshot()); got != "kept" {
+		t.Fatalf("enabled snapshot=%q, want kept", got)
+	}
+	b.SetEnabled(false)
+	if got := b.Snapshot(); len(got) != 0 {
+		t.Fatalf("disabled snapshot=%q, want empty", got)
+	}
+}
+
 func TestMemoryBufferConcurrentWrites(t *testing.T) {
 	b := NewMemoryBuffer()
 	var wg sync.WaitGroup

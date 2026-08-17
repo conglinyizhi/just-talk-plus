@@ -182,17 +182,18 @@ type micPanelState struct {
 // ---- 主 Model ----
 
 type Model struct {
-	w, h        int
-	ready       bool
-	info        hotkey.ProviderInfo
-	logs        []string
-	devices     []string
-	cfg         *config.Config
-	debug       bool
-	showLogs    bool
-	logExpanded bool
-	diagnostics *diag.MemoryBuffer
-	OnSave      func(*config.Config) error
+	w, h                int
+	ready               bool
+	info                hotkey.ProviderInfo
+	logs                []string
+	devices             []string
+	cfg                 *config.Config
+	debug               bool
+	showLogs            bool
+	logExpanded         bool
+	diagnostics         *diag.MemoryBuffer
+	OnSave              func(*config.Config) error
+	OnDiagnosticsChange func(enabled bool)
 
 	tab      tabID
 	tabField map[tabID][]field
@@ -223,12 +224,29 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	vc := cfg.Voice
 	ti := func(v string) textinput.Model { t := textinput.New(); t.SetValue(v); t.Cursor.Blink = false; return t }
 
+	diagnosticOptions := []string{"关闭", "本次运行", "后续 3 次启动", "持续开启"}
+	diagnosticOptionIndex := 0
+	switch {
+	case cfg.Diagnostics.StartupRuns == config.DiagnosticsAlways:
+		diagnosticOptionIndex = 3
+	case cfg.Diagnostics.StartupRuns > 0:
+		diagnosticOptionIndex = 2
+	case cfg.Diagnostics.Active:
+		diagnosticOptionIndex = 1
+	}
+
+	diagnosticLabel := "[高级] 诊断收集"
+	if cfg.Diagnostics.Active {
+		diagnosticLabel += "（当前运行中）"
+	}
+
 	general := []field{
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9；不支持字母数字等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
+		{label: diagnosticLabel, key: "diagnostics_startup_runs", help: "仅用于排查异常：在本机保存最近 512 KiB 日志，按 K 导出。默认关闭；选择次数后会在对应启动完成后自动关闭", fType: fSelect, opts: diagnosticOptions, optIdx: diagnosticOptionIndex},
 	}
 
 	engineTab := []field{
@@ -554,8 +572,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) openDiagnostics() {
-	if m.diagnostics == nil {
-		m.logf("诊断日志尚未初始化")
+	if m.diagnostics == nil || !m.diagnostics.Enabled() {
+		m.logf("诊断收集未启用；在「[高级] 诊断收集」中选择“本次运行”，或以 --diagnostics 启动")
 		return
 	}
 	path, err := diag.OpenInKate(m.diagnostics)
@@ -631,9 +649,30 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 			case "auto_gain":
 				vc.AutoGain = f.boolVal
+			case "diagnostics_startup_runs":
+				switch f.selectValue() {
+				case "后续 3 次启动":
+					next.Diagnostics.StartupRuns = 3
+				case "持续开启":
+					next.Diagnostics.StartupRuns = config.DiagnosticsAlways
+				default:
+					next.Diagnostics.StartupRuns = 0
+				}
 			}
 		}
 	}
+}
+
+func (m *Model) diagnosticsCurrentEnabled() bool {
+	for _, fs := range m.tabField {
+		for _, f := range fs {
+			if f.key != "diagnostics_startup_runs" {
+				continue
+			}
+			return f.selectValue() == "本次运行" || f.selectValue() == "持续开启"
+		}
+	}
+	return false
 }
 
 func (m *Model) save() {
@@ -656,6 +695,11 @@ func (m *Model) save() {
 	if err := config.Save(m.cfg); err != nil {
 		m.logf("保存失败: %s", err)
 	} else {
+		if m.OnDiagnosticsChange != nil {
+			enabled := m.diagnosticsCurrentEnabled()
+			m.cfg.Diagnostics.Active = enabled
+			m.OnDiagnosticsChange(enabled)
+		}
 		m.logf("✅ 配置已保存到 %s", config.FindConfig())
 	}
 	if m.OnSave != nil {
@@ -1540,7 +1584,7 @@ func (m *Model) renderMicPanel() string {
 	}
 	clipMark := ""
 	if lvl.Clipping {
-		clipMark = eStyle.Render(" ⚠ 削波！")
+		clipMark = eStyle.Render(" ⚠ 已限幅")
 	}
 	gainLine := "  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )")
 

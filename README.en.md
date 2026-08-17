@@ -161,7 +161,7 @@ Recommended hotkey config:
 mode = "toggle"
 push_to_talk = "Alt+Super"
 gain = 1
-auto_gain = true   # adaptive gain: lower on clipping, recover slowly when quiet
+auto_gain = true   # adaptive gain: quickly lifts weak voiced input and backs off when limiting engages
 omit_trailing_punct = false  # strip trailing "。" before output (master toggle)
 # omit_trailing_all = false  # sub: strip all trailing punctuation (incl. ASCII)
 # omit_trailing_ascii = false  # sub: additionally strip ASCII . ! ?
@@ -172,6 +172,10 @@ omit_trailing_punct = false  # strip trailing "。" before output (master toggle
 # write_clipboard = true      # sub: copy to clipboard (write the result)
 # restore_clipboard = true    # sub: restore clipboard after autotype on success
 # no_clipboard_on_fail = true # sub: on autotype failure, also restore the original
+
+# Diagnostics are off by default; use "this run" in the TUI to enable immediately; 3 = next 3 starts, -1 = always
+# [diagnostics]
+# startup_runs = 3
 ```
 
 `Alt+Super` with `toggle` mode is recommended. Press once to start recording, then press again to stop. This avoids hold-mode key conflicts with desktop environments or focused input fields. On Windows, the low-level keyboard hook only observes key edges and never consumes or replays modifiers, so standalone `Alt`, `Super`, and shortcuts such as `Alt+Tab` retain their normal system behavior. Modifier combinations require the exact configured set, and hook fallback state is checked against the unsuppressed physical key state so separate single-key presses cannot be combined into the shortcut.
@@ -292,10 +296,10 @@ Select "麦克风调试" in the TUI main form and press Enter to open the debug 
 
 - Press the **same recording hotkey** to start/stop a test recording (microphone only; no ASR, no submit)
 - `[` / `]` (or `h`/`l`, `k`/`j`) cycles recording devices (including "自动 = system default"); switching stops the test and persists to `[voice].device` (the device list is auto-detected)
-- Live unamplified peak/RMS bars, a post-gain RMS bar, peak-hold markers, and a clipping warning
+- Live unamplified peak/RMS bars, a post-gain RMS bar, peak-hold markers, and a soft-limiter warning
 - `+` / `-` fine-grained gain adjustment (1-100, applied live and persisted)
-- Space toggles adaptive gain (lower on clipping, recover slowly when quiet)
-- Press `K` in the TUI to export the in-memory diagnostics and open them in Kate for copying the full stop, ASR, and autotype timeline
+- Space toggles adaptive gain: weak voiced input rises quickly; silence does not raise gain and limiter engagement immediately backs it off
+- To investigate stalls, output, or recognition issues, choose this-run, next-3-start, or persistent collection in `[高级] 诊断收集`; when enabled, press `K` to export the local in-memory log to Kate. `--diagnostics` enables it for one invocation only
 
 The "历史记录" panel shows the last 10 successfully submitted/copied results; `j`/`k` to select, Enter to re-copy to the clipboard, `esc` to exit.
 

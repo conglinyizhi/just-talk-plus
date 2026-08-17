@@ -12,9 +12,11 @@ build:
 install: build
 	$(BUILD_DIR)/$(APP_NAME) --install
 
-# Run (current platform) from a freshly built binary
+# Run (current platform) from a freshly built binary. Pass temporary diagnostics
+# explicitly, for example: make run ARGS=--diagnostics
+ARGS ?=
 run: build
-	$(BUILD_DIR)/$(APP_NAME) --verbose
+	$(BUILD_DIR)/$(APP_NAME) $(ARGS)
 
 # Test
 test:

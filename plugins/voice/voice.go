@@ -1144,11 +1144,11 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client spe
 			return
 		default:
 		}
-		n, err := rec.Read(buf)
+		n, rawPeak, rawRMS, gainedPeak, _, limited, err := rec.readWithLevels(buf)
 		if n > 0 {
-			// 自适应增益：分析实际电平，按需调整麦克风增益（细粒度）
-			peak, rms := analyzePCM(buf[:n])
-			if micTest.autoGain.Process(peak, rms, time.Now()) {
+			// Gate adjustment on the original microphone samples, then drive the
+			// gain from the post-gain peak sent to the ASR engine.
+			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, time.Now()) {
 				rec.SetGain(micTest.autoGain.Gain())
 			}
 			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)

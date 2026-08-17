@@ -6,48 +6,46 @@
 package voice
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// AutoGain 自适应麦克风增益（AGC）：
-//   - 削波（peak 接近满幅）或持续高电平 → 自动降低增益
-//   - 长时间低语音 → 缓慢升回增益
-//   - 细粒度步进（整数增益），可手动设置基准后继续自动调节
-//
-// 分析基于增益应用后的实际电平（recorder.Read 的输出），削波检测天然准确。
+// AutoGain keeps speech in a useful range before it is sent to ASR. It gates
+// adjustment on the unamplified input, so silence does not continually raise
+// gain, while the output peak determines how quickly the gain is corrected.
 type AutoGain struct {
-	enabled   bool
-	gain      atomic.Int32
-	target    float64 // 目标峰值，0..1
-	clipLimit float64 // 削波阈值，0..1
-	lowMin    float64 // 低语音 RMS 下界（低于此视为静音，不升增益）
-	lowMax    float64 // 低语音 RMS 上界
-	lowDelay  time.Duration
-	stepDown  int32 // 削波降档步进
-	minGain   int32
-	maxGain   int32
+	enabled bool
+	gain    atomic.Int32
 
-	mu        sync.Mutex
-	clipCount int
-	hotCount  int
-	lowSince  time.Time
-	lowActive bool
+	targetPeak    float64
+	minPeak       float64
+	maxPeak       float64
+	clipLimit     float64
+	voicePeakMin  float64
+	voiceRMSMin   float64
+	maxRiseFactor float64
+	minGain       int32
+	maxGain       int32
+
+	mu sync.Mutex
 }
 
-// NewAutoGain 构造自适应增益；enabled 为开关，initial 为初始增益。
+// NewAutoGain constructs an AGC controller. The target leaves headroom for
+// louder syllables while lifting consistently weak microphones quickly.
 func NewAutoGain(enabled bool, initial int) *AutoGain {
 	a := &AutoGain{
-		enabled:   enabled,
-		target:    0.70,
-		clipLimit: 0.98,
-		lowMin:    0.005,
-		lowMax:    0.05,
-		lowDelay:  1500 * time.Millisecond,
-		stepDown:  2,
-		minGain:   int32(MinGain),
-		maxGain:   int32(MaxGain),
+		enabled:       enabled,
+		targetPeak:    0.60,
+		minPeak:       0.32,
+		maxPeak:       0.82,
+		clipLimit:     0.96,
+		voicePeakMin:  0.004,
+		voiceRMSMin:   0.0007,
+		maxRiseFactor: 1.7,
+		minGain:       int32(MinGain),
+		maxGain:       int32(MaxGain),
 	}
 	a.gain.Store(int32(clampGain(initial)))
 	return a
@@ -56,67 +54,61 @@ func NewAutoGain(enabled bool, initial int) *AutoGain {
 func (a *AutoGain) Enabled() bool      { return a.enabled }
 func (a *AutoGain) SetEnabled(on bool) { a.enabled = on }
 
-// Gain 返回当前增益（并发安全）。
+// Gain returns the current multiplier.
 func (a *AutoGain) Gain() int { return int(a.gain.Load()) }
 
-// SetGain 手动设定增益基准（如 TUI 微调后），自动调节从该值继续。
+// SetGain changes the manual baseline. Further automatic adjustment starts
+// from this value.
 func (a *AutoGain) SetGain(g int) { a.gain.Store(int32(clampGain(g))) }
 
-// Process 分析一块电平（peak/rms，0..1），按需调整增益；返回是否调整。
-// now 用于低语音恢复的计时（跨块累计）。
-func (a *AutoGain) Process(peak, rms float64, now time.Time) bool {
+// Process observes one PCM block. rawPeak/rawRMS are measured before gain,
+// outputPeak after gain, and limited reports that the soft limiter engaged.
+// The time parameter is retained for callers that sample at explicit times.
+func (a *AutoGain) Process(rawPeak, rawRMS, outputPeak float64, limited bool, _ time.Time) bool {
 	if !a.enabled {
 		return false
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	g := a.gain.Load()
-	changed := false
+	// Do not chase the noise floor. A weak microphone still clears both limits
+	// during speech (for example peak 0.01 / RMS 0.002), while quiet room tone
+	// normally does not.
+	if rawPeak < a.voicePeakMin || rawRMS < a.voiceRMSMin {
+		return false
+	}
+
+	current := a.gain.Load()
+	next := current
 	switch {
-	case peak >= a.clipLimit:
-		// 削波：连续两块立即降档（不跨过下限）
-		a.clipCount++
-		a.hotCount = 0
-		a.lowActive = false
-		if a.clipCount >= 2 && g > a.minGain {
-			g -= a.stepDown
-			if g < a.minGain {
-				g = a.minGain
-			}
-			a.clipCount = 0
-			changed = true
+	case limited || outputPeak >= a.clipLimit:
+		// Limiting means this gain is already unsafe. Drop decisively so the next
+		// block has usable headroom instead of waiting for repeated hard clips.
+		next = int32(math.Floor(float64(current) * 0.65))
+	case outputPeak > a.maxPeak:
+		ratio := a.targetPeak / outputPeak
+		if ratio < 0.65 {
+			ratio = 0.65
 		}
-	case peak >= a.target:
-		// 高电平未削波：持续约 1.5s 后小步降
-		a.clipCount = 0
-		a.hotCount++
-		a.lowActive = false
-		if a.hotCount >= 15 && g > a.minGain {
-			g--
-			a.hotCount = 0
-			changed = true
+		next = int32(math.Floor(float64(current) * ratio))
+	case outputPeak < a.minPeak:
+		denominator := math.Max(outputPeak, 0.01)
+		ratio := a.targetPeak / denominator
+		if ratio > a.maxRiseFactor {
+			ratio = a.maxRiseFactor
 		}
-	case rms >= a.lowMin && rms < a.lowMax:
-		// 低语音：持续 lowDelay 后缓慢升回
-		a.clipCount = 0
-		a.hotCount = 0
-		if !a.lowActive {
-			a.lowActive = true
-			a.lowSince = now
-		} else if now.Sub(a.lowSince) >= a.lowDelay && g < a.maxGain {
-			g++
-			a.lowSince = now
-			changed = true
-		}
-	default:
-		// 静音或正常电平：复位计数
-		a.clipCount = 0
-		a.hotCount = 0
-		a.lowActive = false
+		next = int32(math.Ceil(float64(current) * ratio))
 	}
-	if changed {
-		a.gain.Store(g)
+
+	if next < a.minGain {
+		next = a.minGain
 	}
-	return changed
+	if next > a.maxGain {
+		next = a.maxGain
+	}
+	if next == current {
+		return false
+	}
+	a.gain.Store(next)
+	return true
 }

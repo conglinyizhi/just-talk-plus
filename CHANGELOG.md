@@ -4,7 +4,11 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
-- TUI `K` now exports the in-memory diagnostics to a temporary file and opens it in Kate; `make run` builds a fresh binary with verbose timing anchors for stop, ASR, clipboard, and autotype stages.
+- Added opt-in in-memory diagnostics: the `[高级] 诊断收集` TUI setting enables collection for the current run, the next three starts, or persistently; `--diagnostics` enables one invocation. `K` exports an enabled run's local snapshot to Kate, while normal launches retain no diagnostic log.
+
+- Adaptive gain now gates on the unamplified microphone level, raises consistently weak speech toward a useful range within a few audio blocks, and uses a soft limiter plus immediate gain back-off to protect louder speech.
+
+- `make run` now builds and starts a fresh normal binary; pass `ARGS=--diagnostics` when reproducing a problem.
 
 - Wayland 自动上屏改为前台托管临时 `wl-copy`，粘贴完成后主动回收，避免后台剪贴板 owner 残留导致第二次上屏卡住。
 

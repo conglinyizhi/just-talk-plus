@@ -66,7 +66,7 @@ func TestBuildTabFields(t *testing.T) {
 	m := New(config.Default())
 
 	general := tabKeys(m.tabField[tabGeneral])
-	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms"} {
+	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms", "diagnostics_startup_runs"} {
 		if !general[want] {
 			t.Fatalf("general missing %q: %v", want, general)
 		}
@@ -359,6 +359,23 @@ func TestEnginePickerFlow(t *testing.T) {
 }
 
 // ---- 渠道配置弹层 ----
+
+func TestDiagnosticsSettingAppliesStartupRuns(t *testing.T) {
+	m := readyModel(config.Default())
+	f := fieldByKey(m, "diagnostics_startup_runs")
+	f.optIdx = 2 // 后续 3 次启动
+	next := *m.cfg
+	m.applyFieldsTo(&next)
+	if got := next.Diagnostics.StartupRuns; got != 3 {
+		t.Fatalf("diagnostics startup runs=%d, want 3", got)
+	}
+
+	f.optIdx = 3 // 持续开启
+	m.applyFieldsTo(&next)
+	if got := next.Diagnostics.StartupRuns; got != config.DiagnosticsAlways {
+		t.Fatalf("persistent diagnostics=%d, want %d", got, config.DiagnosticsAlways)
+	}
+}
 
 func TestConfigOverlayFlow(t *testing.T) {
 	cfg := config.Default()
@@ -673,7 +690,7 @@ func TestViewOverlayDoesNotPushContent(t *testing.T) {
 func TestOpenDiagnosticsWithoutBufferLogsFailure(t *testing.T) {
 	m := readyModel(config.Default())
 	m.openDiagnostics()
-	if len(m.logs) == 0 || !strings.Contains(m.logs[len(m.logs)-1], "尚未初始化") {
+	if len(m.logs) == 0 || !strings.Contains(m.logs[len(m.logs)-1], "未启用") {
 		t.Fatalf("diagnostics failure should be visible in TUI logs: %v", m.logs)
 	}
 }

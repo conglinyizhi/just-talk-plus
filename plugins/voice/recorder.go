@@ -29,6 +29,7 @@ type Recorder struct {
 	drainBuf bytes.Buffer
 	started  bool
 	backend  string
+	limited  atomic.Bool
 }
 
 func clampGain(g int) int {
@@ -82,17 +83,18 @@ func (r *Recorder) Start() error {
 }
 
 func (r *Recorder) Read(p []byte) (int, error) {
-	n, _, _, _, _, err := r.read(p, false)
+	n, _, _, _, _, _, err := r.read(p, false)
 	return n, err
 }
 
 // readWithLevels reads PCM and reports both the unamplified input level and
-// the level after the recorder's current gain has been applied.
-func (r *Recorder) readWithLevels(p []byte) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, err error) {
+// the level after the recorder's current gain has been applied. limited reports
+// whether the soft limiter compressed this block.
+func (r *Recorder) readWithLevels(p []byte) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, limited bool, err error) {
 	return r.read(p, true)
 }
 
-func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, err error) {
+func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, limited bool, err error) {
 	r.readMu.Lock()
 	defer r.readMu.Unlock()
 
@@ -102,15 +104,15 @@ func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedP
 		r.mu.Unlock()
 		if measure {
 			gainedPeak, gainedRMS = analyzePCM(p[:n])
-			return n, gainedPeak, gainedRMS, gainedPeak, gainedRMS, nil
+			return n, gainedPeak, gainedRMS, gainedPeak, gainedRMS, r.limited.Load(), nil
 		}
-		return n, 0, 0, 0, 0, nil
+		return n, 0, 0, 0, 0, r.limited.Load(), nil
 	}
 	stdout := r.stdout
 	r.mu.Unlock()
 
 	if stdout == nil {
-		return 0, 0, 0, 0, 0, io.EOF
+		return 0, 0, 0, 0, 0, false, io.EOF
 	}
 
 	n, err = stdout.Read(p)
@@ -119,8 +121,9 @@ func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedP
 			rawPeak, rawRMS = analyzePCM(p[:n])
 		}
 		if g := r.Gain(); g > 1 {
-			applyGain(p[:n], g)
+			limited = applyGain(p[:n], g)
 		}
+		r.limited.Store(limited)
 		if measure {
 			gainedPeak, gainedRMS = analyzePCM(p[:n])
 		}
@@ -128,7 +131,7 @@ func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedP
 	if errors.Is(err, os.ErrClosed) {
 		err = io.EOF
 	}
-	return n, rawPeak, rawRMS, gainedPeak, gainedRMS, err
+	return n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err
 }
 
 func (r *Recorder) Stop() ([]byte, error) {
@@ -176,19 +179,33 @@ func (r *Recorder) Stop() ([]byte, error) {
 	return remaining, nil
 }
 
-// applyGain multiplies s16le samples by gain factor, clamping to valid range.
-func applyGain(pcm []byte, gain int) {
+// applyGain multiplies s16le samples and soft-limits peaks before they reach
+// hard clipping. It reports whether compression was applied to any sample.
+func applyGain(pcm []byte, gain int) (limited bool) {
+	const softLimit = 0.92
 	for i := 0; i+1 < len(pcm); i += 2 {
-		s := int16(pcm[i]) | int16(pcm[i+1])<<8
-		s32 := int32(s) * int32(gain)
-		if s32 > 32767 {
-			s32 = 32767
-		} else if s32 < -32768 {
-			s32 = -32768
+		s := float64(int16(pcm[i])|int16(pcm[i+1])<<8) / 32767.0
+		x := s * float64(gain)
+		abs := math.Abs(x)
+		if abs > softLimit {
+			limited = true
+			compressed := softLimit + (1-softLimit)*(1-math.Exp(-(abs-softLimit)/(1-softLimit)))
+			if x < 0 {
+				x = -compressed
+			} else {
+				x = compressed
+			}
 		}
-		pcm[i] = byte(s32)
-		pcm[i+1] = byte(s32 >> 8)
+		v := int32(math.Round(x * 32767.0))
+		if v > 32767 {
+			v = 32767
+		} else if v < -32768 {
+			v = -32768
+		}
+		pcm[i] = byte(v)
+		pcm[i+1] = byte(v >> 8)
 	}
+	return limited
 }
 
 // analyzePCM 计算 s16le PCM 的峰值与 RMS（归一化到 0..1，含增益应用后的实际电平）。

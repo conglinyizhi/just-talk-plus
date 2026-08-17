@@ -12,66 +12,40 @@ import (
 	"time"
 )
 
-func TestAutoGainClipReduces(t *testing.T) {
-	a := NewAutoGain(true, 10)
-	now := time.Now()
-	// 削波：第一块只计数
-	a.Process(0.99, 0.5, now)
-	if a.Gain() != 10 {
-		t.Fatalf("gain=%d, want 10", a.Gain())
+func TestAutoGainLimiterDropsGain(t *testing.T) {
+	a := NewAutoGain(true, 20)
+	if !a.Process(0.05, 0.01, 0.97, true, time.Now()) {
+		t.Fatal("limited speech should reduce gain")
 	}
-	// 连续第二块 → 降 2
-	a.Process(0.99, 0.5, now.Add(time.Millisecond))
-	if a.Gain() != 8 {
-		t.Fatalf("gain=%d, want 8", a.Gain())
-	}
-	// 持续削波继续降
-	a.Process(1.0, 0.6, now.Add(2*time.Millisecond))
-	a.Process(1.0, 0.6, now.Add(3*time.Millisecond))
-	if a.Gain() != 6 {
-		t.Fatalf("gain=%d, want 6", a.Gain())
-	}
-	// 削波降到下限为止
-	for i := 0; i < 20; i++ {
-		a.Process(1.0, 0.6, now.Add(time.Duration(i+4)*time.Millisecond))
-		a.Process(1.0, 0.6, now.Add(time.Duration(i+5)*time.Millisecond))
-	}
-	if a.Gain() < MinGain {
-		t.Fatalf("gain=%d below min", a.Gain())
+	if got := a.Gain(); got != 13 {
+		t.Fatalf("gain=%d, want 13", got)
 	}
 }
 
-func TestAutoGainQuietRecovers(t *testing.T) {
-	a := NewAutoGain(true, 5)
+func TestAutoGainRaisesWeakSpeechQuickly(t *testing.T) {
+	a := NewAutoGain(true, 7)
 	now := time.Now()
-	changed := false
-	// 低语音持续 1.5s（lowDelay）后缓慢升回；4s 内升 2 次
-	for i := 0; i < 20; i++ {
-		if a.Process(0.1, 0.02, now.Add(time.Duration(i)*200*time.Millisecond)) {
-			changed = true
-		}
+	for i := 0; i < 4; i++ {
+		a.Process(0.01, 0.002, 0.07, false, now.Add(time.Duration(i)*200*time.Millisecond))
 	}
-	if !changed || a.Gain() != 7 {
-		t.Fatalf("gain=%d changed=%v, want 7", a.Gain(), changed)
+	if got := a.Gain(); got < 30 {
+		t.Fatalf("gain=%d, want weak speech to reach useful range quickly", got)
 	}
 }
 
-func TestAutoGainSilenceDoesNotRecover(t *testing.T) {
-	a := NewAutoGain(true, 5)
-	now := time.Now()
-	// 静音（rms < lowMin）不得升增益
+func TestAutoGainSilenceDoesNotRise(t *testing.T) {
+	a := NewAutoGain(true, 7)
 	for i := 0; i < 20; i++ {
-		a.Process(0.0, 0.001, now.Add(time.Duration(i)*200*time.Millisecond))
+		a.Process(0.001, 0.0001, 0.007, false, time.Now())
 	}
-	if a.Gain() != 5 {
-		t.Fatalf("gain=%d, want 5 (silence must not raise)", a.Gain())
+	if got := a.Gain(); got != 7 {
+		t.Fatalf("gain=%d, want 7 (silence must not raise)", got)
 	}
 }
 
 func TestAutoGainDisabled(t *testing.T) {
 	a := NewAutoGain(false, 5)
-	a.Process(0.99, 0.5, time.Now())
-	a.Process(0.99, 0.5, time.Now())
+	a.Process(0.01, 0.002, 0.05, false, time.Now())
 	if a.Gain() != 5 {
 		t.Fatalf("disabled still changed gain: %d", a.Gain())
 	}
@@ -106,7 +80,7 @@ func TestReadWithLevels(t *testing.T) {
 	}
 
 	buf := make([]byte, 2)
-	n, rawPeak, rawRMS, gainedPeak, gainedRMS, err := recorder.readWithLevels(buf)
+	n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := recorder.readWithLevels(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,11 +90,14 @@ func TestReadWithLevels(t *testing.T) {
 	if math.Abs(rawPeak-0.5) > 0.01 || math.Abs(rawRMS-0.5) > 0.01 {
 		t.Fatalf("raw levels peak=%v rms=%v, want about 0.5", rawPeak, rawRMS)
 	}
-	if gainedPeak < 0.99 || gainedRMS < 0.99 {
-		t.Fatalf("gained levels peak=%v rms=%v, want near 1", gainedPeak, gainedRMS)
+	if !limited {
+		t.Fatal("gain should engage soft limiter")
 	}
-	if got := buf; got[0] != 0xFF || got[1] != 0x7F {
-		t.Fatalf("gained PCM=%#v, want full-scale positive sample", got)
+	if gainedPeak < 0.95 || gainedPeak >= 0.99 || gainedRMS < 0.95 || gainedRMS >= 0.99 {
+		t.Fatalf("gained levels peak=%v rms=%v, want soft-limited range", gainedPeak, gainedRMS)
+	}
+	if got := buf; got[0] == 0xFF && got[1] == 0x7F {
+		t.Fatalf("gained PCM=%#v, should not hard-clip to full scale", got)
 	}
 }
 

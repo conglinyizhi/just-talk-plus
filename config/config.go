@@ -18,14 +18,39 @@ import (
 )
 
 type Config struct {
-	Voice   VoiceConfig   `toml:"voice"`
-	Debug   DebugConfig   `toml:"debug"`
-	Overlay OverlayConfig `toml:"overlay"`
+	Voice       VoiceConfig       `toml:"voice"`
+	Debug       DebugConfig       `toml:"debug"`
+	Diagnostics DiagnosticsConfig `toml:"diagnostics"`
+	Overlay     OverlayConfig     `toml:"overlay"`
 }
 
 type DebugConfig struct {
 	Enabled bool     `toml:"enabled"`
 	Hotkeys []string `toml:"hotkeys"`
+}
+
+// DiagnosticsConfig controls bounded in-memory diagnostic collection.
+// StartupRuns is 0 when disabled, -1 when enabled for every start, and a
+// positive number of future starts to collect before automatically disabling.
+type DiagnosticsConfig struct {
+	StartupRuns int  `toml:"startup_runs"`
+	Active      bool `toml:"-"`
+}
+
+const DiagnosticsAlways = -1
+
+// ConsumeStartup reports whether diagnostics should be collected for this
+// process and decrements a finite future-start allowance.
+func (d *DiagnosticsConfig) ConsumeStartup() bool {
+	switch {
+	case d.StartupRuns == DiagnosticsAlways:
+		return true
+	case d.StartupRuns > 0:
+		d.StartupRuns--
+		return true
+	default:
+		return false
+	}
 }
 
 type OverlayConfig struct {
@@ -170,12 +195,18 @@ func Save(cfg *Config) error {
 	path := FindConfig()
 	if path == "" {
 		path = DefaultPath()
-		if path == "" {
-			return fmt.Errorf("cannot determine user config directory")
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return err
-		}
+	}
+	return SaveTo(path, cfg)
+}
+
+// SaveTo writes cfg to an explicit TOML path. It is used when a startup-only
+// setting must be consumed from a config selected with --config.
+func SaveTo(path string, cfg *Config) error {
+	if path == "" {
+		return fmt.Errorf("cannot determine user config directory")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
 	}
 	f, err := os.Create(path)
 	if err != nil {

@@ -20,7 +20,7 @@ type MicLevel struct {
 	RMS           float64 // 原始输入 RMS 0..1
 	GainedRMS     float64 // 应用增益后的 RMS 0..1
 	Gain          int     // 当前增益
-	Clipping      bool    // 应用增益后是否削波
+	Clipping      bool    // 应用增益后是否触发软限幅
 	AutoGain      bool    // 自适应增益开关
 	PeakHold      float64 // 原始输入峰值保持（0 = 无标记）
 	RMSHold       float64 // 原始输入 RMS 保持（0 = 无标记）
@@ -251,10 +251,10 @@ func micTestLoop(ctx context.Context, rec *Recorder) {
 			return
 		default:
 		}
-		n, rawPeak, rawRMS, gainedPeak, gainedRMS, err := rec.readWithLevels(buf)
+		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
 		if n > 0 {
 			now := time.Now()
-			if micTest.autoGain.Process(gainedPeak, gainedRMS, now) {
+			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, now) {
 				rec.SetGain(micTest.autoGain.Gain())
 			}
 			micTest.mu.Lock()
@@ -262,7 +262,7 @@ func micTestLoop(ctx context.Context, rec *Recorder) {
 			micTest.level.RMS = rawRMS
 			micTest.level.GainedRMS = gainedRMS
 			micTest.level.Gain = micTest.autoGain.Gain()
-			micTest.level.Clipping = gainedPeak >= 0.98
+			micTest.level.Clipping = limited
 			micTest.level.AutoGain = micTest.autoGain.Enabled()
 			micTest.level.PeakHold = micTest.peakHold.update(rawPeak, now)
 			micTest.level.RMSHold = micTest.rmsHold.update(rawRMS, now)
