@@ -670,6 +670,14 @@ func TestViewOverlayDoesNotPushContent(t *testing.T) {
 
 // ---- 按键 ----
 
+func TestOpenDiagnosticsWithoutBufferLogsFailure(t *testing.T) {
+	m := readyModel(config.Default())
+	m.openDiagnostics()
+	if len(m.logs) == 0 || !strings.Contains(m.logs[len(m.logs)-1], "尚未初始化") {
+		t.Fatalf("diagnostics failure should be visible in TUI logs: %v", m.logs)
+	}
+}
+
 func TestLogsKeyUppercaseL(t *testing.T) {
 	m := readyModel(config.Default())
 	before := m.logExpanded

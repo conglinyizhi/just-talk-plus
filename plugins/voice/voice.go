@@ -84,6 +84,7 @@ func pout(format string, args ...interface{}) {
 	msg := strings.ReplaceAll(fmt.Sprintf(format, args...), "\n", " ")
 	if TUILog != nil {
 		TUILog(msg)
+		slog.Debug("tui message", "message", msg)
 		return
 	}
 	outputMu.Lock()
@@ -793,24 +794,28 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		return
 	}
 	defer p.recordingSessionFinished(session.sessionID)
+	finishStarted := time.Now()
+	p.logger.Debug("latency anchor: finish started", "session_id", session.sessionID, "user_stopped", session.userStopped)
 	pout("🎤 停止录音")
 	if session.asrClient == nil && session.asrCancel != nil {
 		session.asrCancel()
 	}
 	var remaining []byte
 	if session.recorder != nil {
-		p.logger.Debug("finish session: stopping recorder")
+		stageStarted := time.Now()
+		p.logger.Debug("latency anchor: recorder stop start", "session_id", session.sessionID)
 		remaining, _ = session.recorder.Stop()
-		p.logger.Debug("finish session: recorder stopped", "remaining_bytes", len(remaining))
+		p.logger.Debug("latency anchor: recorder stop done", "session_id", session.sessionID, "remaining_bytes", len(remaining), "duration_ms", time.Since(stageStarted).Milliseconds())
 	}
 
 	if session.asrClient != nil {
 		audioDrained := true
 		if session.audioDone != nil {
-			p.logger.Debug("finish session: waiting audio stream drain")
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: audio drain wait start", "session_id", session.sessionID)
 			select {
 			case <-session.audioDone:
-				p.logger.Debug("finish session: audio stream drained")
+				p.logger.Debug("latency anchor: audio drain wait done", "session_id", session.sessionID, "duration_ms", time.Since(stageStarted).Milliseconds())
 			case <-time.After(audioDrainTimeout):
 				audioDrained = false
 				p.logger.Warn("finish session: audio stream drain timed out")
@@ -822,7 +827,8 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 
 		finalSent := false
 		if audioDrained {
-			p.logger.Debug("finish session: sending final audio", "bytes", len(remaining))
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: final audio send start", "session_id", session.sessionID, "bytes", len(remaining))
 			sendCtx, sendCancel := context.WithTimeout(context.Background(), audioSendTimeout)
 			err := session.asrClient.SendAudio(sendCtx, remaining, true)
 			sendCancel()
@@ -833,6 +839,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				}
 			} else {
 				finalSent = true
+				p.logger.Debug("latency anchor: final audio send done", "session_id", session.sessionID, "duration_ms", time.Since(stageStarted).Milliseconds())
 			}
 		}
 		if finalSent {
@@ -841,12 +848,13 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			if _, isBatch := session.asrClient.(*speech.BatchSession); isBatch {
 				finalTimeout = 5 * time.Minute
 			}
-			p.logger.Debug("finish session: waiting ASR final", "timeout", finalTimeout)
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: ASR final wait start", "session_id", session.sessionID, "timeout", finalTimeout)
 			select {
 			case <-session.asrClient.Final():
-				p.logger.Debug("finish session: ASR final received")
+				p.logger.Debug("latency anchor: ASR final wait done", "session_id", session.sessionID, "reason", "final", "duration_ms", time.Since(stageStarted).Milliseconds())
 			case <-session.asrClient.Done():
-				p.logger.Debug("finish session: ASR done")
+				p.logger.Debug("latency anchor: ASR final wait done", "session_id", session.sessionID, "reason", "done", "duration_ms", time.Since(stageStarted).Milliseconds())
 			case <-time.After(finalTimeout):
 				if !p.sessionCanceled(session.sessionID) {
 					pout("⚠️  识别超时")
@@ -855,12 +863,13 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			}
 		}
 		if text := session.asrClient.LastText(); text != "" && session.userStopped && p.claimSessionOutput(session.sessionID) {
+			p.logger.Debug("latency anchor: output claimed", "session_id", session.sessionID, "text_len", len(text), "finish_elapsed_ms", time.Since(finishStarted).Milliseconds())
 			audioDuration := time.Duration(0)
 			if !session.startedAt.IsZero() {
 				audioDuration = time.Since(session.startedAt)
 			}
 			recordTUIStats(text, audioDuration)
-			p.dispatchTextOutput(text)
+			p.dispatchTextOutput(text, session.sessionID)
 		}
 		p.logger.Debug("finish session: closing ASR client")
 		closeDone := make(chan error, 1)
@@ -880,7 +889,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	p.logger.Debug("finish session: done")
 }
 
-func (p *VoicePlugin) dispatchTextOutput(text string) {
+func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64) {
 	// 输出层统一处理：省略句尾标点、删除中文间空格、中文排版自动空格（上屏/复制前，含历史记录）
 	vc := p.cfg.Load().Voice
 	text = cleanTrailingPunct(text, vc)
@@ -891,9 +900,11 @@ func (p *VoicePlugin) dispatchTextOutput(text string) {
 		text = autoSpaceCJK(text)
 	}
 	go func() {
-		// 输出流程串行执行：同一时刻只有一次识别的上屏/复制/还原在操作剪贴板，
-		// 避免连续两次录音的 goroutine 并发覆盖剪贴板导致上屏错乱（粘到上一步内容）。
+		queuedAt := time.Now()
+		p.logger.Debug("latency anchor: output queued", "session_id", sessionID, "text_len", len(text))
 		dispatchMu.Lock()
+		lockAt := time.Now()
+		p.logger.Debug("latency anchor: output lock acquired", "session_id", sessionID, "text_len", len(text), "wait_ms", lockAt.Sub(queuedAt).Milliseconds())
 		defer dispatchMu.Unlock()
 
 		// 「上屏与复制」行为组合，按平级选项依次执行：
@@ -903,40 +914,54 @@ func (p *VoicePlugin) dispatchTextOutput(text string) {
 		//   2. 复制到剪贴板：独立行为，把识别结果写入剪贴板（可单独开/关）
 		var origClipboard string
 		if vc.RestoreClipboard || vc.NoClipboardOnFail {
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: clipboard read start", "session_id", sessionID)
 			if cb, err := clipboard.New(); err == nil {
 				if s, err := cb.Get(); err == nil {
 					origClipboard = s
+					p.logger.Debug("latency anchor: clipboard read done", "session_id", sessionID, "text_len", len(s), "duration_ms", time.Since(stageStarted).Milliseconds())
+				} else {
+					p.logger.Debug("latency anchor: clipboard read failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 				}
+			} else {
+				p.logger.Debug("latency anchor: clipboard init failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 			}
 		}
 		if vc.AutoSubmit {
-			if err := autotype.Paste(text, p.logger); err != nil {
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: autotype start", "session_id", sessionID, "text_len", len(text))
+			if err := autotype.Paste(text, p.logger.With("session_id", sessionID)); err != nil {
 				pout("❌ 上屏失败: %v", err)
 				if vc.NoClipboardOnFail {
-					restoreClipboard(origClipboard, p.logger)
+					restoreClipboard(origClipboard, p.logger.With("session_id", sessionID))
 					pout("ℹ️  未写入剪贴板")
 				} else if !vc.WriteClipboard {
 					// 失败且未要求复制：文本留在剪贴板作为兜底
 					pout("📋 已复制到剪贴板")
 				}
 			} else {
+				p.logger.Debug("latency anchor: autotype done", "session_id", sessionID, "text_len", len(text), "duration_ms", time.Since(stageStarted).Milliseconds())
 				pout("✅ 已上屏")
 				if vc.RestoreClipboard {
-					restoreClipboard(origClipboard, p.logger)
+					restoreClipboard(origClipboard, p.logger.With("session_id", sessionID))
 				}
 			}
 		}
 
 		if vc.WriteClipboard {
-			p.logger.Debug("text output: writing clipboard", "text_len", len(text))
+			stageStarted := time.Now()
+			p.logger.Debug("latency anchor: persistent clipboard start", "session_id", sessionID, "text_len", len(text))
 			if err := writeClipboard(text); err != nil {
+				p.logger.Debug("latency anchor: persistent clipboard failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 				pout("❌ 复制到剪贴板失败: %v", err)
 			} else {
+				p.logger.Debug("latency anchor: persistent clipboard done", "session_id", sessionID, "text_len", len(text), "duration_ms", time.Since(stageStarted).Milliseconds())
 				pout("📋 已复制到剪贴板")
 			}
 		} else if !vc.AutoSubmit {
 			p.logger.Debug("text output: no action configured", "text_len", len(text))
 		}
+		p.logger.Debug("latency anchor: output complete", "session_id", sessionID, "total_after_queue_ms", time.Since(queuedAt).Milliseconds())
 		recordHistory(text)
 	}()
 }
@@ -1157,16 +1182,19 @@ func writeClipboard(text string) error {
 // restoreClipboard 上屏后恢复剪贴板原内容（尽力而为，失败只记日志）。
 func restoreClipboard(orig string, logger *slog.Logger) {
 	if orig == "" {
+		logger.Debug("latency anchor: clipboard restore skipped", "reason", "empty_original")
 		return // 原剪贴板为空，无需恢复
 	}
+	stageStarted := time.Now()
+	logger.Debug("latency anchor: clipboard restore start", "text_len", len(orig))
 	cb, err := clipboard.New()
 	if err != nil {
 		logger.Debug("restore clipboard: init failed", "error", err)
 		return
 	}
 	if err := cb.Set(orig); err != nil {
-		logger.Debug("restore clipboard: set failed", "error", err)
+		logger.Debug("latency anchor: clipboard restore failed", "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 		return
 	}
-	logger.Debug("clipboard restored after autotype")
+	logger.Debug("latency anchor: clipboard restore done", "duration_ms", time.Since(stageStarted).Milliseconds())
 }

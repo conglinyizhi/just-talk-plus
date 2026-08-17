@@ -104,28 +104,51 @@ func pasteX11(text string, logger *slog.Logger) error {
 }
 
 func pasteWayland(text string, logger *slog.Logger) error {
-	// --sensitive（wl-clipboard ≥2.2）：同时 offer x-kde-passwordManagerHint，
-	// Klipper 与 CopyQ 8.0+ 会把该内容视为敏感并跳过历史记录，
-	// 减少上屏临时写入对剪贴板历史（剪贴板管理器）的污染。
+	// 自动上屏使用前台 wl-copy，由当前调用方在目标应用完成读取后主动回收。
+	// 普通 clipboard.Set 仍使用持久剪贴板，避免改变用户主动复制的语义。
 	sensitiveArgs := buildWaylandCopyArgs(wlCopySupportsSensitive())
-	args := append([]string{"wl-copy"}, sensitiveArgs...)
-	if err := pipeToCmd(text, args...); err != nil {
+	stageStarted := time.Now()
+	clipboardCmd, cancelClipboard, err := startPipeCmd(text, append([]string{"wl-copy", "--foreground"}, sensitiveArgs...)...)
+	if err != nil {
+		logger.Debug("wayland clipboard owner start failed", "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 		return fmt.Errorf("set Wayland clipboard: %w", err)
 	}
+	logger.Debug("wayland clipboard owner started", "pid", clipboardCmd.Process.Pid, "duration_ms", time.Since(stageStarted).Milliseconds())
+	defer func() {
+		cancelClipboard()
+		waitStarted := time.Now()
+		err := clipboardCmd.Wait()
+		logger.Debug("wayland clipboard owner reaped", "pid", clipboardCmd.Process.Pid, "wait_error", err, "duration_ms", time.Since(waitStarted).Milliseconds())
+	}()
+
+	var primaryCmd *exec.Cmd
+	var cancelPrimary context.CancelFunc
 	if !isKDEPlasma() {
-		pargs := append([]string{"wl-copy", "--primary"}, sensitiveArgs...)
-		if err := pipeToCmd(text, pargs...); err != nil {
+		primaryCmd, cancelPrimary, err = startPipeCmd(text, append([]string{"wl-copy", "--primary", "--foreground"}, sensitiveArgs...)...)
+		if err != nil {
+			logger.Debug("wayland primary owner start failed", "error", err)
 			return fmt.Errorf("set Wayland primary selection: %w", err)
 		}
+		logger.Debug("wayland primary owner started", "pid", primaryCmd.Process.Pid)
+		defer func() {
+			cancelPrimary()
+			waitStarted := time.Now()
+			err := primaryCmd.Wait()
+			logger.Debug("wayland primary owner reaped", "pid", primaryCmd.Process.Pid, "wait_error", err, "duration_ms", time.Since(waitStarted).Milliseconds())
+		}()
 	}
 
+	logger.Debug("wayland paste simulation start")
 	time.Sleep(50 * time.Millisecond)
 	if err := simulatePaste(); err != nil {
+		logger.Debug("wayland paste simulation failed", "error", err)
 		return fmt.Errorf("simulate paste: %w", err)
 	}
+	logger.Debug("wayland paste simulation sent")
 
-	// 与 X11 路径一致：给目标应用留出读取剪贴板的时间。
+	// 给目标应用留出读取剪贴板的时间，随后 defer 会明确回收 wl-copy。
 	time.Sleep(pasteSettleDelay)
+	logger.Debug("wayland paste settle done", "duration_ms", pasteSettleDelay.Milliseconds())
 
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil
@@ -174,21 +197,8 @@ func runClipboard(args ...string) (string, error) {
 func pipeToCmd(input string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	stdin, err := cmd.StdinPipe()
+	cmd, err := startPipeCmdWithContext(ctx, input, args...)
 	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if _, err := stdin.Write([]byte(input)); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return err
-	}
-	if err := stdin.Close(); err != nil {
-		_ = cmd.Wait()
 		return err
 	}
 	err = cmd.Wait()
@@ -196,6 +206,37 @@ func pipeToCmd(input string, args ...string) error {
 		return ctx.Err()
 	}
 	return err
+}
+
+func startPipeCmd(input string, args ...string) (*exec.Cmd, context.CancelFunc, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	cmd, err := startPipeCmdWithContext(ctx, input, args...)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return cmd, cancel, nil
+}
+
+func startPipeCmdWithContext(ctx context.Context, input string, args ...string) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	if _, err := stdin.Write([]byte(input)); err != nil {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		return nil, err
+	}
+	if err := stdin.Close(); err != nil {
+		_ = cmd.Wait()
+		return nil, err
+	}
+	return cmd, nil
 }
 
 func simulatePaste() error {

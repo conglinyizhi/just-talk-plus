@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- TUI `K` now exports the in-memory diagnostics to a temporary file and opens it in Kate; `make run` builds a fresh binary with verbose timing anchors for stop, ASR, clipboard, and autotype stages.
+
+- Wayland 自动上屏改为前台托管临时 `wl-copy`，粘贴完成后主动回收，避免后台剪贴板 owner 残留导致第二次上屏卡住。
+
 - Linux 上屏的剪贴板与辅助命令现在有 3 秒硬超时，避免 `wl-copy`、`xclip` 或剪贴板恢复异常时卡住输出锁，导致后续识别结果排队数分钟。
 
 - Mic-debug panel now renders tri-color (green→yellow→red) level bars: the bright fill marks the current level in its zone color, and peak markers hold the highest peak for about 1.5 seconds of silence. The panel distinguishes the unamplified input's peak and RMS ("真实") from the RMS after the current gain has been applied ("增益后真实").

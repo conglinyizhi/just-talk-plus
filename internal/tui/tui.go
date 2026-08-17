@@ -22,6 +22,7 @@ import (
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/hotkey"
 	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
+	"github.com/conglinyizhi/just-talk-plus/internal/diag"
 	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
@@ -190,6 +191,7 @@ type Model struct {
 	debug       bool
 	showLogs    bool
 	logExpanded bool
+	diagnostics *diag.MemoryBuffer
 	OnSave      func(*config.Config) error
 
 	tab      tabID
@@ -389,6 +391,8 @@ func (m *Model) currentEngine() string {
 
 func (m *Model) SetDebug(debug bool) { m.debug = debug }
 
+func (m *Model) SetDiagnostics(logs *diag.MemoryBuffer) { m.diagnostics = logs }
+
 func (m *Model) Init() tea.Cmd { return tea.Batch(fetchDevices(), tea.EnterAltScreen, tickRefresh()) }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -428,6 +432,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	if m.micPanel != nil {
 		return m.handleMicPanelKey(k)
+	}
+	if k == "K" {
+		m.openDiagnostics()
+		return nil
 	}
 
 	// 历史 tab：列表选择与复制
@@ -543,6 +551,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.switchTab(tabID(k[0] - '1'))
 	}
 	return nil
+}
+
+func (m *Model) openDiagnostics() {
+	if m.diagnostics == nil {
+		m.logf("诊断日志尚未初始化")
+		return
+	}
+	path, err := diag.OpenInKate(m.diagnostics)
+	if err != nil {
+		m.logf("❌ 打开诊断日志失败: %s", err)
+		return
+	}
+	m.logf("✅ 诊断日志已在 Kate 打开: %s", path)
 }
 
 func (m *Model) switchTab(t tabID) {
@@ -714,7 +735,7 @@ func (m *Model) View() string {
 // helpLine 底部键位帮助行（固定显示在屏幕最后一行）。
 // 导航遵循 vim 规范：h 左 / j 下 / k 上 / l 右；方向键等效。
 func (m *Model) helpLine() string {
-	return hStyle.Render("  j/k 或 ↑/↓ 选择 · h/l 或 ←/→ 分组 · 1-5 分组 · e 编辑 · s 保存 · L 日志 · q 退出")
+	return hStyle.Render("  j/k 或 ↑/↓ 选择 · h/l 或 ←/→ 分组 · 1-5 分组 · e 编辑 · s 保存 · L 日志 · K 导出诊断 · q 退出")
 }
 
 // renderBase 渲染主界面（不含模态弹层与底部帮助行）。

@@ -12,9 +12,9 @@ build:
 install: build
 	$(BUILD_DIR)/$(APP_NAME) --install
 
-# Run (current platform)
-run:
-	go run $(CMD_DIR)
+# Run (current platform) from a freshly built binary
+run: build
+	$(BUILD_DIR)/$(APP_NAME) --verbose
 
 # Test
 test:

@@ -295,6 +295,7 @@ Select "麦克风调试" in the TUI main form and press Enter to open the debug 
 - Live unamplified peak/RMS bars, a post-gain RMS bar, peak-hold markers, and a clipping warning
 - `+` / `-` fine-grained gain adjustment (1-100, applied live and persisted)
 - Space toggles adaptive gain (lower on clipping, recover slowly when quiet)
+- Press `K` in the TUI to export the in-memory diagnostics and open them in Kate for copying the full stop, ASR, and autotype timeline
 
 The "历史记录" panel shows the last 10 successfully submitted/copied results; `j`/`k` to select, Enter to re-copy to the clipboard, `esc` to exit.
 

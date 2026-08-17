@@ -15,6 +15,7 @@ import (
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/engine"
 	"github.com/conglinyizhi/just-talk-plus/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/internal/diag"
 	"github.com/conglinyizhi/just-talk-plus/internal/doctor"
 	"github.com/conglinyizhi/just-talk-plus/internal/tui"
 	"github.com/conglinyizhi/just-talk-plus/plugins"
@@ -58,6 +59,9 @@ func main() {
 		logLevel = slog.LevelDebug
 	}
 
+	// TUI keeps a bounded in-memory copy so diagnostics can be exported without
+	// relying on a stale or shared log file.
+	memoryLogs := diag.NewMemoryBuffer()
 	// Daemon mode: log to stderr + file. TUI mode: file only (stderr corrupts display).
 	logPath := defaultLogPath()
 	_ = os.MkdirAll(filepath.Dir(logPath), 0755)
@@ -65,20 +69,21 @@ func main() {
 	if *useTUI {
 		lf, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if lf != nil {
-			logWriter = lf
+			logWriter = io.MultiWriter(lf, memoryLogs)
 		} else {
-			logWriter = io.Discard
+			logWriter = memoryLogs
 		}
 	} else {
 		lf, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if lf != nil {
-			logWriter = io.MultiWriter(os.Stderr, lf)
+			logWriter = io.MultiWriter(os.Stderr, lf, memoryLogs)
 		} else {
-			logWriter = os.Stderr
+			logWriter = io.MultiWriter(os.Stderr, memoryLogs)
 		}
 	}
 	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
+	slog.Info("diagnostics initialized", "pid", os.Getpid(), "executable", os.Args[0], "memory_limit_bytes", 512*1024)
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -122,7 +127,7 @@ func main() {
 	}
 
 	if *useTUI {
-		runTUI(eng, cfg, *debug)
+		runTUI(eng, cfg, *debug, memoryLogs)
 	} else {
 		runDaemon(eng)
 	}
@@ -136,11 +141,12 @@ func runDaemon(eng *engine.Engine) {
 	}
 }
 
-func runTUI(eng *engine.Engine, cfg *config.Config, debug bool) {
+func runTUI(eng *engine.Engine, cfg *config.Config, debug bool, memoryLogs *diag.MemoryBuffer) {
 	voice.SetupTUILog()
 	voice.SetOutput(io.Discard)
 	model := tui.New(cfg)
 	model.SetDebug(debug)
+	model.SetDiagnostics(memoryLogs)
 	model.OnSave = func(c *config.Config) error { return eng.ReloadConfig(c) }
 	go func() {
 		if err := eng.Start(false); err != nil && err != context.Canceled {

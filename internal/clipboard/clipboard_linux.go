@@ -28,10 +28,39 @@ func runCmd(args []string) (string, error) {
 }
 
 func runCmdWithInput(ctx context.Context, args []string, input string) (string, error) {
+	// Use a regular file for stdin. wl-copy forks a background owner; giving it
+	// an os/exec pipe lets the child retain that pipe and make cmd.Run wait for
+	// the owner lifetime instead of the short-lived parent command.
+	in, err := os.CreateTemp("", "just-talk-plus-clipboard-*")
+	if err != nil {
+		return "", err
+	}
+	path := in.Name()
+	defer os.Remove(path)
+	defer in.Close()
+	if _, err := in.WriteString(input); err != nil {
+		return "", err
+	}
+	if _, err := in.Seek(0, 0); err != nil {
+		return "", err
+	}
+
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return "", err
+	}
+	defer devNull.Close()
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Stdin = bytes.NewBufferString(input)
-	out, err := cmd.Output()
-	return string(bytes.TrimSpace(out)), err
+	cmd.Stdin = in
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", err
+	}
+	return "", nil
 }
 
 func candidates() []clipCmd {
