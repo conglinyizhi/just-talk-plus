@@ -229,6 +229,18 @@ api_key = "…"
 # Access mode:
 model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
 stream_mode = "async"      # nostream | async (default async; bidirectional + second-pass)
+# --- Recognition quality options (all in the TUI "engine config" overlay, Doubao only) ---
+# enable_lid = true         # mixed Chinese/English and dialect recognition (recommended for code-switching; language must be auto or zh-CN)
+# enable_nonstream = true   # second-pass recognition for more accurate finals (async only)
+# enable_itn = true         # number normalization (一九七零年 → 1970年)
+# enable_punc = true        # punctuation
+# enable_ddc = false        # semantic smoothing (drops fillers/repetitions)
+# boosting_table_name = ""  # hotword table name (console self-learning platform)
+# boosting_table_id = ""
+# correct_table_name = ""   # replacement-word table name
+# correct_table_id = ""
+# regex_correct_table_name = ""  # regex replacement table name
+# regex_correct_table_id = ""
 # resource_id = "volc.bigasr.sauc.duration"  # explicit resource override
 # base_host = "openspeech.bytedance.com"
 ```

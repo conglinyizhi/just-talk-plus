@@ -378,6 +378,39 @@ func TestConfigOverlayFlow(t *testing.T) {
 	}
 }
 
+func TestConfigOverlayToggleSave(t *testing.T) {
+	cfg := config.Default()
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	// 光标移到 enable_lid 字段
+	found := false
+	for i := range ov.fields {
+		if ov.fields[i].key == "ec.enable_lid" {
+			ov.cursor = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("enable_lid field not present in doubao overlay")
+	}
+	if ov.fields[ov.cursor].boolVal {
+		t.Fatal("enable_lid should default off")
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if !ov.fields[ov.cursor].boolVal {
+		t.Fatal("enter should toggle enable_lid on")
+	}
+	m.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["doubao-stream"]["enable_lid"]; got != "true" {
+		t.Fatalf("enable_lid = %q, want true", got)
+	}
+}
+
 func TestEngineConfigPerEngineIsolation(t *testing.T) {
 	// 不同引擎的配置互不覆盖：doubao 的 key 与 openai 的 key 独立保存
 	cfg := config.Default()

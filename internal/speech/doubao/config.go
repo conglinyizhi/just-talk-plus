@@ -24,22 +24,35 @@ import (
 //	enable_itn       true/false（默认 true）
 //	enable_punc      true/false（默认 true；文档默认 false，语音输入工具开启标点更友好）
 //	enable_ddc       true/false（默认 false）
+//	enable_lid       true/false（默认 false；中英文及方言识别，中英混说建议开启）
+//	enable_nonstream true/false（默认 true；二遍识别，仅流式模式 async 生效）
+//	boosting_table_name / boosting_table_id       热词词表（控制台自学习平台）
+//	correct_table_name / correct_table_id         替换词词表
+//	regex_correct_table_name / regex_correct_table_id  正则替换词表
 //	base_host        默认 openspeech.bytedance.com（官方固定域名；仅在自建代理/网关时覆盖）
 
 type Config struct {
-	APIKey        string
-	AppID         string
-	AccessKey     string
-	ModelVersion  string // 1.0 | 2.0
-	StreamMode    string // nostream | async
-	StreamBilling string // duration | concurrent
-	FileMode      string // flash | standard
-	ResourceID    string // 显式资源 ID 覆盖
-	Language      string
-	EnableITN     bool
-	EnablePunc    bool
-	EnableDDC     bool
-	BaseHost      string
+	APIKey                string
+	AppID                 string
+	AccessKey             string
+	ModelVersion          string // 1.0 | 2.0
+	StreamMode            string // nostream | async
+	StreamBilling         string // duration | concurrent
+	FileMode              string // flash | standard
+	ResourceID            string // 显式资源 ID 覆盖
+	Language              string
+	EnableITN             bool
+	EnablePunc            bool
+	EnableDDC             bool
+	EnableLID             bool
+	EnableNonstream       bool
+	BoostingTableName     string
+	BoostingTableID       string
+	CorrectTableName      string
+	CorrectTableID        string
+	RegexCorrectTableName string
+	RegexCorrectTableID   string
+	BaseHost              string
 }
 
 func ParseConfig(m map[string]string) (Config, error) {
@@ -47,19 +60,27 @@ func ParseConfig(m map[string]string) (Config, error) {
 		m = map[string]string{}
 	}
 	c := Config{
-		APIKey:        strings.TrimSpace(m["api_key"]),
-		AppID:         firstNonEmpty(m["app_id"], m["app_key"]),
-		AccessKey:     strings.TrimSpace(m["access_key"]),
-		ModelVersion:  strings.TrimSpace(m["model_version"]),
-		StreamMode:    strings.TrimSpace(m["stream_mode"]),
-		StreamBilling: strings.TrimSpace(m["stream_billing"]),
-		FileMode:      strings.TrimSpace(m["file_mode"]),
-		ResourceID:    strings.TrimSpace(m["resource_id"]),
-		Language:      strings.TrimSpace(m["language"]),
-		BaseHost:      strings.TrimSpace(m["base_host"]),
-		EnableITN:     parseBoolDefault(m["enable_itn"], true),
-		EnablePunc:    parseBoolDefault(m["enable_punc"], true),
-		EnableDDC:     parseBoolDefault(m["enable_ddc"], false),
+		APIKey:                strings.TrimSpace(m["api_key"]),
+		AppID:                 firstNonEmpty(m["app_id"], m["app_key"]),
+		AccessKey:             strings.TrimSpace(m["access_key"]),
+		ModelVersion:          strings.TrimSpace(m["model_version"]),
+		StreamMode:            strings.TrimSpace(m["stream_mode"]),
+		StreamBilling:         strings.TrimSpace(m["stream_billing"]),
+		FileMode:              strings.TrimSpace(m["file_mode"]),
+		ResourceID:            strings.TrimSpace(m["resource_id"]),
+		Language:              strings.TrimSpace(m["language"]),
+		BaseHost:              strings.TrimSpace(m["base_host"]),
+		EnableITN:             parseBoolDefault(m["enable_itn"], true),
+		EnablePunc:            parseBoolDefault(m["enable_punc"], true),
+		EnableDDC:             parseBoolDefault(m["enable_ddc"], false),
+		EnableLID:             parseBoolDefault(m["enable_lid"], false),
+		EnableNonstream:       parseBoolDefault(m["enable_nonstream"], true),
+		BoostingTableName:     strings.TrimSpace(m["boosting_table_name"]),
+		BoostingTableID:       strings.TrimSpace(m["boosting_table_id"]),
+		CorrectTableName:      strings.TrimSpace(m["correct_table_name"]),
+		CorrectTableID:        strings.TrimSpace(m["correct_table_id"]),
+		RegexCorrectTableName: strings.TrimSpace(m["regex_correct_table_name"]),
+		RegexCorrectTableID:   strings.TrimSpace(m["regex_correct_table_id"]),
 	}
 	if c.ModelVersion == "" {
 		// 新版 X-Api-Key 通常绑定流式 2.0（seedasr）；旧版凭据保持 1.0（bigasr）兼容。

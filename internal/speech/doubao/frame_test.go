@@ -123,3 +123,74 @@ func TestParseConfigRejectLegacyStreamMode(t *testing.T) {
 		t.Fatal("stream_mode=stream should be rejected")
 	}
 }
+
+func TestParseConfigRecognitionFlags(t *testing.T) {
+	c, err := ParseConfig(map[string]string{
+		"api_key":                  "k",
+		"enable_lid":               "true",
+		"enable_nonstream":         "false",
+		"enable_itn":               "false",
+		"enable_punc":              "false",
+		"enable_ddc":               "true",
+		"boosting_table_name":      "tbl",
+		"boosting_table_id":        "id1",
+		"correct_table_name":       "ctn",
+		"correct_table_id":         "id2",
+		"regex_correct_table_name": "rtn",
+		"regex_correct_table_id":   "id3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.EnableLID {
+		t.Fatal("enable_lid should be true")
+	}
+	if c.EnableNonstream {
+		t.Fatal("enable_nonstream should be false")
+	}
+	if c.EnableITN {
+		t.Fatal("enable_itn should be false")
+	}
+	if c.EnablePunc {
+		t.Fatal("enable_punc should be false")
+	}
+	if !c.EnableDDC {
+		t.Fatal("enable_ddc should be true")
+	}
+	if c.BoostingTableName != "tbl" || c.BoostingTableID != "id1" {
+		t.Fatalf("boosting table = %q/%q", c.BoostingTableName, c.BoostingTableID)
+	}
+	if c.CorrectTableName != "ctn" || c.CorrectTableID != "id2" {
+		t.Fatalf("correct table = %q/%q", c.CorrectTableName, c.CorrectTableID)
+	}
+	if c.RegexCorrectTableName != "rtn" || c.RegexCorrectTableID != "id3" {
+		t.Fatalf("regex correct table = %q/%q", c.RegexCorrectTableName, c.RegexCorrectTableID)
+	}
+}
+
+func TestParseConfigRecognitionDefaults(t *testing.T) {
+	c, err := ParseConfig(map[string]string{"api_key": "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.EnableLID {
+		t.Fatal("enable_lid default should be false")
+	}
+	if !c.EnableNonstream {
+		t.Fatal("enable_nonstream default should be true")
+	}
+	if !c.EnableITN {
+		t.Fatal("enable_itn default should be true")
+	}
+	if !c.EnablePunc {
+		t.Fatal("enable_punc default should be true")
+	}
+	if c.EnableDDC {
+		t.Fatal("enable_ddc default should be false")
+	}
+	if c.BoostingTableName != "" || c.BoostingTableID != "" ||
+		c.CorrectTableName != "" || c.CorrectTableID != "" ||
+		c.RegexCorrectTableName != "" || c.RegexCorrectTableID != "" {
+		t.Fatal("table fields should default empty")
+	}
+}

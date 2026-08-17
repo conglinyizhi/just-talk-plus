@@ -229,6 +229,18 @@ api_key = "…"
 # 接入方式：
 model_version = "1.0"      # 1.0=bigasr（默认） | 2.0=seedasr
 stream_mode = "async"      # nostream | async（默认 async；双向流+二遍识别）
+# —— 识别质量选项（均在 TUI「引擎配置」弹层中，仅豆包引擎显示）——
+# enable_lid = true         # 中英文及方言识别（中英混说建议开；语言需为自动或 zh-CN）
+# enable_nonstream = true   # 二遍识别，最终更准（仅 async 生效）
+# enable_itn = true         # 数字规范化（一九七零年 → 1970年）
+# enable_punc = true        # 标点
+# enable_ddc = false        # 语义顺滑（删语气词/重复词）
+# boosting_table_name = ""  # 热词词表名（控制台自学习平台）
+# boosting_table_id = ""
+# correct_table_name = ""   # 替换词词表名
+# correct_table_id = ""
+# regex_correct_table_name = ""  # 正则替换词表名
+# regex_correct_table_id = ""
 # resource_id = "volc.bigasr.sauc.duration"  # 显式覆盖资源 ID
 # base_host = "openspeech.bytedance.com"
 ```

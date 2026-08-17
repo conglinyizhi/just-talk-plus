@@ -127,6 +127,48 @@ func TestStreamRequestUsesConfigFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBigmodelRequest(t *testing.T) {
+	req := buildBigmodelRequest(Config{
+		StreamMode:        "async",
+		EnableITN:         true,
+		EnablePunc:        true,
+		EnableLID:         true,
+		EnableNonstream:   true,
+		BoostingTableName: "tbl",
+		CorrectTableID:    "cid",
+	})
+	if req["model_name"] != "bigmodel" {
+		t.Fatalf("model_name = %v", req["model_name"])
+	}
+	if req["enable_lid"] != true {
+		t.Fatal("enable_lid not true")
+	}
+	if req["enable_nonstream"] != true {
+		t.Fatal("enable_nonstream not true (async)")
+	}
+	if req["enable_itn"] != true || req["enable_punc"] != true || req["enable_ddc"] != false {
+		t.Fatal("itn/punc/ddc mismatch")
+	}
+	if req["boosting_table_name"] != "tbl" {
+		t.Fatalf("boosting_table_name = %v", req["boosting_table_name"])
+	}
+	if _, ok := req["boosting_table_id"]; ok {
+		t.Fatal("empty boosting_table_id should be omitted")
+	}
+	if req["correct_table_id"] != "cid" {
+		t.Fatalf("correct_table_id = %v", req["correct_table_id"])
+	}
+	if _, ok := req["correct_table_name"]; ok {
+		t.Fatal("empty correct_table_name should be omitted")
+	}
+
+	// nostream 模式下二遍识别不生效
+	ns := buildBigmodelRequest(Config{StreamMode: "nostream", EnableNonstream: true})
+	if ns["enable_nonstream"] != false {
+		t.Fatal("nostream mode should disable nonstream")
+	}
+}
+
 func testASRResponse(t *testing.T, flags byte, text string, definite bool) []byte {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{

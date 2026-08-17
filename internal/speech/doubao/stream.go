@@ -142,17 +142,36 @@ func (s *StreamSession) Close() error {
 	return nil
 }
 
-func (s *StreamSession) sendFullClientRequest(ctx context.Context) error {
-	request := map[string]any{
+// buildBigmodelRequest 构造 bigmodel 识别请求体（与整段 WS 识别共用的模型参数）。
+func buildBigmodelRequest(cfg Config) map[string]any {
+	req := map[string]any{
 		"model_name":       "bigmodel",
-		"enable_itn":       s.cfg.EnableITN,
-		"enable_punc":      s.cfg.EnablePunc,
-		"enable_ddc":       s.cfg.EnableDDC,
+		"enable_itn":       cfg.EnableITN,
+		"enable_punc":      cfg.EnablePunc,
+		"enable_ddc":       cfg.EnableDDC,
+		"enable_lid":       cfg.EnableLID,
 		"enable_word":      false,
-		"enable_nonstream": s.cfg.StreamMode == "async", // 双向流开启二遍识别，分句带 definite
+		"enable_nonstream": cfg.EnableNonstream && cfg.StreamMode == "async", // 二遍识别仅双向流（async）生效
 		"result_type":      "full",
 		"show_utterances":  true,
 	}
+	// 语境词表：需在控制台自学习平台建表后才有 name/id，空值不发。
+	setIf := func(k, v string) {
+		if v != "" {
+			req[k] = v
+		}
+	}
+	setIf("boosting_table_name", cfg.BoostingTableName)
+	setIf("boosting_table_id", cfg.BoostingTableID)
+	setIf("correct_table_name", cfg.CorrectTableName)
+	setIf("correct_table_id", cfg.CorrectTableID)
+	setIf("regex_correct_table_name", cfg.RegexCorrectTableName)
+	setIf("regex_correct_table_id", cfg.RegexCorrectTableID)
+	return req
+}
+
+func (s *StreamSession) sendFullClientRequest(ctx context.Context) error {
+	request := buildBigmodelRequest(s.cfg)
 	if len(s.params.Hotwords) > 0 {
 		if contextJSON, err := hotwordsContext(s.params.Hotwords); err == nil && contextJSON != "" {
 			request["corpus"] = map[string]any{"context": contextJSON}

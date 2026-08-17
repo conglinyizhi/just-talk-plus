@@ -275,6 +275,18 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 		}
 		return v
 	}
+	bval := func(name, defv string) bool {
+		v := strings.TrimSpace(ec[name])
+		if v == "" {
+			v = defv
+		}
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
 
 	var fields []field
 	switch engine {
@@ -319,6 +331,17 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "Access Key(旧版)", key: "ec.access_key", help: "旧版 Access Token", fType: fString, input: ti(get("access_key"))},
 			{label: "Base Host", key: "ec.base_host", help: "默认 openspeech.bytedance.com", fType: fString, input: ti(ec["base_host"])},
 			{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+			{label: "中英文识别", key: "ec.enable_lid", help: "中英混说/方言识别；语言需为自动或 zh-CN", fType: fToggle, boolVal: bval("enable_lid", "false")},
+			{label: "二遍识别", key: "ec.enable_nonstream", help: "分句二次识别，最终更准；仅流式模式=async 生效", fType: fToggle, boolVal: bval("enable_nonstream", "true")},
+			{label: "数字规范化", key: "ec.enable_itn", help: "口语数字/金额转阿拉伯数字（一九七零年→1970年）", fType: fToggle, boolVal: bval("enable_itn", "true")},
+			{label: "标点", key: "ec.enable_punc", help: "识别结果加逗号句号等标点", fType: fToggle, boolVal: bval("enable_punc", "true")},
+			{label: "语义顺滑", key: "ec.enable_ddc", help: "删停顿词/语气词/重复词，文本更连贯", fType: fToggle, boolVal: bval("enable_ddc", "false")},
+			{label: "热词表名", key: "ec.boosting_table_name", help: "控制台自学习平台创建的热词词表名", fType: fString, input: ti(ec["boosting_table_name"])},
+			{label: "热词表ID", key: "ec.boosting_table_id", help: "热词词表ID；与表名不一致时以ID为准", fType: fString, input: ti(ec["boosting_table_id"])},
+			{label: "替换词表名", key: "ec.correct_table_name", help: "控制台创建的替换词词表名", fType: fString, input: ti(ec["correct_table_name"])},
+			{label: "替换词表ID", key: "ec.correct_table_id", help: "替换词词表ID", fType: fString, input: ti(ec["correct_table_id"])},
+			{label: "正则替换表名", key: "ec.regex_correct_table_name", help: "控制台创建的正则替换词表名", fType: fString, input: ti(ec["regex_correct_table_name"])},
+			{label: "正则替换表ID", key: "ec.regex_correct_table_id", help: "正则替换词表ID", fType: fString, input: ti(ec["regex_correct_table_id"])},
 		}
 	}
 	return fields
@@ -1230,6 +1253,11 @@ func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			case "j", "down", "k", "up", "h", "l", "left", "right":
 				f.optIdx = (f.optIdx + 1) % len(f.opts)
 			}
+		case fToggle:
+			switch k {
+			case "j", "down", "k", "up", "h", "l", "left", "right":
+				f.boolVal = !f.boolVal
+			}
 		case fString:
 			var cmd tea.Cmd
 			f.input, cmd = f.input.Update(msg)
@@ -1249,13 +1277,18 @@ func (m *Model) handleConfigOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			ov.cursor = len(ov.fields) - 1
 		}
 	case "e", "i", "enter":
-		if ov.fields[ov.cursor].fType == fAction {
-			m.triggerAction(ov.fields[ov.cursor].key)
+		f := &ov.fields[ov.cursor]
+		if f.fType == fAction {
+			m.triggerAction(f.key)
+			return nil
+		}
+		if f.fType == fToggle {
+			f.boolVal = !f.boolVal
 			return nil
 		}
 		ov.editing = true
-		if ov.fields[ov.cursor].fType == fString {
-			ov.fields[ov.cursor].input.Focus()
+		if f.fType == fString {
+			f.input.Focus()
 		}
 	case "s":
 		m.saveChannelConfig()
@@ -1295,9 +1328,18 @@ func (m *Model) applyConfigOverlay() {
 			vc.Hotwords = splitList(f.input.Value())
 		case strings.HasPrefix(f.key, "ec."):
 			name := strings.TrimPrefix(f.key, "ec.")
-			val := strings.TrimSpace(f.input.Value())
-			if f.fType == fSelect {
-				val = f.selectValue()
+			var val string
+			if f.fType == fToggle {
+				if f.boolVal {
+					val = "true"
+				} else {
+					val = "false"
+				}
+			} else {
+				val = strings.TrimSpace(f.input.Value())
+				if f.fType == fSelect {
+					val = f.selectValue()
+				}
 			}
 			if val == "" {
 				delete(ec, name)
@@ -1375,6 +1417,11 @@ func (m *Model) renderOverlayField(i int, f field, ov *configOverlayState) strin
 			return aStyle.Render("[" + v + " ▲▼]")
 		}
 		return vStyle.Render(v)
+	case fToggle:
+		if f.boolVal {
+			return aStyle.Render("● 开")
+		}
+		return dStyle.Render("○ 关")
 	case fAction:
 		return aStyle.Render("▶ 回车进入")
 	}
