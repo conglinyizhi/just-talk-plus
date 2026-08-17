@@ -33,6 +33,7 @@ package autotype
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -47,6 +48,9 @@ import (
 const (
 	uinputDev  = "/dev/uinput"
 	keyDelayMs = 15
+	// commandTimeout bounds clipboard and helper subprocesses so one broken
+	// Wayland/X11 command cannot hold dispatchMu indefinitely.
+	commandTimeout = 3 * time.Second
 	// pasteSettleDelay 模拟粘贴后等待目标应用读取剪贴板的时间。
 	// 过早返回会让调用方立刻恢复剪贴板，应用实际粘到的是被还原的旧内容。
 	pasteSettleDelay = 300 * time.Millisecond
@@ -140,8 +144,10 @@ func buildWaylandCopyArgs(sensitive bool) []string {
 // wlCopySupportsSensitive 检测 wl-copy 是否支持 --sensitive（wl-clipboard ≥2.2），结果缓存。
 func wlCopySupportsSensitive() bool {
 	sensitiveOnce.Do(func() {
-		out, err := exec.Command("wl-copy", "--help").Output()
-		sensitiveOK = err == nil && strings.Contains(string(out), "--sensitive")
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "wl-copy", "--help").Output()
+		sensitiveOK = err == nil && ctx.Err() == nil && strings.Contains(string(out), "--sensitive")
 	})
 	return sensitiveOK
 }
@@ -152,8 +158,13 @@ var (
 )
 
 func runClipboard(args ...string) (string, error) {
-	cmd := exec.Command(args[0], args[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +172,9 @@ func runClipboard(args ...string) (string, error) {
 }
 
 func pipeToCmd(input string, args ...string) error {
-	cmd := exec.Command(args[0], args[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -178,7 +191,11 @@ func pipeToCmd(input string, args ...string) error {
 		_ = cmd.Wait()
 		return err
 	}
-	return cmd.Wait()
+	err = cmd.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func simulatePaste() error {

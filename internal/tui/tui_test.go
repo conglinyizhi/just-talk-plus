@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -13,6 +14,14 @@ import (
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
+
+// ansiRe 匹配 ANSI SGR 转义序列（lipgloss 输出的着色码）。
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripANSI 去除 ANSI 着色码，便于断言电平条的实际字符。
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
 
 // fieldByKey 在全部 tab 中按 key 查找字段。
 func fieldByKey(m *Model, key string) *field {
@@ -479,9 +488,14 @@ func TestRenderMicPanel(t *testing.T) {
 	if out == "" || !strings.Contains(out, "麦克风调试") {
 		t.Fatalf("mic panel render:\n%s", out)
 	}
-	// 面板显示设备行与切换提示
-	if !strings.Contains(out, "设备") || !strings.Contains(out, "[ ]") {
-		t.Fatalf("mic panel missing device switcher:\n%s", out)
+	// 面板显示设备行与切换提示，以及原始和增益后两路真实电平。
+	for _, want := range []string{"设备", "[ ]", "真实:", "增益后真实:"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("mic panel missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "有效:") {
+		t.Fatalf("mic panel still uses the old RMS label:\n%s", out)
 	}
 }
 
@@ -668,14 +682,18 @@ func TestLogsKeyUppercaseL(t *testing.T) {
 // ---- 工具函数 ----
 
 func TestRenderLevelBar(t *testing.T) {
-	if got := renderLevelBar(0, 5); got != "░░░░░" {
+	if got := stripANSI(renderLevelBar(0, 0, 5)); got != "░░░░░" {
 		t.Fatalf("zero: %q", got)
 	}
-	if got := renderLevelBar(1, 5); got != "█████" {
+	if got := stripANSI(renderLevelBar(1, 0, 5)); got != "█████" {
 		t.Fatalf("full: %q", got)
 	}
-	if got := renderLevelBar(0.5, 4); got != "██░░" {
+	if got := stripANSI(renderLevelBar(0.5, 0, 4)); got != "██░░" {
 		t.Fatalf("half: %q", got)
+	}
+	// 峰值保持标记：hold=0.9、宽度 5 → 位置 4 绘制标记，当前电平 0.2 → 位置 0 填充。
+	if got := stripANSI(renderLevelBar(0.2, 0.9, 5)); got != "█░░░▏" {
+		t.Fatalf("hold marker: %q", got)
 	}
 }
 

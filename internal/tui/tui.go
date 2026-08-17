@@ -34,6 +34,19 @@ var (
 	eStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	dStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	hStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	// 麦克风调试电平条：条体按位置分绿/黄/红三区，填充为当前电平高亮。
+	barFill = [3]lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true),  // 绿
+		lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true), // 黄
+		lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),  // 红
+	}
+	barEmpty = [3]lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Faint(true), // 暗绿
+		lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Faint(true), // 暗黄
+		lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Faint(true), // 暗红
+	}
+	barHold = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
 )
 
 type backendMsg hotkey.ProviderInfo
@@ -1488,12 +1501,14 @@ func (m *Model) renderMicPanel() string {
 	if m.w > 0 && width > m.w-4 {
 		width = m.w - 4
 	}
-	barW := width - 12
-	if barW < 20 {
-		barW = 20
+	// 最长的「增益后真实」行决定条宽，避免窄终端里数值越出面板边框。
+	barW := width - lipgloss.Width("  增益后真实: [] 0.00") - 2
+	if barW < 1 {
+		barW = 1
 	}
-	peakBar := renderLevelBar(lvl.Peak, barW)
-	rmsBar := renderLevelBar(lvl.RMS, barW)
+	peakBar := renderLevelBar(lvl.Peak, lvl.PeakHold, barW)
+	rmsBar := renderLevelBar(lvl.RMS, lvl.RMSHold, barW)
+	gainedRMSBar := renderLevelBar(lvl.GainedRMS, lvl.GainedRMSHold, barW)
 	state := "待机（按录音热键开始测试）"
 	if voice.MicTestTesting() {
 		state = "测试中（按录音热键停止）"
@@ -1506,13 +1521,15 @@ func (m *Model) renderMicPanel() string {
 	if lvl.Clipping {
 		clipMark = eStyle.Render(" ⚠ 削波！")
 	}
+	gainLine := "  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )")
 
 	lines := []string{
 		" " + lStyle.Render("🎤 麦克风调试"),
 		"  设备: " + vStyle.Render(displayDeviceName(voice.MicTestDevice())) + dStyle.Render("  ( [ ] 切换，自动 = 系统默认 )"),
-		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak) + clipMark,
-		"  有效: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
-		"  增益: " + wStyle.Render(fmt.Sprintf("%d", lvl.Gain)) + dStyle.Render("  ( +/- 调整，范围 1-100 )"),
+		"  峰值: " + vStyle.Render("["+peakBar+"]") + fmt.Sprintf(" %.2f", lvl.Peak),
+		"  真实: " + vStyle.Render("["+rmsBar+"]") + fmt.Sprintf(" %.2f", lvl.RMS),
+		"  增益后真实: " + vStyle.Render("["+gainedRMSBar+"]") + fmt.Sprintf(" %.2f", lvl.GainedRMS) + clipMark,
+		gainLine,
 		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
 		"  状态: " + vStyle.Render(state),
 		"",
@@ -1538,21 +1555,60 @@ func (m *Model) renderMicPanel() string {
 	return strings.Join(bl, "\n")
 }
 
-func renderLevelBar(level float64, width int) string {
+// clamp01 把 v 限制在 [0,1]。
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// levelZone 返回电平条某位置所在分区：0 绿（<1/3）｜1 黄（1/3..2/3）｜2 红（>=2/3）。
+func levelZone(frac float64) int {
+	if frac < 1.0/3.0 {
+		return 0
+	}
+	if frac < 2.0/3.0 {
+		return 1
+	}
+	return 2
+}
+
+// renderLevelBar 渲染三色电平条：条体按位置分绿/黄/红三区（暗色底），
+// 填充部分为当前电平（高亮、按分区着色）；hold>0 时在保持峰值位置绘制标记。
+func renderLevelBar(level, hold float64, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if level < 0 {
-		level = 0
-	}
-	if level > 1 {
-		level = 1
-	}
+	level = clamp01(level)
 	filled := int(level*float64(width) + 0.5)
 	if filled > width {
 		filled = width
 	}
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	holdIdx := -1
+	if hold > 0 {
+		holdIdx = int(hold*float64(width) + 0.5)
+		if holdIdx >= width {
+			holdIdx = width - 1
+		}
+	}
+	var b strings.Builder
+	for i := 0; i < width; i++ {
+		if i == holdIdx {
+			b.WriteString(barHold.Render("▏"))
+			continue
+		}
+		z := levelZone(float64(i) / float64(width))
+		if i < filled {
+			b.WriteString(barFill[z].Render("█"))
+		} else {
+			b.WriteString(barEmpty[z].Render("░"))
+		}
+	}
+	return b.String()
 }
 
 // truncateText 截断文本到指定显示宽度（含中文宽字符）。

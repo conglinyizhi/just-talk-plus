@@ -16,29 +16,66 @@ import (
 
 // MicLevel 麦克风实时电平快照（供 TUI 调试面板显示）。
 type MicLevel struct {
-	Peak     float64 // 峰值 0..1
-	RMS      float64 // 有效值 0..1
-	Gain     int     // 当前增益
-	Clipping bool    // 是否削波
-	AutoGain bool    // 自适应增益开关
+	Peak          float64 // 原始输入峰值 0..1
+	RMS           float64 // 原始输入 RMS 0..1
+	GainedRMS     float64 // 应用增益后的 RMS 0..1
+	Gain          int     // 当前增益
+	Clipping      bool    // 应用增益后是否削波
+	AutoGain      bool    // 自适应增益开关
+	PeakHold      float64 // 原始输入峰值保持（0 = 无标记）
+	RMSHold       float64 // 原始输入 RMS 保持（0 = 无标记）
+	GainedRMSHold float64 // 应用增益后 RMS 保持（0 = 无标记）
 }
 
 // micTestState 麦克风测试模式状态。
 // 测试录音与正常录音共用同一 AutoGain 与增益，TUI 中的调整对后续正常录音即时生效。
 type micTestState struct {
-	active   bool // TUI 调试面板是否打开
-	testing  bool // 测试录音是否进行中
-	recorder *Recorder
-	cancel   context.CancelFunc
-	autoGain *AutoGain
-	logger   *slog.Logger
-	device   string
-	cfg      *config.Config // 非 nil 时手动调增益会持久化到配置
-	mu       sync.Mutex
-	level    MicLevel
+	active        bool // TUI 调试面板是否打开
+	testing       bool // 测试录音是否进行中
+	recorder      *Recorder
+	cancel        context.CancelFunc
+	autoGain      *AutoGain
+	logger        *slog.Logger
+	device        string
+	cfg           *config.Config // 非 nil 时手动调增益会持久化到配置
+	mu            sync.Mutex
+	level         MicLevel
+	peakHold      peakHoldTracker
+	rmsHold       peakHoldTracker
+	gainedRMSHold peakHoldTracker
 }
 
 var micTest micTestState
+
+// peakHoldTracker 峰值保持：记录有信号期间的峰值并停住，静音超时后回落清零，
+// 供麦克风调试面板绘制「最高峰」标记。
+type peakHoldTracker struct {
+	hold       float64
+	lastSignal time.Time
+	hasSignal  bool
+}
+
+const (
+	// peakQuietThreshold 峰值低于该值视为无信号。
+	peakQuietThreshold = 0.05
+	// peakHoldDuration 无信号持续该时长后，保持的峰值回落清零。
+	peakHoldDuration = 1500 * time.Millisecond
+)
+
+// update 喂入一块峰值电平（peak 0..1，now 采样时间），返回当前保持的峰值。
+func (p *peakHoldTracker) update(peak float64, now time.Time) float64 {
+	if peak >= peakQuietThreshold {
+		if peak > p.hold {
+			p.hold = peak
+		}
+		p.lastSignal = now
+		p.hasSignal = true
+	} else if p.hasSignal && now.Sub(p.lastSignal) >= peakHoldDuration {
+		p.hold = 0
+		p.hasSignal = false
+	}
+	return p.hold
+}
 
 // setupMicTest 由插件 Init 调用：初始化日志器、设备、配置引用与自适应增益。
 func setupMicTest(logger *slog.Logger, cfg *config.Config, gain int, autoGainOn bool) {
@@ -178,6 +215,9 @@ func startMicTestRecording() {
 		micTest.mu.Unlock()
 		return
 	}
+	micTest.peakHold = peakHoldTracker{}
+	micTest.rmsHold = peakHoldTracker{}
+	micTest.gainedRMSHold = peakHoldTracker{}
 	gain := micTest.autoGain.Gain()
 	device := micTest.device
 	logger := micTest.logger
@@ -211,18 +251,22 @@ func micTestLoop(ctx context.Context, rec *Recorder) {
 			return
 		default:
 		}
-		n, err := rec.Read(buf)
+		n, rawPeak, rawRMS, gainedPeak, gainedRMS, err := rec.readWithLevels(buf)
 		if n > 0 {
-			peak, rms := analyzePCM(buf[:n])
-			if micTest.autoGain.Process(peak, rms, time.Now()) {
+			now := time.Now()
+			if micTest.autoGain.Process(gainedPeak, gainedRMS, now) {
 				rec.SetGain(micTest.autoGain.Gain())
 			}
 			micTest.mu.Lock()
-			micTest.level.Peak = peak
-			micTest.level.RMS = rms
+			micTest.level.Peak = rawPeak
+			micTest.level.RMS = rawRMS
+			micTest.level.GainedRMS = gainedRMS
 			micTest.level.Gain = micTest.autoGain.Gain()
-			micTest.level.Clipping = peak >= 0.98
+			micTest.level.Clipping = gainedPeak >= 0.98
 			micTest.level.AutoGain = micTest.autoGain.Enabled()
+			micTest.level.PeakHold = micTest.peakHold.update(rawPeak, now)
+			micTest.level.RMSHold = micTest.rmsHold.update(rawRMS, now)
+			micTest.level.GainedRMSHold = micTest.gainedRMSHold.update(gainedRMS, now)
 			micTest.mu.Unlock()
 		}
 		if err != nil {

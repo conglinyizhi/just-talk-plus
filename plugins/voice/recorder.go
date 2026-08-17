@@ -82,32 +82,53 @@ func (r *Recorder) Start() error {
 }
 
 func (r *Recorder) Read(p []byte) (int, error) {
+	n, _, _, _, _, err := r.read(p, false)
+	return n, err
+}
+
+// readWithLevels reads PCM and reports both the unamplified input level and
+// the level after the recorder's current gain has been applied.
+func (r *Recorder) readWithLevels(p []byte) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, err error) {
+	return r.read(p, true)
+}
+
+func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedPeak, gainedRMS float64, err error) {
 	r.readMu.Lock()
 	defer r.readMu.Unlock()
 
 	r.mu.Lock()
 	if r.drainBuf.Len() > 0 {
-		n, _ := r.drainBuf.Read(p)
+		n, _ = r.drainBuf.Read(p)
 		r.mu.Unlock()
-		return n, nil
+		if measure {
+			gainedPeak, gainedRMS = analyzePCM(p[:n])
+			return n, gainedPeak, gainedRMS, gainedPeak, gainedRMS, nil
+		}
+		return n, 0, 0, 0, 0, nil
 	}
 	stdout := r.stdout
 	r.mu.Unlock()
 
 	if stdout == nil {
-		return 0, io.EOF
+		return 0, 0, 0, 0, 0, io.EOF
 	}
 
-	n, err := stdout.Read(p)
+	n, err = stdout.Read(p)
 	if n > 0 {
+		if measure {
+			rawPeak, rawRMS = analyzePCM(p[:n])
+		}
 		if g := r.Gain(); g > 1 {
 			applyGain(p[:n], g)
+		}
+		if measure {
+			gainedPeak, gainedRMS = analyzePCM(p[:n])
 		}
 	}
 	if errors.Is(err, os.ErrClosed) {
 		err = io.EOF
 	}
-	return n, err
+	return n, rawPeak, rawRMS, gainedPeak, gainedRMS, err
 }
 
 func (r *Recorder) Stop() ([]byte, error) {

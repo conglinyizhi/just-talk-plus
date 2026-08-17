@@ -7,15 +7,23 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"time"
 )
+
+const commandTimeout = 3 * time.Second
 
 func lookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }
 
 func runCmd(args []string) (string, error) {
-	cmd := exec.Command(args[0], args[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return string(bytes.TrimSpace(out)), ctx.Err()
+	}
 	return string(bytes.TrimSpace(out)), err
 }
 

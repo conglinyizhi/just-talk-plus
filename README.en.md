@@ -292,7 +292,7 @@ Select "麦克风调试" in the TUI main form and press Enter to open the debug 
 
 - Press the **same recording hotkey** to start/stop a test recording (microphone only; no ASR, no submit)
 - `[` / `]` (or `h`/`l`, `k`/`j`) cycles recording devices (including "自动 = system default"); switching stops the test and persists to `[voice].device` (the device list is auto-detected)
-- Live peak/RMS level bars and clipping warning
+- Live unamplified peak/RMS bars, a post-gain RMS bar, peak-hold markers, and a clipping warning
 - `+` / `-` fine-grained gain adjustment (1-100, applied live and persisted)
 - Space toggles adaptive gain (lower on clipping, recover slowly when quiet)
 

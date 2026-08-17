@@ -6,6 +6,8 @@
 package voice
 
 import (
+	"math"
+	"os"
 	"testing"
 	"time"
 )
@@ -84,6 +86,41 @@ func TestAutoGainManualBaseline(t *testing.T) {
 	a.SetGain(0)
 	if a.Gain() != MinGain {
 		t.Fatalf("gain=%d, want min", a.Gain())
+	}
+}
+
+func TestReadWithLevels(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readEnd.Close()
+
+	recorder := NewRecorder(nil, 2)
+	recorder.stdout = readEnd
+	if _, err := writeEnd.Write([]byte{0x00, 0x40}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEnd.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, 2)
+	n, rawPeak, rawRMS, gainedPeak, gainedRMS, err := recorder.readWithLevels(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("bytes read=%d, want 2", n)
+	}
+	if math.Abs(rawPeak-0.5) > 0.01 || math.Abs(rawRMS-0.5) > 0.01 {
+		t.Fatalf("raw levels peak=%v rms=%v, want about 0.5", rawPeak, rawRMS)
+	}
+	if gainedPeak < 0.99 || gainedRMS < 0.99 {
+		t.Fatalf("gained levels peak=%v rms=%v, want near 1", gainedPeak, gainedRMS)
+	}
+	if got := buf; got[0] != 0xFF || got[1] != 0x7F {
+		t.Fatalf("gained PCM=%#v, want full-scale positive sample", got)
 	}
 }
 

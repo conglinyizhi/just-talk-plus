@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Linux 上屏的剪贴板与辅助命令现在有 3 秒硬超时，避免 `wl-copy`、`xclip` 或剪贴板恢复异常时卡住输出锁，导致后续识别结果排队数分钟。
+
+- Mic-debug panel now renders tri-color (green→yellow→red) level bars: the bright fill marks the current level in its zone color, and peak markers hold the highest peak for about 1.5 seconds of silence. The panel distinguishes the unamplified input's peak and RMS ("真实") from the RMS after the current gain has been applied ("增益后真实").
+
 - Renamed the project identity from `just-talk` to `just-talk-plus` (no compatibility kept — zero users besides the maintainer): the Go module path is now `github.com/conglinyizhi/just-talk-plus`, the `cmd/` package and binary are `just-talk-plus`, the per-user config directory moved from `~/.config/just-talk/` (Windows `%APPDATA%\just-talk\`) to `~/.config/just-talk-plus/` (Windows `%APPDATA%\just-talk-plus\`), and the backend-override env var is now `JUST_TALK_PLUS_BACKEND`. The GitHub remote stays `conglinyizhi/just-talk-go-plus`.
 
 - Added Doubao recognition-quality options to the engine-config overlay (shown only for `doubao-stream`): 中英文识别 (`enable_lid`) for mixed Chinese/English and dialect speech, 二遍识别 (`enable_nonstream`, second-pass recognition for more accurate finals — async mode only), 数字规范化 (`enable_itn`), 标点 (`enable_punc`), 语义顺滑 (`enable_ddc`), and console hotword/replacement/regex-replacement tables (`boosting_table_name/id`, `correct_table_name/id`, `regex_correct_table_name/id`). The engine-config overlay now supports toggle fields (Enter flips them) alongside text and select fields.
