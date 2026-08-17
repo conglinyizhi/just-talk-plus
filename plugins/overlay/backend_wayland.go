@@ -74,7 +74,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -240,7 +240,7 @@ func (b *waylandBackend) createSurface() error {
 	if b.surface == nil {
 		return fmt.Errorf("cannot create Wayland surface")
 	}
-	ns := C.CString("just-talk-overlay")
+	ns := C.CString("just-talk-plus-overlay")
 	defer C.free(unsafe.Pointer(ns))
 	b.layerSurface = C.zwlr_layer_shell_v1_get_layer_surface(
 		b.layerShell,
@@ -272,7 +272,7 @@ func (b *waylandBackend) createSurface() error {
 
 func (b *waylandBackend) createBuffer() error {
 	size := b.w * b.h * 4
-	f, err := os.CreateTemp("", "just-talk-overlay-*.shm")
+	f, err := os.CreateTemp("", "just-talk-plus-overlay-*.shm")
 	if err != nil {
 		return err
 	}

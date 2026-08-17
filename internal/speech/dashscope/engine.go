@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 func init() {

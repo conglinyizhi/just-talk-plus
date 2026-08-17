@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 // MicLevel 麦克风实时电平快照（供 TUI 调试面板显示）。

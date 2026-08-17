@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/engine"
-	"github.com/c/just-talk-go/plugins/voice"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/engine"
+	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
 type backend interface {

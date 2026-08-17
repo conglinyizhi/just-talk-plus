@@ -30,7 +30,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 const (

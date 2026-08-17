@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/engine"
-	"github.com/c/just-talk-go/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/engine"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
 )
 
 // DebugPlugin registers hotkeys from the config and prints events.

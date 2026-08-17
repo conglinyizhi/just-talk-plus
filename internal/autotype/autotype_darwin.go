@@ -33,7 +33,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/c/just-talk-go/internal/clipboard"
+	"github.com/conglinyizhi/just-talk-plus/internal/clipboard"
 )
 
 func pastePlatform(text string, logger *slog.Logger) error {

@@ -11,15 +11,15 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/engine"
-	"github.com/c/just-talk-go/hotkey"
-	"github.com/c/just-talk-go/internal/doctor"
-	"github.com/c/just-talk-go/internal/tui"
-	"github.com/c/just-talk-go/plugins"
-	"github.com/c/just-talk-go/plugins/overlay"
-	"github.com/c/just-talk-go/plugins/voice"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/engine"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/internal/doctor"
+	"github.com/conglinyizhi/just-talk-plus/internal/tui"
+	"github.com/conglinyizhi/just-talk-plus/plugins"
+	"github.com/conglinyizhi/just-talk-plus/plugins/overlay"
+	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 	useTUI := flag.Bool("tui", true, "run with terminal UI")
 	noTUI := flag.Bool("no-tui", false, "run without terminal UI")
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
-	installOnly := flag.Bool("install", false, "install just-talk for the current user")
+	installOnly := flag.Bool("install", false, "install just-talk-plus for the current user")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
@@ -87,10 +87,10 @@ func main() {
 	}
 
 	if *backend == "" {
-		*backend = os.Getenv("JUST_TALK_BACKEND")
+		*backend = os.Getenv("JUST_TALK_PLUS_BACKEND")
 	}
 	if *backend != "" {
-		os.Setenv("JUST_TALK_BACKEND", *backend)
+		os.Setenv("JUST_TALK_PLUS_BACKEND", *backend)
 	}
 
 	report := doctor.Run(cfg, *backend)
@@ -129,7 +129,7 @@ func main() {
 }
 
 func runDaemon(eng *engine.Engine) {
-	slog.Info("just-talk started — press hotkeys, Ctrl+C to quit")
+	slog.Info("just-talk-plus started — press hotkeys, Ctrl+C to quit")
 	if err := eng.Start(true); err != nil && err != context.Canceled {
 		slog.Error("engine exited with error", "error", err)
 		os.Exit(1)
@@ -187,13 +187,13 @@ func installSelf() error {
 	if resolved, err := filepath.EvalSymlinks(src); err == nil {
 		src = resolved
 	}
-	name := "just-talk"
+	name := "just-talk-plus"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	target := filepath.Join(targetDir, name)
 	if samePath(src, target) {
-		fmt.Fprintf(os.Stdout, "just-talk is already installed at %s\n", target)
+		fmt.Fprintf(os.Stdout, "just-talk-plus is already installed at %s\n", target)
 		printInstallPathNote(targetDir)
 		return nil
 	}
@@ -204,7 +204,7 @@ func installSelf() error {
 	}
 	defer in.Close()
 
-	tmp, err := os.CreateTemp(targetDir, ".just-talk-*")
+	tmp, err := os.CreateTemp(targetDir, ".just-talk-plus-*")
 	if err != nil {
 		return fmt.Errorf("create temporary installer file: %w", err)
 	}
@@ -232,7 +232,7 @@ func installSelf() error {
 	}
 	ok = true
 
-	fmt.Fprintf(os.Stdout, "Installed just-talk to %s\n", target)
+	fmt.Fprintf(os.Stdout, "Installed just-talk-plus to %s\n", target)
 	printInstallPathNote(targetDir)
 	return nil
 }
@@ -284,10 +284,10 @@ func replaceInstalledFile(source, target string) error {
 func defaultLogPath() string {
 	if runtime.GOOS == "windows" {
 		if dir, err := os.UserCacheDir(); err == nil {
-			return filepath.Join(dir, "just-talk", "just-talk.log")
+			return filepath.Join(dir, "just-talk-plus", "just-talk-plus.log")
 		}
 	}
-	return "/tmp/just-talk.log"
+	return "/tmp/just-talk-plus.log"
 }
 
 func samePath(a, b string) bool {
@@ -310,7 +310,7 @@ func samePath(a, b string) bool {
 
 func printInstallPathNote(dir string) {
 	if !pathContains(dir) {
-		fmt.Fprintf(os.Stdout, "Note: %s is not in PATH. Add it to your shell profile to run just-talk directly.\n", dir)
+		fmt.Fprintf(os.Stdout, "Note: %s is not in PATH. Add it to your shell profile to run just-talk-plus directly.\n", dir)
 	}
 }
 

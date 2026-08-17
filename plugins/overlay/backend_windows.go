@@ -12,7 +12,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 	"golang.org/x/sys/windows"
 )
 

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func TestWindowsOverlayIntegration(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func TestEngineTypeDefault(t *testing.T) {

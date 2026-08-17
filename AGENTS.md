@@ -18,7 +18,7 @@ This project is **GPL-3.0-only** (`LICENSE`). These rules are not optional:
 
 ## Project
 
-Just Talk Plus is a desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows. (Successor of Just Talk; the `just-talk` binary and config paths keep the old name.)
+Just Talk Plus is a desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows. (Successor of Just Talk; the binary and config paths now use the `just-talk-plus` name.)
 
 ## Build And Test
 
@@ -27,17 +27,17 @@ Linux/macOS need cgo; Windows builds with `CGO_ENABLED=0`.
 ```bash
 go test ./...            # tests
 go test ./... -tags no_x11
-CGO_ENABLED=1 go build -o build/just-talk ./cmd/just-talk
-go build -o build/just-talk.exe ./cmd/just-talk   # Windows
+CGO_ENABLED=1 go build -o build/just-talk-plus ./cmd/just-talk-plus
+go build -o build/just-talk-plus.exe ./cmd/just-talk-plus   # Windows
 ```
 
-Runtime: `just-talk` (TUI default), `--no-tui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_BACKEND`); `mock` is provider-testing only.
+Runtime: `just-talk-plus` (TUI default), `--no-tui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_PLUS_BACKEND`); `mock` is provider-testing only.
 
 Never add or keep non-cgo macOS fallback builds: a build that compiles but lacks native hotkeys/recording/clipboard/auto-submit/overlay is worse than a failed build.
 
 ## Architecture
 
-Startup: `cmd/just-talk/main.go` → `config.Load` → `doctor.Run` → `hotkey.NewProvider` → `engine.New` → load voice + overlay plugins → TUI or daemon.
+Startup: `cmd/just-talk-plus/main.go` → `config.Load` → `doctor.Run` → `hotkey.NewProvider` → `engine.New` → load voice + overlay plugins → TUI or daemon.
 
 - `hotkey/`: global hotkey providers + combo/event types.
 - `engine/`: plugin lifecycle, config reload.

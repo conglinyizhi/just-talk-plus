@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c/just-talk-go/internal/clipboard"
+	"github.com/conglinyizhi/just-talk-plus/internal/clipboard"
 	"golang.org/x/sys/windows"
 )
 

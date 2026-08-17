@@ -12,8 +12,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/internal/asrcfg"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
 )
 
 type Severity int

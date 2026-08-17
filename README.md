@@ -69,33 +69,33 @@ winget install --id GoLang.Go --exact
 构建当前平台二进制：
 
 ```bash
-cd just-talk-go
-CGO_ENABLED=1 go build -o build/just-talk ./cmd/just-talk
+cd just-talk-plus
+CGO_ENABLED=1 go build -o build/just-talk-plus ./cmd/just-talk-plus
 ```
 
 Windows PowerShell：
 
 ```powershell
-cd just-talk-go
-go build -o build\just-talk.exe .\cmd\just-talk
+cd just-talk-plus
+go build -o build\just-talk-plus.exe .\cmd\just-talk-plus
 ```
 
-安装到 `~/.local/bin/just-talk`：
+安装到 `~/.local/bin/just-talk-plus`：
 
 ```bash
 # 确保 ~/.local/bin 在 PATH 中（如未配置，将下面这行加入 ~/.bashrc 或 ~/.zshrc）
 # export PATH="$HOME/.local/bin:$PATH"
-build/just-talk --install
+build/just-talk-plus --install
 # 或
 make install
 ```
 
 macOS 需要在本机 macOS 上构建；项目不提供非 cgo 版本。
 
-Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk.exe`：
+Windows 安装到 `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk-plus.exe`：
 
 ```powershell
-.\build\just-talk.exe --install
+.\build\just-talk-plus.exe --install
 # 如果安装目录尚未在 PATH 中，按命令输出提示添加即可。
 ```
 
@@ -120,26 +120,26 @@ git push origin v0.7.0
 默认启动 TUI：
 
 ```bash
-just-talk
+just-talk-plus
 ```
 
 后台模式：
 
 ```bash
-just-talk --no-tui
+just-talk-plus --no-tui
 ```
 
 指定后端：
 
 ```bash
-just-talk --backend wayland
-just-talk --backend x11
+just-talk-plus --backend wayland
+just-talk-plus --backend x11
 ```
 
 Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 
 ```powershell
-.\build\just-talk.exe --doctor
+.\build\just-talk-plus.exe --doctor
 ```
 
 ## 配置
@@ -148,10 +148,10 @@ Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 
 ```text
 # Linux / macOS
-~/.config/just-talk/config.toml
+~/.config/just-talk-plus/config.toml
 
 # Windows
-%APPDATA%\just-talk\config.toml
+%APPDATA%\just-talk-plus\config.toml
 ```
 
 推荐热键配置：
@@ -187,7 +187,7 @@ omit_trailing_punct = false  # 输出前省略句尾句号「。」（主设置�
 
 ```toml
 [voice]
-hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-plus"]
 ```
 
 macOS 热键写法：

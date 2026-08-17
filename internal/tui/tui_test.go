@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/plugins/voice"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
 // fieldByKey 在全部 tab 中按 key 查找字段。

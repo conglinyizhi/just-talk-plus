@@ -8,7 +8,7 @@ package voice
 import (
 	"testing"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func TestCleanTrailingPunct(t *testing.T) {

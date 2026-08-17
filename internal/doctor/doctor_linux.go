@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func runPlatform(cfg *config.Config, backend string) Report {
@@ -36,13 +36,13 @@ func runPlatform(cfg *config.Config, backend string) Report {
 		report.Checks = append(report.Checks, Check{
 			Name: "热键后端", OK: false, Severity: Required,
 			Detail: fmt.Sprintf("unknown backend %q", backend),
-			Fix:    "使用 --backend wayland 或 --backend x11，或设置 JUST_TALK_BACKEND=wayland/x11。",
+			Fix:    "使用 --backend wayland 或 --backend x11，或设置 JUST_TALK_PLUS_BACKEND=wayland/x11。",
 		})
 	}
 
 	report.Checks = append(report.Checks, platformDependencyChecks(backend)...)
 	if cfg.Voice.Enabled {
-		report.Checks = append(report.Checks, asrEngineCheck(cfg, "~/.config/just-talk/config.toml"))
+		report.Checks = append(report.Checks, asrEngineCheck(cfg, "~/.config/just-talk-plus/config.toml"))
 	}
 	return report
 }
@@ -51,7 +51,7 @@ func detectBackend(backend string) string {
 	if backend != "" {
 		return backend
 	}
-	if env := os.Getenv("JUST_TALK_BACKEND"); env != "" {
+	if env := os.Getenv("JUST_TALK_PLUS_BACKEND"); env != "" {
 		return env
 	}
 	if os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland" {

@@ -4,6 +4,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- Renamed the project identity from `just-talk` to `just-talk-plus` (no compatibility kept — zero users besides the maintainer): the Go module path is now `github.com/conglinyizhi/just-talk-plus`, the `cmd/` package and binary are `just-talk-plus`, the per-user config directory moved from `~/.config/just-talk/` (Windows `%APPDATA%\just-talk\`) to `~/.config/just-talk-plus/` (Windows `%APPDATA%\just-talk-plus\`), and the backend-override env var is now `JUST_TALK_PLUS_BACKEND`. The GitHub remote stays `conglinyizhi/just-talk-go-plus`.
+
 - Fixed an autotype bug where the submitted text was the **previous** utterance's content: Wayland's `pasteWayland` returned immediately after simulating paste, so the output layer restored the clipboard before the target app had read it — the app then pasted the restored (old) content. Both X11 and Wayland now wait `pasteSettleDelay` (300ms) after the paste, and the output dispatch is serialized with a mutex so two consecutive recordings can no longer interleave clipboard writes.
 
 - Grouped the submit/copy options under 自动上屏 on the Output tab: 复制到剪贴板 (`write_clipboard`), 上屏后还原剪贴板 (`restore_clipboard`) and 上屏失败不写入 (`no_clipboard_on_fail`) are now indented sub-options of `auto_submit` instead of flat siblings.

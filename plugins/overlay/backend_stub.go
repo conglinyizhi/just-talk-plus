@@ -5,7 +5,7 @@ package overlay
 import (
 	"fmt"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func newBackend(cfg config.OverlayConfig) (backend, error) {

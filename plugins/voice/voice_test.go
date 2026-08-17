@@ -10,9 +10,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/engine"
-	"github.com/c/just-talk-go/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/engine"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
 )
 
 // fakeEnv 最小 PluginEnv 实现，用于插件级测试。

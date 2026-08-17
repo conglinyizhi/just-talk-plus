@@ -16,13 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/hotkey"
-	"github.com/c/just-talk-go/internal/asrcfg"
-	"github.com/c/just-talk-go/plugins/voice"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
+	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
 var (

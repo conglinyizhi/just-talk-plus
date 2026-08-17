@@ -8,8 +8,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
 )
 
 // Plugin is the interface for all engine plugins.

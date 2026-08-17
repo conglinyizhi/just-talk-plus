@@ -23,7 +23,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 // NewStream 实现 speech.StreamingEngine。
@@ -166,7 +166,7 @@ func (s *StreamSession) sendFullClientRequest(ctx context.Context) error {
 		audio["language"] = lang
 	}
 	payload := map[string]any{
-		"user":    map[string]string{"uid": "just-talk"},
+		"user":    map[string]string{"uid": "just-talk-plus"},
 		"audio":   audio,
 		"request": request,
 	}

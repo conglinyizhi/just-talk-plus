@@ -69,33 +69,33 @@ winget install --id GoLang.Go --exact
 Build for the current platform:
 
 ```bash
-cd just-talk-go
-CGO_ENABLED=1 go build -o build/just-talk ./cmd/just-talk
+cd just-talk-plus
+CGO_ENABLED=1 go build -o build/just-talk-plus ./cmd/just-talk-plus
 ```
 
 Windows PowerShell:
 
 ```powershell
-cd just-talk-go
-go build -o build\just-talk.exe .\cmd\just-talk
+cd just-talk-plus
+go build -o build\just-talk-plus.exe .\cmd\just-talk-plus
 ```
 
-Install to `~/.local/bin/just-talk`:
+Install to `~/.local/bin/just-talk-plus`:
 
 ```bash
 # Make sure ~/.local/bin is in PATH. If not, add this line to ~/.bashrc or ~/.zshrc.
 # export PATH="$HOME/.local/bin:$PATH"
-build/just-talk --install
+build/just-talk-plus --install
 # or
 make install
 ```
 
 macOS must be built on macOS. The project does not provide a non-cgo build.
 
-Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk.exe`:
+Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk-plus.exe`:
 
 ```powershell
-.\build\just-talk.exe --install
+.\build\just-talk-plus.exe --install
 # If the directory is not already in PATH, follow the note printed by the command.
 ```
 
@@ -120,26 +120,26 @@ git push origin v0.7.0
 Start the TUI:
 
 ```bash
-just-talk
+just-talk-plus
 ```
 
 Run without the TUI:
 
 ```bash
-just-talk --no-tui
+just-talk-plus --no-tui
 ```
 
 Force a backend:
 
 ```bash
-just-talk --backend wayland
-just-talk --backend x11
+just-talk-plus --backend wayland
+just-talk-plus --backend x11
 ```
 
 Windows selects its native backend automatically. Check the microphone and configuration before first use:
 
 ```powershell
-.\build\just-talk.exe --doctor
+.\build\just-talk-plus.exe --doctor
 ```
 
 ## Configuration
@@ -148,10 +148,10 @@ Default config path:
 
 ```text
 # Linux / macOS
-~/.config/just-talk/config.toml
+~/.config/just-talk-plus/config.toml
 
 # Windows
-%APPDATA%\just-talk\config.toml
+%APPDATA%\just-talk-plus\config.toml
 ```
 
 Recommended hotkey config:
@@ -187,7 +187,7 @@ Hotword example:
 
 ```toml
 [voice]
-hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-go"]
+hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-plus"]
 ```
 
 macOS hotkey example:

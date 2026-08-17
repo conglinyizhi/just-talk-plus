@@ -1,8 +1,8 @@
 # Build outputs
 /build/
 /dist/
-/just-talk
-/cmd/just-talk/just-talk
+/just-talk-plus
+/cmd/just-talk-plus/just-talk-plus
 *.exe
 
 # Local runtime files

@@ -21,13 +21,13 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/engine"
-	"github.com/c/just-talk-go/hotkey"
-	"github.com/c/just-talk-go/internal/asrcfg"
-	"github.com/c/just-talk-go/internal/autotype"
-	"github.com/c/just-talk-go/internal/clipboard"
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/engine"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
+	"github.com/conglinyizhi/just-talk-plus/internal/autotype"
+	"github.com/conglinyizhi/just-talk-plus/internal/clipboard"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 const (
@@ -198,7 +198,7 @@ func statsPath() string {
 			base = "."
 		}
 	}
-	return filepath.Join(base, "just-talk", "stats.json")
+	return filepath.Join(base, "just-talk-plus", "stats.json")
 }
 
 func TUIStatus() TUIVoiceStatus {

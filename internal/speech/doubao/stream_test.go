@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 func newTestSession() *StreamSession {

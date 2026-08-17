@@ -30,7 +30,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 func init() {
@@ -108,7 +108,7 @@ func (e *Engine) transcribeStream(ctx context.Context, req speech.TranscribeRequ
 
 	fullReq := map[string]any{
 		"user": map[string]any{
-			"uid": "just-talk",
+			"uid": "just-talk-plus",
 		},
 		"audio": map[string]any{
 			"format":  format,

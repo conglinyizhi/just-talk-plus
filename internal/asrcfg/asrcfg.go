@@ -12,13 +12,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/c/just-talk-go/config"
-	"github.com/c/just-talk-go/internal/speech"
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 
-	_ "github.com/c/just-talk-go/internal/speech/auralwise"
-	_ "github.com/c/just-talk-go/internal/speech/dashscope"
-	_ "github.com/c/just-talk-go/internal/speech/doubao"
-	_ "github.com/c/just-talk-go/internal/speech/openai"
+	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/auralwise"
+	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/dashscope"
+	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/doubao"
+	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/openai"
 )
 
 // DefaultEngine 未配置 engine 时使用的引擎（保持旧版行为）。

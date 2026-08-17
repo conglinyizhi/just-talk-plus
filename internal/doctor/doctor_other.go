@@ -5,7 +5,7 @@ package doctor
 import (
 	"runtime"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 func runPlatform(cfg *config.Config, backend string) Report {

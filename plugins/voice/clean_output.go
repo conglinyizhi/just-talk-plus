@@ -8,7 +8,7 @@ package voice
 import (
 	"unicode"
 
-	"github.com/c/just-talk-go/config"
+	"github.com/conglinyizhi/just-talk-plus/config"
 )
 
 // cleanTrailingPunct 输出层统一处理：按配置省略句尾标点。

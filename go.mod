@@ -1,4 +1,4 @@
-module github.com/c/just-talk-go
+module github.com/conglinyizhi/just-talk-plus
 
 go 1.25.0
 

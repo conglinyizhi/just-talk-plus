@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/c/just-talk-go/hotkey"
+	"github.com/conglinyizhi/just-talk-plus/hotkey"
 )
 
 type Config struct {
@@ -156,7 +156,7 @@ func FindConfig() string {
 		candidates = append(candidates, path)
 	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		candidates = append(candidates, filepath.Join(xdg, "just-talk", "config.toml"))
+		candidates = append(candidates, filepath.Join(xdg, "just-talk-plus", "config.toml"))
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
@@ -189,11 +189,11 @@ func Save(cfg *Config) error {
 func DefaultPath() string {
 	if runtime.GOOS == "windows" {
 		if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
-			return filepath.Join(dir, "just-talk", "config.toml")
+			return filepath.Join(dir, "just-talk-plus", "config.toml")
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "just-talk", "config.toml")
+		return filepath.Join(home, ".config", "just-talk-plus", "config.toml")
 	}
 	return ""
 }
