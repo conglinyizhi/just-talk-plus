@@ -40,7 +40,7 @@ func TestStreamAudioDrainsQueuedAudioAfterDelayedConnection(t *testing.T) {
 	client := &recordingStreamSession{}
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, false, defaultNoiseThreshold, queue, nil); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(client.audio(), want) {
@@ -48,7 +48,9 @@ func TestStreamAudioDrainsQueuedAudioAfterDelayedConnection(t *testing.T) {
 	}
 }
 
-func TestStreamAudioAuditContainsOnlySuccessfulOutgoingAudio(t *testing.T) {
+// TestStreamAudioRecordsBelowThresholdAsIs 验证低于噪声阈值的块也原样发送并录制：
+// 阈值仅用于开头开始录音与结束停止判定，中间不丢弃内容。
+func TestStreamAudioRecordsBelowThresholdAsIs(t *testing.T) {
 	queue := newAudioQueue()
 	queue.Push(audioChunk{pcm: []byte{3, 4}, gainedPeak: 0.001, gainedRMS: 0.001})
 	queue.Push(audioChunk{pcm: []byte{5, 6}, gainedPeak: 0.1, gainedRMS: 0.1})
@@ -58,10 +60,10 @@ func TestStreamAudioAuditContainsOnlySuccessfulOutgoingAudio(t *testing.T) {
 	client.SetAudioSentObserver(func(pcm []byte) { _, _ = audit.Write(pcm) })
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, true, defaultNoiseThreshold, queue, &audit); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, &audit); err != nil {
 		t.Fatal(err)
 	}
-	if want := []byte{1, 2, 5, 6}; !bytes.Equal(audit.Bytes(), want) {
+	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(audit.Bytes(), want) {
 		t.Fatalf("audited audio = %v, want %v", audit.Bytes(), want)
 	}
 }
