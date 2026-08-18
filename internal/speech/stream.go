@@ -42,6 +42,17 @@ type TraceableSession interface {
 	UpstreamLogID() string
 }
 
+// AudioSentObservable 可选地报告已成功交给 ASR 传输层的 PCM。回调用于生成
+// 与实际上游音频一致的本地审计录音；调用方不得阻塞回调。
+type AudioSentObservable interface {
+	SetAudioSentObserver(func([]byte))
+}
+
+// AudioSentFormatProvider 可选地描述 AudioSentObservable 回调中的 PCM 格式。
+type AudioSentFormatProvider interface {
+	AudioSentSampleRate() int
+}
+
 // UpstreamLogID 返回会话对应的上游日志 ID；不支持时返回空字符串。
 func UpstreamLogID(session StreamSession) string {
 	if traceable, ok := session.(TraceableSession); ok {
