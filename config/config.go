@@ -76,8 +76,7 @@ type VoiceConfig struct {
 	AutoGainMaxPeak    *float64 `toml:"auto_gain_max_peak"`
 	AutoGainMaxRise    *float64 `toml:"auto_gain_max_rise"`
 	AutoGainMaxGain    *int     `toml:"auto_gain_max_gain"`
-	NoiseGate        bool    `toml:"noise_gate"`      // 噪声门控：低于噪声阈值的音频不发送到 ASR
-	NoiseThreshold   float64 `toml:"noise_threshold"` // 增益后 RMS 噪声阈值
+	NoiseThreshold   float64 `toml:"noise_threshold"` // 底噪阈值（RMS）：用于开头开始录音与结束停止判定
 	NoiseDeadband    float64 `toml:"noise_deadband"`  // 停止判定容差：高于底噪阈值多少才算人声（默认 0.1）
 	NoiseFloorAuto   bool    `toml:"noise_floor_auto"` // 自动底噪：停止判定阈值随环境底噪自动漂移
 	SaveRecordings   bool    `toml:"save_recordings"` // 保存最近历史对应的运行期录音 WAV
