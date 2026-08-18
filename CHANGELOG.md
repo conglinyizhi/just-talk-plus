@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 新增噪声门控：可在输入设置中启用 `noise_gate`，低于 `noise_threshold` 的增益后 RMS 音频不会发送到远程 ASR；新增“检测当前底噪”动作，采样约 3 秒环境噪声后自动计算并持久化阈值，也支持手动调整。
+
+- 底噪检测完成后会在 TUI/日志中明确报告成功、保存的阈值，或失败/无有效样本等结果。
+
 - 胶囊文字增大并改为状态灯与文字整体居中布局，Linux 使用系统等宽字体测量实际文字宽度，Windows/macOS 同步放大系统字体，避免文字偏左且没有占满胶囊。
 
 - 胶囊状态现在使用系统字体和等宽数字倒计时（如 `STOP 06.0s`），并额外显示 `MIC ON` 与 `ASR ON/..`，区分麦克风是否真的在采集、ASR 会话是否已经连接；Linux ARGB 胶囊使用 Cairo 系统字体渲染。

@@ -37,8 +37,6 @@ const (
 	errorHoldDuration  = 10 * time.Second
 	audioSendTimeout   = 3 * time.Second
 	audioDrainTimeout  = 15 * time.Second
-	voiceTriggerRMS    = 0.015
-	voiceTriggerPeak   = 0.05
 )
 
 func normalizeStopDelayMs(delayMs int) int {
@@ -49,6 +47,20 @@ func normalizeStopDelayMs(delayMs int) int {
 		return maxStopDelayMs
 	}
 	return delayMs
+}
+
+func normalizeNoiseThreshold(threshold float64) float64 {
+	if threshold <= 0 {
+		return defaultNoiseThreshold
+	}
+	if threshold > 0.2 {
+		return 0.2
+	}
+	return threshold
+}
+
+func voiceAboveNoise(gainedRMS, gainedPeak, threshold float64) bool {
+	return gainedRMS >= threshold || gainedPeak >= threshold*3
 }
 
 var (
@@ -291,6 +303,8 @@ type VoicePlugin struct {
 	asrCancel              context.CancelFunc
 	audioDone              <-chan struct{}
 	stopDelayMs            int
+	noiseGate              bool
+	noiseThreshold         float64
 	pendingDone            int
 	finishingSessions      map[uint64]struct{}
 	canceledSessions       map[uint64]struct{}
@@ -304,13 +318,15 @@ type VoicePlugin struct {
 }
 
 type recordingSession struct {
-	sessionID   uint64
-	recorder    *Recorder
-	asrClient   speech.StreamSession
-	asrCancel   context.CancelFunc
-	audioDone   <-chan struct{}
-	userStopped bool
-	startedAt   time.Time
+	sessionID      uint64
+	recorder       *Recorder
+	asrClient      speech.StreamSession
+	asrCancel      context.CancelFunc
+	audioDone      <-chan struct{}
+	userStopped    bool
+	startedAt      time.Time
+	noiseGate      bool
+	noiseThreshold float64
 }
 
 func NewVoicePlugin() *VoicePlugin     { return &VoicePlugin{stopDelayMs: defaultStopDelayMs} }
@@ -383,6 +399,8 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	p.combo = combo
 	p.mode = mode
 	p.stopDelayMs = normalizeStopDelayMs(vc.StopDelayMs)
+	p.noiseGate = vc.NoiseGate
+	p.noiseThreshold = normalizeNoiseThreshold(vc.NoiseThreshold)
 	p.mu.Unlock()
 
 	p.logger.Info("config_reloaded", "hotkey", combo, "mode", mode,
@@ -618,7 +636,10 @@ func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams
 }
 
 func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams) {
-	prebuffer, detected := p.waitForVoice(ctx, rec)
+	p.mu.Lock()
+	noiseThreshold, noiseGate := p.noiseThreshold, p.noiseGate
+	p.mu.Unlock()
+	prebuffer, detected := p.waitForVoice(ctx, rec, noiseThreshold)
 	if !detected {
 		return
 	}
@@ -684,7 +705,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 
 	go func() {
 		defer close(audioDone)
-		p.streamAudio(ctx, rec, client, prebuffer)
+		p.streamAudio(ctx, rec, client, prebuffer, noiseGate, noiseThreshold)
 	}()
 	go func() {
 		for result := range client.Results() {
@@ -783,13 +804,15 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		return nil
 	}
 	session := &recordingSession{
-		sessionID:   p.sessionID,
-		recorder:    p.recorder,
-		asrClient:   p.asrClient,
-		asrCancel:   p.asrCancel,
-		audioDone:   p.audioDone,
-		userStopped: p.userStopped,
-		startedAt:   p.startedAt,
+		sessionID:      p.sessionID,
+		recorder:       p.recorder,
+		asrClient:      p.asrClient,
+		asrCancel:      p.asrCancel,
+		audioDone:      p.audioDone,
+		userStopped:    p.userStopped,
+		startedAt:      p.startedAt,
+		noiseGate:      p.noiseGate,
+		noiseThreshold: p.noiseThreshold,
 	}
 	p.sessionGen++
 	p.recorder, p.asrClient, p.asrCancel, p.audioDone = nil, nil, nil, nil
@@ -849,9 +872,16 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		finalSent := false
 		if audioDrained {
 			stageStarted := time.Now()
-			p.logger.Debug("latency anchor: final audio send start", "session_id", session.sessionID, "bytes", len(remaining))
+			finalAudio := remaining
+			if session.noiseGate && len(finalAudio) > 0 {
+				peak, rms := analyzePCM(finalAudio)
+				if !voiceAboveNoise(rms, peak, session.noiseThreshold) {
+					finalAudio = nil
+				}
+			}
+			p.logger.Debug("latency anchor: final audio send start", "session_id", session.sessionID, "bytes", len(finalAudio))
 			sendCtx, sendCancel := context.WithTimeout(context.Background(), audioSendTimeout)
-			err := session.asrClient.SendAudio(sendCtx, remaining, true)
+			err := session.asrClient.SendAudio(sendCtx, finalAudio, true)
 			sendCancel()
 			if err != nil {
 				p.logger.Warn("send final audio failed", "error", err)
@@ -1160,7 +1190,7 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder) ([]byte, bool) {
+func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder, threshold float64) ([]byte, bool) {
 	buf := make([]byte, 6400)
 	var prebuffer bytes.Buffer
 	for {
@@ -1175,7 +1205,7 @@ func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder) ([]byte, 
 				rec.SetGain(micTest.autoGain.Gain())
 			}
 			_, _ = prebuffer.Write(buf[:n])
-			if gainedRMS >= voiceTriggerRMS || gainedPeak >= voiceTriggerPeak {
+			if voiceAboveNoise(gainedRMS, gainedPeak, threshold) {
 				return prebuffer.Bytes(), true
 			}
 		}
@@ -1185,7 +1215,7 @@ func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder) ([]byte, 
 	}
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession, initial []byte) {
+func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession, initial []byte, noiseGate bool, threshold float64) {
 	if len(initial) > 0 {
 		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
 		sendErr := client.SendAudio(sendCtx, initial, false)
@@ -1204,12 +1234,15 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client spe
 			return
 		default:
 		}
-		n, rawPeak, rawRMS, gainedPeak, _, limited, err := rec.readWithLevels(buf)
+		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
 		if n > 0 {
 			// Gate adjustment on the original microphone samples, then drive the
 			// gain from the post-gain peak sent to the ASR engine.
 			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, time.Now()) {
 				rec.SetGain(micTest.autoGain.Gain())
+			}
+			if noiseGate && !voiceAboveNoise(gainedRMS, gainedPeak, threshold) {
+				continue
 			}
 			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
 			sendErr := client.SendAudio(sendCtx, buf[:n], false)

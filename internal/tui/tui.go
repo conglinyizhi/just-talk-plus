@@ -258,6 +258,9 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	mic := []field{
 		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
+		{label: "噪声门控", key: "noise_gate", help: "低于噪声阈值的音频不发送到远程 ASR", fType: fToggle, boolVal: vc.NoiseGate},
+		{label: "噪声阈值", key: "noise_threshold", help: "增益后 RMS 阈值，建议先执行一次底噪检测再微调", fType: fString, input: ti(fmt.Sprintf("%.4f", vc.NoiseThreshold))},
+		{label: "检测当前底噪", key: "noise_calibrate", help: "采集约 3 秒环境底噪，自动计算并保存噪声阈值", fType: fAction},
 	}
 
 	output := []field{
@@ -606,6 +609,12 @@ func (m *Model) triggerAction(key string) {
 	case "mic_test":
 		voice.StartMicTest()
 		m.micPanel = &micPanelState{devIdx: m.deviceIndex(voice.MicTestDevice())}
+	case "noise_calibrate":
+		if voice.StartNoiseCalibration() {
+			m.logf("🎤 正在检测底噪，请保持安静约 3 秒")
+		} else {
+			m.logf("⚠️ 底噪检测未启动：麦克风正在使用中")
+		}
 	case "doc_links":
 		m.openLinkPicker()
 	}
@@ -649,6 +658,10 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
 			case "auto_gain":
 				vc.AutoGain = f.boolVal
+			case "noise_gate":
+				vc.NoiseGate = f.boolVal
+			case "noise_threshold":
+				fmt.Sscanf(f.input.Value(), "%f", &vc.NoiseThreshold)
 			case "diagnostics_startup_runs":
 				switch f.selectValue() {
 				case "后续 3 次启动":
@@ -1592,6 +1605,10 @@ func (m *Model) renderMicPanel() string {
 	if lvl.AutoGain {
 		ag = "● 开"
 	}
+	noiseState := fmt.Sprintf("%.4f", lvl.NoiseThreshold)
+	if lvl.NoiseCalibrating {
+		noiseState = "检测中..."
+	}
 	clipMark := ""
 	if lvl.Clipping {
 		clipMark = eStyle.Render(" ⚠ 已限幅")
@@ -1606,6 +1623,7 @@ func (m *Model) renderMicPanel() string {
 		"  增益后真实: " + vStyle.Render("["+gainedRMSBar+"]") + fmt.Sprintf(" %.2f", lvl.GainedRMS) + clipMark,
 		gainLine,
 		"  自适应增益: " + aStyle.Render(ag) + dStyle.Render("  (空格切换)"),
+		"  底噪阈值: " + wStyle.Render(noiseState) + dStyle.Render("  (设置页可调整/检测)"),
 		"  状态: " + vStyle.Render(state),
 		"",
 		" " + dStyle.Render("[ ] 设备  |  +/- 增益  |  空格 自适应增益  |  录音热键 开始/停止  |  esc 退出"),

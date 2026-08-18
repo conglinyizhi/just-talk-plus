@@ -8,6 +8,7 @@ package voice
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,15 +17,17 @@ import (
 
 // MicLevel 麦克风实时电平快照（供 TUI 调试面板显示）。
 type MicLevel struct {
-	Peak          float64 // 原始输入峰值 0..1
-	RMS           float64 // 原始输入 RMS 0..1
-	GainedRMS     float64 // 应用增益后的 RMS 0..1
-	Gain          int     // 当前增益
-	Clipping      bool    // 应用增益后是否触发软限幅
-	AutoGain      bool    // 自适应增益开关
-	PeakHold      float64 // 原始输入峰值保持（0 = 无标记）
-	RMSHold       float64 // 原始输入 RMS 保持（0 = 无标记）
-	GainedRMSHold float64 // 应用增益后 RMS 保持（0 = 无标记）
+	Peak             float64 // 原始输入峰值 0..1
+	RMS              float64 // 原始输入 RMS 0..1
+	GainedRMS        float64 // 应用增益后的 RMS 0..1
+	Gain             int     // 当前增益
+	Clipping         bool    // 应用增益后是否触发软限幅
+	AutoGain         bool    // 自适应增益开关
+	PeakHold         float64 // 原始输入峰值保持（0 = 无标记）
+	RMSHold          float64 // 原始输入 RMS 保持（0 = 无标记）
+	GainedRMSHold    float64 // 应用增益后 RMS 保持（0 = 无标记）
+	NoiseThreshold   float64
+	NoiseCalibrating bool
 }
 
 // micTestState 麦克风测试模式状态。
@@ -59,8 +62,88 @@ const (
 	// peakQuietThreshold 峰值低于该值视为无信号。
 	peakQuietThreshold = 0.05
 	// peakHoldDuration 无信号持续该时长后，保持的峰值回落清零。
-	peakHoldDuration = 1500 * time.Millisecond
+	peakHoldDuration         = 1500 * time.Millisecond
+	noiseCalibrationDuration = 3 * time.Second
+	defaultNoiseThreshold    = 0.015
 )
+
+// StartNoiseCalibration 采集当前设备的底噪，并把建议 RMS 阈值保存到配置。
+func StartNoiseCalibration() bool {
+	ensureAutoGain()
+	micTest.mu.Lock()
+	if micTest.testing || micTest.recorder != nil || micTest.level.NoiseCalibrating {
+		micTest.mu.Unlock()
+		return false
+	}
+	logger, device, gain, cfg := micTest.logger, micTest.device, micTest.autoGain.Gain(), micTest.cfg
+	micTest.level.NoiseCalibrating = true
+	micTest.mu.Unlock()
+
+	go func() {
+		defer func() {
+			micTest.mu.Lock()
+			micTest.level.NoiseCalibrating = false
+			micTest.mu.Unlock()
+		}()
+		rec := NewRecorderWithDevice(logger, device, gain)
+		if err := rec.Start(); err != nil {
+			pout("❌ 底噪检测失败: %v", err)
+			return
+		}
+		defer rec.Stop()
+		deadline := time.NewTimer(noiseCalibrationDuration)
+		defer deadline.Stop()
+		buf := make([]byte, 6400)
+		levels := make([]float64, 0, 100)
+		for {
+			select {
+			case <-deadline.C:
+				threshold := calibratedNoiseThreshold(levels)
+				micTest.mu.Lock()
+				micTest.level.NoiseThreshold = threshold
+				if cfg != nil {
+					cfg.Voice.NoiseThreshold = threshold
+				}
+				micTest.mu.Unlock()
+				if cfg != nil {
+					_ = config.Save(cfg)
+				}
+				if len(levels) == 0 {
+					pout("⚠️ 底噪检测完成，但没有采集到有效样本，已使用默认阈值 %.4f", threshold)
+				} else {
+					pout("✅ 底噪检测完成，噪声阈值已保存为 %.4f", threshold)
+				}
+				return
+			default:
+			}
+			_, _, _, _, rms, _, err := rec.readWithLevels(buf)
+			if err != nil {
+				pout("❌ 底噪检测中断: %v", err)
+				return
+			}
+			if rms > 0 {
+				levels = append(levels, rms)
+			}
+		}
+	}()
+	return true
+}
+
+func calibratedNoiseThreshold(levels []float64) float64 {
+	if len(levels) == 0 {
+		return defaultNoiseThreshold
+	}
+	sort.Float64s(levels)
+	index := int(float64(len(levels)-1) * 0.9)
+	threshold := levels[index] * 2.5
+	if threshold < 0.005 {
+		threshold = 0.005
+	}
+	if threshold > 0.2 {
+		threshold = 0.2
+	}
+	return threshold
+}
 
 // update 喂入一块峰值电平（peak 0..1，now 采样时间），返回当前保持的峰值。
 func (p *peakHoldTracker) update(peak float64, now time.Time) float64 {
@@ -84,6 +167,7 @@ func setupMicTest(logger *slog.Logger, cfg *config.Config, gain int, autoGainOn 
 	micTest.logger = logger
 	micTest.device = cfg.Voice.Device
 	micTest.cfg = cfg
+	micTest.level.NoiseThreshold = normalizeNoiseThreshold(cfg.Voice.NoiseThreshold)
 	if micTest.autoGain == nil {
 		micTest.autoGain = NewAutoGain(autoGainOn, gain)
 	}
