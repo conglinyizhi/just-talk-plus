@@ -111,8 +111,11 @@ type TUIVoiceStats struct {
 
 func pout(format string, args ...interface{}) {
 	msg := strings.ReplaceAll(fmt.Sprintf(format, args...), "\n", " ")
-	if TUILog != nil {
-		TUILog(msg)
+	tuilogMu.Lock()
+	writeTUILog := TUILog
+	tuilogMu.Unlock()
+	if writeTUILog != nil {
+		writeTUILog(msg)
 		slog.Debug("tui message", "message", msg)
 		return
 	}
@@ -130,14 +133,9 @@ func SetOutput(w io.Writer) {
 }
 
 func SetupTUILog() {
-	TUILog = func(msg string) {
-		tuilogMu.Lock()
-		TUILogBuf = append(TUILogBuf, msg)
-		if len(TUILogBuf) > 200 {
-			TUILogBuf = TUILogBuf[len(TUILogBuf)-100:]
-		}
-		tuilogMu.Unlock()
-	}
+	tuilogMu.Lock()
+	TUILog = AppendTUILog
+	tuilogMu.Unlock()
 }
 
 func DisableTUILog() {
@@ -145,6 +143,25 @@ func DisableTUILog() {
 	TUILog = nil
 	TUILogBuf = nil
 	tuilogMu.Unlock()
+}
+
+// AppendTUILog 向 TUI 的统一时间线追加一条消息。
+func AppendTUILog(msg string) {
+	tuilogMu.Lock()
+	defer tuilogMu.Unlock()
+	TUILogBuf = append(TUILogBuf, msg)
+	if len(TUILogBuf) > 200 {
+		TUILogBuf = TUILogBuf[len(TUILogBuf)-200:]
+	}
+}
+
+// TUILogSnapshot 返回按写入顺序排列的 TUI 日志快照。
+func TUILogSnapshot() []string {
+	tuilogMu.Lock()
+	defer tuilogMu.Unlock()
+	snapshot := make([]string, len(TUILogBuf))
+	copy(snapshot, TUILogBuf)
+	return snapshot
 }
 
 func TUIStats() TUIVoiceStats {
@@ -295,6 +312,7 @@ type VoicePlugin struct {
 	userStopped            bool
 	stopTimer              *time.Timer
 	stopAt                 time.Time
+	stopGeneration         uint64
 	startedAt              time.Time
 	sessionID              uint64
 	sessionGen             uint64
@@ -303,8 +321,11 @@ type VoicePlugin struct {
 	asrCancel              context.CancelFunc
 	audioDone              <-chan struct{}
 	stopDelayMs            int
+	stopAfterSilence       bool
 	noiseGate              bool
 	noiseThreshold         float64
+	recordedAudio          *bytes.Buffer
+	recordedAudioRate      int
 	pendingDone            int
 	finishingSessions      map[uint64]struct{}
 	canceledSessions       map[uint64]struct{}
@@ -318,15 +339,17 @@ type VoicePlugin struct {
 }
 
 type recordingSession struct {
-	sessionID      uint64
-	recorder       *Recorder
-	asrClient      speech.StreamSession
-	asrCancel      context.CancelFunc
-	audioDone      <-chan struct{}
-	userStopped    bool
-	startedAt      time.Time
-	noiseGate      bool
-	noiseThreshold float64
+	sessionID         uint64
+	recorder          *Recorder
+	asrClient         speech.StreamSession
+	asrCancel         context.CancelFunc
+	audioDone         <-chan struct{}
+	userStopped       bool
+	startedAt         time.Time
+	noiseGate         bool
+	noiseThreshold    float64
+	recordedAudio     *bytes.Buffer
+	recordedAudioRate int
 }
 
 func NewVoicePlugin() *VoicePlugin     { return &VoicePlugin{stopDelayMs: defaultStopDelayMs} }
@@ -400,6 +423,7 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	p.combo = combo
 	p.mode = mode
 	p.stopDelayMs = normalizeStopDelayMs(vc.StopDelayMs)
+	p.stopAfterSilence = vc.StopAfterSilence
 	p.noiseGate = vc.NoiseGate
 	p.noiseThreshold = normalizeNoiseThreshold(vc.NoiseThreshold)
 	p.mu.Unlock()
@@ -520,13 +544,45 @@ func (p *VoicePlugin) startStopDelay() {
 	}
 	p.holdReleased = false
 	p.stopping, p.userStopped = true, true
+	p.armStopTimerLocked()
+	p.publishStatusLocked()
+	if p.stopAfterSilence {
+		pout("🎤 等待末段声音结束...（静音 %dms 后停止）", p.stopDelayMs)
+	} else {
+		pout("🎤 即将停止... (%dms 缓冲)", p.stopDelayMs)
+	}
+}
+
+func (p *VoicePlugin) armStopTimerLocked() {
+	if p.stopTimer != nil {
+		p.stopTimer.Stop()
+	}
+	p.stopGeneration++
+	generation := p.stopGeneration
 	delay := time.Duration(normalizeStopDelayMs(p.stopDelayMs)) * time.Millisecond
 	p.stopAt = time.Now().Add(delay)
-	p.stopTimer = time.AfterFunc(delay, func() {
-		p.stopRecordingAsync()
-	})
+	p.stopTimer = time.AfterFunc(delay, func() { p.stopRecordingWhenDue(generation) })
+}
+
+func (p *VoicePlugin) stopRecordingWhenDue(generation uint64) {
+	p.mu.Lock()
+	if generation != p.stopGeneration || !p.recording || !p.stopping || time.Now().Before(p.stopAt) {
+		p.mu.Unlock()
+		return
+	}
+	p.stopTimer = nil
+	p.mu.Unlock()
+	p.stopRecordingAsync()
+}
+
+func (p *VoicePlugin) noteStopActivity(gainedRMS, gainedPeak float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.stopAfterSilence || !p.recording || !p.stopping || !voiceAboveNoise(gainedRMS, gainedPeak, p.noiseThreshold) {
+		return
+	}
+	p.armStopTimerLocked()
 	p.publishStatusLocked()
-	pout("🎤 即将停止... (%dms 缓冲)", p.stopDelayMs)
 }
 
 func (p *VoicePlugin) cancelStopDelay() {
@@ -546,6 +602,7 @@ func (p *VoicePlugin) cancelStopDelayOnlyLocked() {
 		p.stopTimer.Stop()
 		p.stopTimer = nil
 	}
+	p.stopGeneration++
 	if p.stopping {
 		pout("🎤 继续录音")
 	}
@@ -600,7 +657,11 @@ func (p *VoicePlugin) startRecording() {
 	sessionID := p.sessionID
 	sessionGen := p.sessionGen
 	startedAt := time.Now()
-	p.recorder, p.recording, p.userStopped = rec, true, false
+	var recordedAudio *bytes.Buffer
+	if vc.SaveRecordings {
+		recordedAudio = &bytes.Buffer{}
+	}
+	p.recorder, p.recording, p.userStopped, p.recordedAudio, p.recordedAudioRate = rec, true, false, recordedAudio, speech.PCMRate
 	p.startedAt = startedAt
 	p.stopping = false
 	p.stopAt = time.Time{}
@@ -610,7 +671,9 @@ func (p *VoicePlugin) startRecording() {
 	p.publishStatusLocked()
 	p.mu.Unlock() // Release lock before slow WebSocket dial
 
-	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params)
+	audioQueue := newAudioQueue()
+	go p.captureAudio(ctx, rec, audioQueue)
+	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params, audioQueue, recordedAudio)
 	if shouldStopImmediately {
 		p.startStopDelay()
 	}
@@ -636,12 +699,18 @@ func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams
 	return speech.NewBatchSession(eng, params), eng, nil
 }
 
-func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams) {
+func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams, audioQueue *audioQueue, recordedAudio *bytes.Buffer) {
 	p.mu.Lock()
 	noiseThreshold, noiseGate := p.noiseThreshold, p.noiseGate
 	p.mu.Unlock()
-	prebuffer, detected := p.waitForVoice(ctx, rec, noiseThreshold)
-	if !detected {
+	prebuffer, err := p.waitForVoice(ctx, audioQueue, noiseThreshold)
+	if err != nil {
+		if ctx.Err() == nil {
+			p.failRecordingSession(sessionID, "录音读取失败: "+shortError(err))
+		}
+		return
+	}
+	if len(prebuffer) == 0 {
 		return
 	}
 	client, engineInfo, err := p.newSession(ctx, params)
@@ -655,6 +724,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 			p.stopping, p.recorder, p.recording = false, nil, false
 			p.stopAt = time.Time{}
 			p.asrCancel = nil
+			p.recordedAudio = nil
 			if !wasCanceled {
 				p.publishErrorLocked("ASR 引擎配置错误: "+shortError(err), sessionID)
 			} else {
@@ -677,6 +747,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 			p.stopping, p.recorder, p.recording = false, nil, false
 			p.stopAt = time.Time{}
 			p.asrCancel = nil
+			p.recordedAudio = nil
 			if !wasCanceled {
 				p.publishErrorLocked("ASR 连接失败: "+asrConnectErrorDetail(err), sessionID)
 			} else {
@@ -690,6 +761,15 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		return
 	}
 	pout("✅ ASR 已连接 (引擎: %s)", engineInfo.Name())
+	audioRate := speech.PCMRate
+	if provider, ok := client.(speech.AudioSentFormatProvider); ok && provider.AudioSentSampleRate() > 0 {
+		audioRate = provider.AudioSentSampleRate()
+	}
+	if observer, ok := client.(speech.AudioSentObservable); ok && recordedAudio != nil {
+		observer.SetAudioSentObserver(func(pcm []byte) {
+			_, _ = recordedAudio.Write(pcm)
+		})
+	}
 
 	p.mu.Lock()
 	if p.sessionGen != sessionGen || !p.recording || p.recorder != rec {
@@ -701,12 +781,17 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	audioDone := make(chan struct{})
 	p.asrClient = client
 	p.audioDone = audioDone
+	p.recordedAudioRate = audioRate
 	p.publishStatusLocked()
 	p.mu.Unlock()
 
 	go func() {
 		defer close(audioDone)
-		p.streamAudio(ctx, rec, client, prebuffer, noiseGate, noiseThreshold)
+		if err := p.streamAudio(ctx, client, prebuffer, noiseGate, noiseThreshold, audioQueue, recordedAudio); err != nil && ctx.Err() == nil {
+			p.logger.Error("ASR audio stream interrupted", "session_id", sessionID, "error", err)
+			pout("❌ ASR 音频传输中断: %v", shortError(err))
+			p.failRecordingSession(sessionID, "ASR 音频传输中断: "+shortError(err))
+		}
 	}()
 	go func() {
 		for result := range client.Results() {
@@ -794,29 +879,49 @@ func (p *VoicePlugin) stopRecordingAsync() {
 	}
 }
 
+// failRecordingSession 只终止指定会话，防止旧会话的网络错误影响刚启动的新录音。
+func (p *VoicePlugin) failRecordingSession(sessionID uint64, detail string) {
+	p.mu.Lock()
+	if p.sessionID != sessionID || !p.recording {
+		p.mu.Unlock()
+		return
+	}
+	session := p.detachRecordingLocked()
+	p.trackFinishLocked(session)
+	p.publishErrorLocked(detail, sessionID)
+	p.mu.Unlock()
+	if session != nil {
+		go p.finishRecordingSession(session)
+	}
+}
+
 func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 	if p.stopTimer != nil {
 		p.stopTimer.Stop()
 		p.stopTimer = nil
 	}
+	p.stopGeneration++
 	p.stopAt = time.Time{}
 	if p.recorder == nil && p.asrClient == nil && p.asrCancel == nil {
 		p.recording, p.stopping, p.userStopped = false, false, false
 		return nil
 	}
 	session := &recordingSession{
-		sessionID:      p.sessionID,
-		recorder:       p.recorder,
-		asrClient:      p.asrClient,
-		asrCancel:      p.asrCancel,
-		audioDone:      p.audioDone,
-		userStopped:    p.userStopped,
-		startedAt:      p.startedAt,
-		noiseGate:      p.noiseGate,
-		noiseThreshold: p.noiseThreshold,
+		sessionID:         p.sessionID,
+		recorder:          p.recorder,
+		asrClient:         p.asrClient,
+		asrCancel:         p.asrCancel,
+		audioDone:         p.audioDone,
+		userStopped:       p.userStopped,
+		startedAt:         p.startedAt,
+		noiseGate:         p.noiseGate,
+		noiseThreshold:    p.noiseThreshold,
+		recordedAudio:     p.recordedAudio,
+		recordedAudioRate: p.recordedAudioRate,
 	}
 	p.sessionGen++
-	p.recorder, p.asrClient, p.asrCancel, p.audioDone = nil, nil, nil, nil
+	p.recorder, p.asrClient, p.asrCancel, p.audioDone, p.recordedAudio = nil, nil, nil, nil, nil
+	p.recordedAudioRate = speech.PCMRate
 	p.startedAt = time.Time{}
 	p.recording, p.stopping, p.userStopped = false, false, false
 	p.holdReleased = false
@@ -869,7 +974,6 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				}
 			}
 		}
-
 		finalSent := false
 		if audioDrained {
 			stageStarted := time.Now()
@@ -890,6 +994,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 					p.publishError("结束识别失败: "+shortError(err), session.sessionID)
 				}
 			} else {
+				recordAudioAfterSend(session.asrClient, session.recordedAudio, finalAudio)
 				finalSent = true
 				p.logger.Debug("latency anchor: final audio send done", "session_id", session.sessionID, "duration_ms", time.Since(stageStarted).Milliseconds())
 			}
@@ -922,7 +1027,11 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			}
 			recordTUIStats(text, audioDuration)
 			upstreamLogID := speech.UpstreamLogID(session.asrClient)
-			p.dispatchTextOutput(text, session.sessionID, upstreamLogID)
+			recordingPath := ""
+			if session.recordedAudio != nil {
+				recordingPath = saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
+			}
+			p.dispatchTextOutput(text, session.sessionID, upstreamLogID, recordingPath)
 		}
 		p.logger.Debug("finish session: closing ASR client")
 		closeDone := make(chan error, 1)
@@ -942,7 +1051,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	p.logger.Debug("finish session: done")
 }
 
-func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstreamLogID string) {
+func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstreamLogID, recordingPath string) {
 	// 输出层统一处理：省略句尾标点、删除中文间空格、中文排版自动空格（上屏/复制前，含历史记录）
 	vc := p.cfg.Load().Voice
 	text = cleanTrailingPunct(text, vc)
@@ -1015,7 +1124,9 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 			p.logger.Debug("text output: no action configured", "text_len", len(text))
 		}
 		p.logger.Debug("latency anchor: output complete", "session_id", sessionID, "total_after_queue_ms", time.Since(queuedAt).Milliseconds())
-		recordHistory(text, upstreamLogID)
+		if !recordHistoryWithRecording(text, upstreamLogID, recordingPath) && recordingPath != "" {
+			_ = os.Remove(recordingPath)
+		}
 	}()
 }
 
@@ -1192,78 +1303,89 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder, threshold float64) ([]byte, bool) {
+func (p *VoicePlugin) captureAudio(ctx context.Context, rec *Recorder, audioQueue *audioQueue) {
+	defer audioQueue.Close(nil)
 	buf := make([]byte, 6400)
-	var prebuffer bytes.Buffer
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, false
-		default:
-		}
 		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
 		if n > 0 {
 			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, time.Now()) {
 				rec.SetGain(micTest.autoGain.Gain())
 			}
-			_, _ = prebuffer.Write(buf[:n])
-			if voiceAboveNoise(gainedRMS, gainedPeak, threshold) {
-				return prebuffer.Bytes(), true
-			}
-		}
-		if err != nil {
-			return nil, false
-		}
-	}
-}
-
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession, initial []byte, noiseGate bool, threshold float64) {
-	if len(initial) > 0 {
-		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
-		sendErr := client.SendAudio(sendCtx, initial, false)
-		sendCancel()
-		if sendErr != nil {
-			if ctx.Err() == nil {
-				p.logger.Error("send buffered audio error", "error", sendErr)
-			}
-			return
-		}
-	}
-	buf := make([]byte, 6400)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
-		if n > 0 {
-			// Gate adjustment on the original microphone samples, then drive the
-			// gain from the post-gain peak sent to the ASR engine.
-			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, time.Now()) {
-				rec.SetGain(micTest.autoGain.Gain())
-			}
-			if noiseGate && !voiceAboveNoise(gainedRMS, gainedPeak, threshold) {
-				continue
-			}
-			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
-			sendErr := client.SendAudio(sendCtx, buf[:n], false)
-			sendCancel()
-			if sendErr != nil {
-				if ctx.Err() == nil {
-					p.logger.Error("send audio error", "error", sendErr)
-				}
-				return
-			}
+			pcm := append([]byte(nil), buf[:n]...)
+			audioQueue.Push(audioChunk{pcm: pcm, rawPeak: rawPeak, rawRMS: rawRMS, gainedPeak: gainedPeak, gainedRMS: gainedRMS, limited: limited})
 		}
 		if err == io.EOF || (err != nil && ctx.Err() != nil) {
 			return
 		}
 		if err != nil {
-			p.logger.Error("read audio error", "error", err)
+			audioQueue.Close(err)
 			return
 		}
 	}
+}
+
+func (p *VoicePlugin) waitForVoice(ctx context.Context, audioQueue *audioQueue, threshold float64) ([]byte, error) {
+	var prebuffer bytes.Buffer
+	for {
+		chunk, err := audioQueue.Next(ctx)
+		if err != nil {
+			if err == context.Canceled {
+				return nil, nil
+			}
+			return nil, err
+		}
+		_, _ = prebuffer.Write(chunk.pcm)
+		if voiceAboveNoise(chunk.gainedRMS, chunk.gainedPeak, threshold) {
+			p.noteStopActivity(chunk.gainedRMS, chunk.gainedPeak)
+			return prebuffer.Bytes(), nil
+		}
+	}
+}
+
+func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSession, initial []byte, noiseGate bool, threshold float64, audioQueue *audioQueue, recordedAudio *bytes.Buffer) error {
+	if len(initial) > 0 {
+		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
+		sendErr := client.SendAudio(sendCtx, initial, false)
+		sendCancel()
+		if sendErr != nil {
+			return fmt.Errorf("send buffered audio: %w", sendErr)
+		}
+		recordAudioAfterSend(client, recordedAudio, initial)
+	}
+	for {
+		chunk, err := audioQueue.Next(ctx)
+		if err == io.EOF {
+			return nil
+		}
+		if err == context.Canceled {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read captured audio: %w", err)
+		}
+		p.noteStopActivity(chunk.gainedRMS, chunk.gainedPeak)
+		if noiseGate && !voiceAboveNoise(chunk.gainedRMS, chunk.gainedPeak, threshold) {
+			continue
+		}
+		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
+		sendErr := client.SendAudio(sendCtx, chunk.pcm, false)
+		sendCancel()
+		if sendErr != nil {
+			return fmt.Errorf("send audio: %w", sendErr)
+		}
+		recordAudioAfterSend(client, recordedAudio, chunk.pcm)
+	}
+}
+
+func recordAudioAfterSend(client speech.StreamSession, recordedAudio *bytes.Buffer, pcm []byte) {
+	if recordedAudio == nil || len(pcm) == 0 {
+		return
+	}
+	if _, observable := client.(speech.AudioSentObservable); observable {
+		return
+	}
+	_, _ = recordedAudio.Write(pcm)
 }
 
 func writeClipboard(text string) error {
