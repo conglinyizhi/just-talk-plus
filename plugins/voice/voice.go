@@ -821,11 +821,8 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.mu.Unlock()
 
 	// 测量「第一声被检测到」到「音频开始发送给 ASR」的延迟，供参考调整停止延迟。
-	p.logger.Info("voice latency: first voice to audio send",
-		"session_id", sessionID,
-		"engine", engineInfo.Name(),
-		"voice_to_send_ms", time.Since(firstVoiceAt).Milliseconds(),
-	)
+	pout("🎙 语音延迟: 检测到第一声 → 音频开始发送 %dms (引擎: %s)",
+		time.Since(firstVoiceAt).Milliseconds(), engineInfo.Name())
 
 	go func() {
 		defer close(audioDone)
