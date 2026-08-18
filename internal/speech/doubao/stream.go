@@ -45,6 +45,7 @@ type StreamSession struct {
 	finalOnce sync.Once
 	textMu    sync.RWMutex
 	lastText  string
+	audioSent func([]byte)
 }
 
 // NewStreamSession 创建会话（不连接；连接在 Connect 中进行）。
@@ -68,6 +69,11 @@ func (s *StreamSession) SetLogger(l *slog.Logger) {
 		s.logger = l
 	}
 }
+
+// SetAudioSentObserver 设置已成功写入上游连接的音频观察器。
+func (s *StreamSession) SetAudioSentObserver(observer func([]byte)) { s.audioSent = observer }
+
+func (s *StreamSession) AudioSentSampleRate() int { return speech.PCMRate }
 
 func (s *StreamSession) Connect(ctx context.Context) error {
 	url := s.cfg.streamURL()
@@ -110,7 +116,13 @@ func (s *StreamSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) 
 	if err != nil {
 		return err
 	}
-	return s.conn.Write(ctx, websocket.MessageBinary, frame)
+	if err := s.conn.Write(ctx, websocket.MessageBinary, frame); err != nil {
+		return err
+	}
+	if len(pcm) > 0 && s.audioSent != nil {
+		s.audioSent(pcm)
+	}
+	return nil
 }
 
 func (s *StreamSession) Results() <-chan speech.StreamResult { return s.resultCh }
