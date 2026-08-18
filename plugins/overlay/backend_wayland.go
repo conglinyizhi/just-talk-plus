@@ -347,10 +347,9 @@ func (b *waylandBackend) draw(label string, color statusColor) {
 	text := C.CString(label)
 	textW := int(C.wayland_system_text_width(text, C.double(fontSize)))
 	C.free(unsafe.Pointer(text))
-	dotX := b.scaled(14)
+	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), textW)
 	dotY := (b.h - dotSize) / 2
 	b.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textX := (b.w - textW) / 2
 	textY := (b.h-int(fontSize))/2 - b.scaled(1)
 	b.drawSystemText(textX, textY+int(fontSize), label, fontSize)
 }

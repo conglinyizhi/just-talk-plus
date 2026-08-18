@@ -338,10 +338,9 @@ func (b *x11Backend) draw(label string, color statusColor) {
 	textScale := b.scaled(3)
 	fontSize := 14 * b.scale
 	textW := p.systemTextWidth(label, fontSize)
-	dotX := b.scaled(14)
+	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), int(textW))
 	dotY := (b.h - dotSize) / 2
 	p.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textX := (b.w - int(textW)) / 2
 	textY := (b.h-int(fontSize))/2 - b.scaled(1)
 	if !p.drawSystemText(textX, textY, label, fontSize) {
 		p.drawText(textX, textY, label, textScale, fg)
@@ -373,7 +372,7 @@ func (b *x11Backend) drawShape(label string, color statusColor) {
 	dotSize := b.scaled(14)
 	textScale := b.scaled(3)
 	textW := bitmapTextWidth(label, textScale)
-	dotX := b.scaled(14)
+	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), textW)
 	dotY := (b.h - dotSize) / 2
 	C.XSetForeground(b.dpy, b.gc, dotEdge)
 	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX), C.int(dotY), C.uint(dotSize), C.uint(dotSize), 0, 360*64)
@@ -382,7 +381,6 @@ func (b *x11Backend) drawShape(label string, color statusColor) {
 	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX+inset), C.int(dotY+inset), C.uint(dotSize-2*inset), C.uint(dotSize-2*inset), 0, 360*64)
 	C.XSetForeground(b.dpy, b.gc, fg)
 	textH := 7 * textScale
-	textX := (b.w - textW) / 2
 	textY := (b.h - textH) / 2
 	drawBitmapText(b, textX, textY, label, textScale)
 }
