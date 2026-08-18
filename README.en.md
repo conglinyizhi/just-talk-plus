@@ -16,7 +16,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
 - Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), Qianwen DashScope Fun-ASR realtime streaming (8k models auto-downsampled), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
-- Recognition history panel: the latest 50 submitted/copied results are kept as a rolling runtime snapshot and can be re-copied to the clipboard. It survives app restarts and is cleared after a system restart.
+- Recognition history panel: the latest 50 submitted/copied results are kept as a rolling runtime snapshot and can be re-copied to the clipboard. It survives app restarts and is cleared after a system restart. Sessions that recorded audio but produced no ASR text are also recorded as `[无结果]` for playback.
 - Optional recording retention: enable Input → Keep recording files to retain the WAV actually sent to ASR for each successful recognition (noise-gated chunks are excluded). Press Enter on the History tab to copy text, play it with `ffplay`, or reveal it in the file manager.
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
 - CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
@@ -24,7 +24,7 @@ It is built for people who want to type less and speak more while coding, chatti
   - Division of labor: **CJK space cleanup** (off by default) only removes spaces between two CJK characters; **CJK typographic auto-spacing** (on by default) only adds spaces between CJK and Latin letters/digits. They are independent and can be toggled separately.
 - Submit & copy options are grouped under 自动上屏 on the Output tab: **autotype** (simulate paste into the focused field) with sub-options **copy to clipboard** (write the result), **restore clipboard after autotype** (restore the original on success to keep clipboard history clean), and **do not write on autotype failure** (restore the original on failure too, so the text is never left in the clipboard) — executed in combination after each recognition to reduce pollution of your clipboard history (e.g. clipboard managers).
 - Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
-- Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Input / Output / History), so more settings never stretch the screen height.
+- Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Input / Output / History / Display), so more settings never stretch the screen height.
 - ASR hotwords (Doubao) for project names, people names, English terms, and domain-specific vocabulary.
 - Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
 
@@ -180,6 +180,7 @@ auto_gain = true   # adaptive gain: slowly lifts weak voiced input; loud blocks 
 # auto_gain_max_peak = 0.65     # start backing off when output peak exceeds this (default 0.65)
 # auto_gain_max_rise = 1.15     # max rise per block (~200ms, default 1.15)
 # auto_gain_max_gain = 25       # gain cap in multiples (default 25, max 100)
+# The four parameters above can also be edited under the 自适应增益 section of the TUI Input tab: leave blank to restore the built-in default; takes effect after restart.
 stop_delay_ms = 3000  # silence wait duration after requesting stop
 stop_after_silence = true  # reset the wait while voice keeps arriving; stop only after this much silence
 # For delayed microphones, set this at least to the device's maximum transport delay. Audio keeps buffering while ASR connects and is replayed in order.
