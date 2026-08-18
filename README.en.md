@@ -183,6 +183,10 @@ auto_gain = true   # adaptive gain: slowly lifts weak voiced input; loud blocks 
 # The four parameters above can also be edited under the 自适应增益 section of the TUI Input tab: leave blank to restore the built-in default; takes effect after restart.
 stop_delay_ms = 3000  # silence wait duration after requesting stop
 stop_after_silence = true  # reset the wait while voice keeps arriving; stop only after this much silence
+# Noise-based voice detection (editable on the TUI Input tab):
+# noise_threshold = 0.015  # noise floor (RMS): blocks below it are dropped by the noise gate
+# noise_deadband = 0.1     # stop-decision deadband: how far above the floor counts as voice; keep it small or normal speech is treated as noise and cut off early
+# noise_floor_auto = false # auto noise floor: stop-decision threshold drifts with the environment, no manual calibration needed
 # For delayed microphones, set this at least to the device's maximum transport delay. Audio keeps buffering while ASR connects and is replayed in order.
 omit_trailing_punct = false  # strip trailing "。" before output (master toggle)
 # omit_trailing_all = false  # sub: strip all trailing punctuation (incl. ASCII)
