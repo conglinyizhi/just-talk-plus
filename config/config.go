@@ -78,6 +78,8 @@ type VoiceConfig struct {
 	AutoGainMaxGain    *int     `toml:"auto_gain_max_gain"`
 	NoiseGate        bool    `toml:"noise_gate"`      // 噪声门控：低于噪声阈值的音频不发送到 ASR
 	NoiseThreshold   float64 `toml:"noise_threshold"` // 增益后 RMS 噪声阈值
+	NoiseDeadband    float64 `toml:"noise_deadband"`  // 停止判定容差：高于底噪阈值多少才算人声（默认 0.1）
+	NoiseFloorAuto   bool    `toml:"noise_floor_auto"` // 自动底噪：停止判定阈值随环境底噪自动漂移
 	SaveRecordings   bool    `toml:"save_recordings"` // 保存最近历史对应的运行期录音 WAV
 	StopDelayMs      int     `toml:"stop_delay_ms"`
 	StopAfterSilence bool    `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
@@ -159,7 +161,7 @@ func Default() *Config {
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
-			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015,
+			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015, NoiseDeadband: 0.1,
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
