@@ -61,16 +61,27 @@ type OverlayConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled        bool    `toml:"enabled"`
-	Mode           string  `toml:"mode"`
-	PushToTalk     string  `toml:"push_to_talk"`
-	Device         string  `toml:"device"`
-	Gain           int     `toml:"gain"`
-	AutoGain       bool    `toml:"auto_gain"`       // 自适应增益：爆音自动降低、安静恢复
-	NoiseGate      bool    `toml:"noise_gate"`      // 噪声门控：低于噪声阈值的音频不发送到 ASR
-	NoiseThreshold float64 `toml:"noise_threshold"` // 增益后 RMS 噪声阈值
-	StopDelayMs    int     `toml:"stop_delay_ms"`
-	Language       string  `toml:"language"`
+	Enabled          bool    `toml:"enabled"`
+	Mode             string  `toml:"mode"`
+	PushToTalk       string  `toml:"push_to_talk"`
+	Device           string  `toml:"device"`
+	Gain             int     `toml:"gain"`
+	AutoGain         bool    `toml:"auto_gain"`       // 自适应增益：爆音自动降低、安静恢复
+	// 以下自适应增益参数均为可选（nil = 使用内置保守默认值），写入 config.toml 后重启生效：
+	//   auto_gain_target_peak 目标输出峰值（默认 0.42）
+	//   auto_gain_max_peak    输出峰值超过此值开始回撤增益（默认 0.65）
+	//   auto_gain_max_rise    每块（约 200ms）最大升高倍数（默认 1.15）
+	//   auto_gain_max_gain    增益上限（倍，默认 25；上限 100）
+	AutoGainTargetPeak *float64 `toml:"auto_gain_target_peak"`
+	AutoGainMaxPeak    *float64 `toml:"auto_gain_max_peak"`
+	AutoGainMaxRise    *float64 `toml:"auto_gain_max_rise"`
+	AutoGainMaxGain    *int     `toml:"auto_gain_max_gain"`
+	NoiseGate        bool    `toml:"noise_gate"`      // 噪声门控：低于噪声阈值的音频不发送到 ASR
+	NoiseThreshold   float64 `toml:"noise_threshold"` // 增益后 RMS 噪声阈值
+	SaveRecordings   bool    `toml:"save_recordings"` // 保存最近历史对应的运行期录音 WAV
+	StopDelayMs      int     `toml:"stop_delay_ms"`
+	StopAfterSilence bool    `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
+	Language         string  `toml:"language"`
 	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
 	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
 	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
