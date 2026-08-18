@@ -81,7 +81,7 @@ func TestBuildTabFields(t *testing.T) {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
-	for _, want := range []string{"mic_test", "auto_gain", "noise_threshold", "noise_floor_auto", "noise_deadband"} {
+	for _, want := range []string{"mic_test", "auto_gain", "noise_threshold", "noise_floor_auto", "noise_deadband", "diagnose"} {
 		if !mic[want] {
 			t.Fatalf("mic tab missing %q: %v", want, mic)
 		}
