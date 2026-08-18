@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -179,6 +180,21 @@ type micPanelState struct {
 	devIdx int
 }
 
+type historyAction string
+
+const (
+	historyCopy   historyAction = "copy"
+	historyPlay   historyAction = "play"
+	historyReveal historyAction = "reveal"
+)
+
+type historyMenuState struct {
+	entry      voice.HistoryEntry
+	entryIndex int // 该条目在 History() 中的下标（0 = 最新），用于菜单内显示序号
+	idx        int
+	actions    []historyAction
+}
+
 // ---- 主 Model ----
 
 type Model struct {
@@ -200,10 +216,12 @@ type Model struct {
 	cursor   int
 	editing  bool
 
-	picker        *pickerState
-	configOverlay *configOverlayState
-	linkPicker    *linkPickerState
-	micPanel      *micPanelState
+	picker                  *pickerState
+	configOverlay           *configOverlayState
+	linkPicker              *linkPickerState
+	micPanel                *micPanelState
+	historyMenu             *historyMenuState
+	noiseCalibrationVersion uint64
 }
 
 func New(cfg *config.Config) *Model {
@@ -246,6 +264,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
+		{label: "有声后停止", key: "stop_after_silence", help: "停止请求后，检测到有效人声会重置倒计时；静音满「停止延迟」才截断录音", fType: fToggle, boolVal: vc.StopAfterSilence},
 		{label: diagnosticLabel, key: "diagnostics_startup_runs", help: "仅用于排查异常：在本机保存最近 512 KiB 日志，按 K 导出。默认关闭；选择次数后会在对应启动完成后自动关闭", fType: fSelect, opts: diagnosticOptions, optIdx: diagnosticOptionIndex},
 	}
 
@@ -260,6 +279,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 		{label: "噪声门控", key: "noise_gate", help: "低于噪声阈值的音频不发送到远程 ASR", fType: fToggle, boolVal: vc.NoiseGate},
 		{label: "噪声阈值", key: "noise_threshold", help: "增益后 RMS 阈值，建议先执行一次底噪检测再微调", fType: fString, input: ti(fmt.Sprintf("%.4f", vc.NoiseThreshold))},
+		{label: "保留录音文件", key: "save_recordings", help: "将成功识别时实际发往 ASR 的音频以 WAV 保留在系统运行时目录，最多随历史保留 50 条", fType: fToggle, boolVal: vc.SaveRecordings},
 		{label: "检测当前底噪", key: "noise_calibrate", help: "采集约 3 秒环境底噪，自动计算并保存噪声阈值", fType: fAction},
 	}
 
@@ -354,14 +374,15 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 	default: // doubao-stream
 		mvOpts := []string{"1.0 (bigasr)", "2.0 (seedasr)"}
 		mvVals := []string{"1.0", "2.0"}
-		smOpts := []string{"async", "nostream"}
+		smOpts := []string{"双向流式（低延迟，实时结果）", "单向流式（优先完整上下文）"}
+		smVals := []string{"async", "nostream"}
 		mvDefault := "1.0"
 		if ec["api_key"] != "" {
 			mvDefault = "2.0"
 		}
 		fields = []field{
 			{label: "模型版本", key: "ec.model_version", help: "1.0=bigasr 旧资源 / 2.0=seedasr 新资源", fType: fSelect, opts: mvOpts, optVals: mvVals, optIdx: idxOf(mvVals, def(ec["model_version"], mvDefault))},
-			{label: "流式模式", key: "ec.stream_mode", help: "默认 async", fType: fSelect, opts: smOpts, optIdx: idxOf(smOpts, def(ec["stream_mode"], "async"))},
+			{label: "识别传输模式", key: "ec.stream_mode", help: "双向：边录边出字、延迟低；单向：服务端在结束后结合完整音频给最终结果。二遍识别仅双向模式可用", fType: fSelect, opts: smOpts, optVals: smVals, optIdx: idxOf(smVals, def(ec["stream_mode"], "async"))},
 			{label: "API Key(新版)", key: "ec.api_key", help: "新版控制台 X-Api-Key；与下方旧版凭据二选一", fType: fString, input: ti(ec["api_key"])},
 			{label: "App ID(旧版)", key: "ec.app_id", help: "旧版控制台 App ID（无 api_key 时使用）", fType: fString, input: ti(get("app_id"))},
 			{label: "Access Key(旧版)", key: "ec.access_key", help: "旧版 Access Token", fType: fString, input: ti(get("access_key"))},
@@ -425,6 +446,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case backendMsg:
 		m.info = hotkey.ProviderInfo(msg)
 	case refreshMsg:
+		m.syncNoiseCalibration()
 		return m, tickRefresh()
 	case devMsg:
 		if msg.Error != nil {
@@ -434,6 +456,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case linkOpenFailedMsg:
 		m.logf("❌ 打开链接失败: %s", msg.err)
+	case recordingActionMsg:
+		if msg.err != nil {
+			m.logf("❌ 录音操作失败: %s", msg.err)
+		} else {
+			m.logf("✅ %s", msg.detail)
+		}
 	}
 	return m, nil
 }
@@ -454,6 +482,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.micPanel != nil {
 		return m.handleMicPanelKey(k)
 	}
+	if m.historyMenu != nil {
+		return m.handleHistoryMenuKey(k)
+	}
 	if k == "K" {
 		m.openDiagnostics()
 		return nil
@@ -473,10 +504,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case "enter":
 			if m.cursor >= 0 && m.cursor < len(hist) {
-				if err := voice.CopyHistoryEntry(m.cursor); err != nil {
-					m.logf("❌ 复制失败: %s", err)
+				if hist[m.cursor].RecordingPath != "" {
+					m.openHistoryMenu(m.cursor, hist[m.cursor])
 				} else {
-					m.logf("📋 已复制: %s", truncateText(hist[m.cursor].Text, 60))
+					m.copyHistoryText(hist[m.cursor].Text)
 				}
 			}
 		case "h", "left":
@@ -620,6 +651,34 @@ func (m *Model) triggerAction(key string) {
 	}
 }
 
+// syncNoiseCalibration 把异步底噪检测的结果写回当前表单，并通知运行中的语音插件。
+func (m *Model) syncNoiseCalibration() {
+	version, threshold := voice.NoiseCalibrationSnapshot()
+	m.syncNoiseCalibrationSnapshot(version, threshold)
+}
+
+func (m *Model) syncNoiseCalibrationSnapshot(version uint64, threshold float64) {
+	if version == 0 || version == m.noiseCalibrationVersion {
+		return
+	}
+	m.noiseCalibrationVersion = version
+	m.cfg.Voice.NoiseThreshold = threshold
+	for i := range m.tabField[tabMic] {
+		field := &m.tabField[tabMic][i]
+		if field.key == "noise_threshold" {
+			field.input.SetValue(fmt.Sprintf("%.4f", threshold))
+			break
+		}
+	}
+	if m.OnSave != nil {
+		if err := m.OnSave(m.cfg); err != nil {
+			m.logf("❌ 底噪阈值已保存，但运行时更新失败: %s", err)
+			return
+		}
+	}
+	m.logf("✅ 底噪阈值已同步为 %.4f", threshold)
+}
+
 // ---- 保存 ----
 
 // applyFieldsTo 把所有 tab 的设置字段写回目标配置（纯内存，供 save 与测试使用）。
@@ -656,12 +715,16 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.NoClipboardOnFail = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
+			case "stop_after_silence":
+				vc.StopAfterSilence = f.boolVal
 			case "auto_gain":
 				vc.AutoGain = f.boolVal
 			case "noise_gate":
 				vc.NoiseGate = f.boolVal
 			case "noise_threshold":
 				fmt.Sscanf(f.input.Value(), "%f", &vc.NoiseThreshold)
+			case "save_recordings":
+				vc.SaveRecordings = f.boolVal
 			case "diagnostics_startup_runs":
 				switch f.selectValue() {
 				case "后续 3 次启动":
@@ -770,7 +833,7 @@ func (m *Model) View() string {
 		return "loading..."
 	}
 	base := m.renderBase()
-	if m.picker == nil && m.configOverlay == nil && m.linkPicker == nil && m.micPanel == nil {
+	if m.picker == nil && m.configOverlay == nil && m.linkPicker == nil && m.micPanel == nil && m.historyMenu == nil {
 		// 无弹层：键位帮助行固定在屏幕最底部
 		return pinBottom(base, m.helpLine(), m.h)
 	}
@@ -784,6 +847,8 @@ func (m *Model) View() string {
 		overlay = m.renderConfigOverlay()
 	case m.micPanel != nil:
 		overlay = m.renderMicPanel()
+	case m.historyMenu != nil:
+		overlay = m.renderHistoryMenu()
 	}
 	// 有弹层：弹层为模态，覆盖主内容（含帮助行），自含按键提示
 	return overlayOn(base, overlay, m.h)
@@ -805,7 +870,7 @@ func (m *Model) renderBase() string {
 	b.WriteString("  " + m.renderVoiceStats() + "\n\n")
 
 	if m.tab == tabHistory {
-		b.WriteString(m.renderHistory())
+		b.WriteString(m.renderHistory(m.historyRows()))
 	} else {
 		b.WriteString(m.renderFields())
 	}
@@ -815,25 +880,33 @@ func (m *Model) renderBase() string {
 		if m.logExpanded {
 			maxLogs = 100
 		}
+		logs := voice.TUILogSnapshot()
 		s := 0
-		if len(m.logs) > maxLogs {
-			s = len(m.logs) - maxLogs
+		if len(logs) > maxLogs {
+			s = len(logs) - maxLogs
 		}
-		if s < len(m.logs) || len(voice.TUILogBuf) > 0 {
+		if s < len(logs) {
 			b.WriteString(lStyle.Render("── 日志 (L 展开) ──") + "\n")
-			for _, l := range m.logs[s:] {
-				b.WriteString("  " + dStyle.Render(l) + "\n")
-			}
-			sv := 0
-			if len(voice.TUILogBuf) > maxLogs {
-				sv = len(voice.TUILogBuf) - maxLogs
-			}
-			for _, l := range voice.TUILogBuf[sv:] {
-				b.WriteString("  " + dStyle.Render(l) + "\n")
+			for _, l := range logs[s:] {
+				b.WriteString("  " + dStyle.Render(m.formatLogLine(l)) + "\n")
 			}
 		}
 	}
 	return b.String()
+}
+
+// formatLogLine 将流式 ASR 更新保持为单行，并保留 partial 结果中最新的文字。
+func (m *Model) formatLogLine(line string) string {
+	line = strings.ReplaceAll(line, "\r", "")
+	const prefix = "🎤 "
+	if !strings.HasPrefix(line, prefix) {
+		return line
+	}
+	maxWidth := m.w - 4
+	if maxWidth <= 0 {
+		maxWidth = 76
+	}
+	return prefix + truncateTextTail(strings.TrimPrefix(line, prefix), maxWidth-displayWidth(prefix))
 }
 
 // pinBottom 把 footer 固定在屏幕最后一行：主内容补空行到 screenH-1 行，
@@ -877,8 +950,83 @@ func (m *Model) renderFields() string {
 	return b.String()
 }
 
-// renderHistory 渲染历史 tab：空提示或可复制的条目列表。
-func (m *Model) renderHistory() string {
+// historyHeaderRows 是历史 tab 在列表之上的固定开销行数
+// （标题/tab 栏/状态区/分隔/提示行余量），滚动窗口据此计算可用高度。
+const historyHeaderRows = 7
+
+// historyRows 返回历史列表可用的渲染行数：整屏减去头部固定开销，
+// 再减去日志区（若展开）占用的行数，保证滚动窗口不溢出屏幕。
+func (m *Model) historyRows() int {
+	rows := m.h - historyHeaderRows
+	if rows < 3 {
+		rows = 3
+	}
+	if m.showLogs {
+		logs := voice.TUILogSnapshot()
+		logRows := len(logs)
+		if !m.logExpanded && logRows > 3 {
+			logRows = 3
+		}
+		if logRows > 0 {
+			logRows++ // “── 日志 ──”标题行
+		}
+		rows -= logRows
+		if rows < 3 {
+			rows = 3
+		}
+	}
+	return rows
+}
+
+// historyWindow 返回以 cursor 为中心的滚动窗口 [start, end)（条目下标）。
+// 窗口内渲染行数（每条 1 行，带 LogID 的条目 2 行）不超过 maxRows，
+// 且光标所在条目始终可见——这是长历史列表正常浏览的前提。
+func historyWindow(hist []voice.HistoryEntry, cursor, maxRows int) (start, end int) {
+	total := len(hist)
+	if total == 0 {
+		return 0, 0
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= total {
+		cursor = total - 1
+	}
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	rows := func(s, e int) int {
+		n := 0
+		for i := s; i < e; i++ {
+			n++
+			if hist[i].UpstreamLogID != "" {
+				n++
+			}
+		}
+		return n
+	}
+	start, end = cursor, cursor+1
+	for {
+		upOK := start > 0 && rows(start-1, end) <= maxRows
+		downOK := end < total && rows(start, end+1) <= maxRows
+		if !upOK && !downOK {
+			break
+		}
+		// 先向上扩一格（基于旧窗口评估）；再基于更新后的窗口评估向下扩，
+		// 避免 up/down 同时按旧窗口扩展导致一轮超出 maxRows。
+		if upOK {
+			start--
+		}
+		if end < total && rows(start, end+1) <= maxRows {
+			end++
+		}
+	}
+	return start, end
+}
+
+// renderHistory 渲染历史 tab：以光标为中心的滚动窗口，超出窗口的部分
+// 用 ▲/▼ 指示器提示，保证光标条目始终可见且列表跟随光标滚动。
+func (m *Model) renderHistory(rows int) string {
 	hist := voice.History()
 	if len(hist) == 0 {
 		return m.renderHistoryEmpty()
@@ -886,21 +1034,88 @@ func (m *Model) renderHistory() string {
 	if m.cursor >= len(hist) {
 		m.cursor = len(hist) - 1
 	}
+	start, end := historyWindow(hist, m.cursor, rows)
 	var b strings.Builder
-	for i, e := range hist {
+	if start > 0 {
+		b.WriteString(dStyle.Render(fmt.Sprintf("  ▲ 以上 %d 条", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		e := hist[i]
 		marker := "  "
 		if i == m.cursor {
 			marker = aStyle.Render("▸ ")
 		}
-		text := truncateText(e.Text, 60)
+		idx := dStyle.Render(fmt.Sprintf("#%-3d ", i+1))
+		text := truncateText(e.Text, 48)
 		ts := e.Time.Format("15:04:05")
-		b.WriteString(marker + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
+		b.WriteString(marker + idx + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
 		if e.UpstreamLogID != "" {
-			b.WriteString("    " + dStyle.Render("豆包 LogID: "+e.UpstreamLogID) + "\n")
+			b.WriteString("       " + dStyle.Render("豆包 LogID: "+e.UpstreamLogID) + "\n")
 		}
 	}
-	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · enter 复制到剪贴板") + "\n")
+	if end < len(hist) {
+		b.WriteString(dStyle.Render(fmt.Sprintf("  ▼ 以下 %d 条", len(hist)-end)) + "\n")
+	}
+	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · enter 复制/录音操作") + "\n")
 	return b.String()
+}
+
+func (m *Model) copyHistoryText(text string) {
+	if err := voice.CopyHistoryText(text); err != nil {
+		m.logf("❌ 复制失败: %s", err)
+		return
+	}
+	m.logf("📋 已复制: %s", truncateText(text, 60))
+}
+
+func (m *Model) openHistoryMenu(i int, entry voice.HistoryEntry) {
+	m.historyMenu = &historyMenuState{entry: entry, entryIndex: i, actions: []historyAction{historyCopy, historyPlay, historyReveal}}
+}
+
+func (m *Model) handleHistoryMenuKey(key string) tea.Cmd {
+	menu := m.historyMenu
+	if menu == nil {
+		return nil
+	}
+	switch key {
+	case "j", "down", "tab":
+		menu.idx = (menu.idx + 1) % len(menu.actions)
+	case "k", "up", "shift+tab":
+		menu.idx = (menu.idx + len(menu.actions) - 1) % len(menu.actions)
+	case "esc", "q", "ctrl+c":
+		m.historyMenu = nil
+	case "enter":
+		action, entry := menu.actions[menu.idx], menu.entry
+		m.historyMenu = nil
+		switch action {
+		case historyCopy:
+			m.copyHistoryText(entry.Text)
+		case historyPlay:
+			return recordingActionCmd(entry.RecordingPath, false)
+		case historyReveal:
+			return recordingActionCmd(entry.RecordingPath, true)
+		}
+	}
+	return nil
+}
+
+func (m *Model) renderHistoryMenu() string {
+	menu := m.historyMenu
+	labels := map[historyAction]string{historyCopy: "复制识别文本", historyPlay: "播放录音（无 ffplay 时打开文件夹）", historyReveal: "在文件管理器中显示录音"}
+	lines := []string{" " + lStyle.Render("历史记录操作")}
+	// 序号 + 时间戳：让操作对象与列表中的条目可对照，长列表下不迷路。
+	lines = append(lines, "  "+dStyle.Render(fmt.Sprintf("#%d  %s", menu.entryIndex+1, menu.entry.Time.Format("15:04:05"))))
+	lines = append(lines, "  "+dStyle.Render(truncateText(menu.entry.Text, 48)))
+	for index, action := range menu.actions {
+		if index == menu.idx {
+			lines = append(lines, aStyle.Render("▸ "+labels[action]))
+		} else {
+			lines = append(lines, "  "+vStyle.Render(labels[action]))
+		}
+	}
+	lines = append(lines, "", " "+dStyle.Render("j/k 或 ↑/↓ 选择  回车确认  esc 返回"))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Width(64).Render(strings.Join(lines, "\n"))
+	return box
 }
 
 // renderHistoryEmpty 历史为空时的提示：说明运行期滚动保存方式。
@@ -1079,7 +1294,9 @@ func (m *Model) logf(format string, args ...interface{}) {
 	if !m.showLogs {
 		return
 	}
-	m.logs = append(m.logs, fmt.Sprintf(format, args...))
+	message := fmt.Sprintf(format, args...)
+	m.logs = append(m.logs, message)
+	voice.AppendTUILog(message)
 }
 
 // overlayOn 把模态浮层垂直居中覆盖在 base 之上：用浮层行替换主内容对应行，
@@ -1273,6 +1490,24 @@ func openLinkCmd(url string) tea.Cmd {
 type linkOpenFailedMsg struct {
 	url string
 	err error
+}
+
+type recordingActionMsg struct {
+	detail string
+	err    error
+}
+
+func recordingActionCmd(path string, reveal bool) tea.Cmd {
+	return func() tea.Msg {
+		if reveal {
+			return recordingActionMsg{detail: "已在文件管理器中打开录音", err: revealRecording(path)}
+		}
+		openedFolder, err := playRecording(path)
+		if openedFolder && err == nil {
+			return recordingActionMsg{detail: "未找到 ffplay，已在文件管理器中打开录音"}
+		}
+		return recordingActionMsg{detail: "已开始播放录音", err: err}
+	}
 }
 
 func (m *Model) renderLinkPicker() string {
@@ -1711,16 +1946,48 @@ func renderLevelBar(level, hold float64, width int) string {
 func truncateText(s string, maxW int) string {
 	w := 0
 	for i, r := range s {
-		cw := 1
-		if r > 0x7F {
-			cw = 2
-		}
+		cw := displayWidth(string(r))
 		if w+cw > maxW {
 			return s[:i] + "…"
 		}
 		w += cw
 	}
 	return s
+}
+
+// truncateTextTail 截断文本到指定显示宽度，保留末尾字符。
+func truncateTextTail(s string, maxW int) string {
+	if displayWidth(s) <= maxW {
+		return s
+	}
+	if maxW <= 1 {
+		return "…"
+	}
+	width := 1
+	start := len(s)
+	for i := len(s); i > 0; {
+		r, size := utf8.DecodeLastRuneInString(s[:i])
+		charWidth := displayWidth(string(r))
+		if width+charWidth > maxW {
+			break
+		}
+		width += charWidth
+		start = i - size
+		i -= size
+	}
+	return "…" + s[start:]
+}
+
+func displayWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		if r > 0x7F {
+			width += 2
+		} else {
+			width++
+		}
+	}
+	return width
 }
 
 // displayDeviceName 设备显示名；空（自动）显示「自动」。
