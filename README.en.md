@@ -16,7 +16,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
 - Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), Qianwen DashScope Fun-ASR realtime streaming (8k models auto-downsampled), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
-- Recognition history panel: the last 10 submitted/copied results are kept in memory and can be re-copied to the clipboard.
+- Recognition history panel: the latest 50 submitted/copied results are kept as a rolling runtime snapshot and can be re-copied to the clipboard. It survives app restarts and is cleared after a system restart.
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
 - CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
 - CJK typographic auto-spacing (on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters/digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces around full-width punctuation, and convert full-width digits to half-width.
@@ -152,6 +152,8 @@ make dev ARGS="--no-tui --verbose"
 
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
 On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
+
+With `doubao-stream`, the History tab shows the `X-Tt-Logid` returned during the recognition WebSocket handshake, which can be used to trace the upstream log with Doubao support.
 
 ## Configuration
 
@@ -312,7 +314,7 @@ Select "麦克风调试" in the TUI main form and press Enter to open the debug 
 - Space toggles adaptive gain: weak voiced input rises quickly; silence does not raise gain and limiter engagement immediately backs it off
 - To investigate stalls, output, or recognition issues, choose this-run, next-3-start, or persistent collection in `[高级] 诊断收集`; when enabled, press `K` to export the local in-memory log to Kate. `--diagnostics` enables it for one invocation only
 
-The "历史记录" panel shows the last 10 successfully submitted/copied results; `j`/`k` to select, Enter to re-copy to the clipboard, `esc` to exit.
+The "历史记录" panel shows the latest 50 successfully submitted/copied results; use `j`/`k` to select, Enter to re-copy to the clipboard, and `esc` to exit. Its rolling snapshot is stored in the system runtime directory, survives app restarts, and is cleared after a system restart.
 
 ### Working With Clipboard Managers (Klipper / CopyQ)
 

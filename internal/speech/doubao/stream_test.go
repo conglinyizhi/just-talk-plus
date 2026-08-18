@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,16 @@ func TestParseResponseTracksLastText(t *testing.T) {
 	client.parseResponse(testASRResponse(t, 0x01, "你好", false))
 	if got := client.LastText(); got != "你好" {
 		t.Fatalf("LastText = %q", got)
+	}
+}
+
+func TestLogIDFromResponse(t *testing.T) {
+	resp := &http.Response{Header: http.Header{"X-Tt-Logid": []string{"trace-123"}}}
+	if got := logIDFromResponse(resp); got != "trace-123" {
+		t.Fatalf("logIDFromResponse = %q", got)
+	}
+	if got := logIDFromResponse(nil); got != "" {
+		t.Fatalf("nil response log ID = %q", got)
 	}
 }
 

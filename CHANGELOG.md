@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 历史记录改为最多 50 条的运行期滚动快照，程序重启后可恢复；新记录会淘汰最旧记录，系统重启后自动清理。
+
+- 豆包流式 ASR 的每条识别历史现在会记录并显示 WebSocket 握手返回的 `X-Tt-Logid`，便于追溯上游日志与排障。
+
 - `make dev` 的 Air 热重载现在隐藏 watcher/build 日志并关闭自动清屏；Linux/macOS 会在运行时将前台终端交给 Bubble Tea TUI，并在退出或热重载时交还，避免 Air 与 TUI 争抢终端。
 
 - 在 `make dev` 中按 `q` 正常退出 TUI 时，Air 会继续监听文件变更而不会自动重启程序。

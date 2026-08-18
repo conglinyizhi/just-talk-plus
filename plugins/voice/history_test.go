@@ -5,13 +5,31 @@
 
 package voice
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
-func TestHistoryRing(t *testing.T) {
-	// 清空全局历史
+func useTestHistoryStore(t *testing.T) string {
+	t.Helper()
+	originalPathFunc := historyPathFunc
+	path := filepath.Join(t.TempDir(), "history.json")
+	historyPathFunc = func() string { return path }
 	historyMu.Lock()
 	history = nil
 	historyMu.Unlock()
+	t.Cleanup(func() {
+		historyMu.Lock()
+		history = nil
+		historyMu.Unlock()
+		historyPathFunc = originalPathFunc
+	})
+	return path
+}
+
+func TestHistoryRing(t *testing.T) {
+	path := useTestHistoryStore(t)
 
 	total := historyCap + 3
 	for i := 0; i < total; i++ {
@@ -36,13 +54,45 @@ func TestHistoryRing(t *testing.T) {
 	if len(History()) != len(items) {
 		t.Fatal("empty text should not be recorded")
 	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("history snapshot was not saved: %v", err)
+	}
 }
 
 func TestHistoryEmpty(t *testing.T) {
+	useTestHistoryStore(t)
+	if len(History()) != 0 {
+		t.Fatal("history should be empty")
+	}
+}
+
+func TestHistoryStoresUpstreamLogID(t *testing.T) {
+	useTestHistoryStore(t)
+
+	recordHistory("识别结果", "doubao-log-1")
+	recordHistory("识别结果", "doubao-log-2")
+	items := History()
+	if len(items) != 2 {
+		t.Fatalf("len=%d, want 2", len(items))
+	}
+	if items[0].UpstreamLogID != "doubao-log-2" {
+		t.Fatalf("latest log ID = %q", items[0].UpstreamLogID)
+	}
+}
+
+func TestHistoryLoadsRuntimeSnapshot(t *testing.T) {
+	useTestHistoryStore(t)
+	recordHistory("恢复的记录", "doubao-log-restore")
 	historyMu.Lock()
 	history = nil
 	historyMu.Unlock()
-	if len(History()) != 0 {
-		t.Fatal("history should be empty")
+
+	loadHistory()
+	items := History()
+	if len(items) != 1 || items[0].Text != "恢复的记录" {
+		t.Fatalf("loaded history = %+v", items)
+	}
+	if items[0].UpstreamLogID != "doubao-log-restore" {
+		t.Fatalf("loaded log ID = %q", items[0].UpstreamLogID)
 	}
 }

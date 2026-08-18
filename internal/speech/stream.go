@@ -36,6 +36,20 @@ type StreamSession interface {
 	Close() error
 }
 
+// TraceableSession 可选地暴露上游服务返回的排障追踪 ID。
+// 目前只有豆包 ASR 流式会话提供该字段。
+type TraceableSession interface {
+	UpstreamLogID() string
+}
+
+// UpstreamLogID 返回会话对应的上游日志 ID；不支持时返回空字符串。
+func UpstreamLogID(session StreamSession) string {
+	if traceable, ok := session.(TraceableSession); ok {
+		return traceable.UpstreamLogID()
+	}
+	return ""
+}
+
 // StreamingEngine 由支持流式识别的引擎实现；批处理引擎可被 BatchSession 包装。
 type StreamingEngine interface {
 	Engine

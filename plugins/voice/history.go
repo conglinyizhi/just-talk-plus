@@ -6,39 +6,119 @@
 package voice
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
-// historyCap 内存中保留的最近识别结果条数。
-const historyCap = 10
+// historyCap 运行期滚动保存的最近识别结果条数。
+const historyCap = 50
 
 // HistoryEntry 一条识别历史。
 type HistoryEntry struct {
-	Text string
-	Time time.Time
+	Text          string
+	Time          time.Time
+	UpstreamLogID string
 }
 
 var (
-	historyMu sync.Mutex
-	history   []HistoryEntry // 最新在前
+	historyMu       sync.Mutex
+	history         []HistoryEntry // 最新在前
+	historyPathFunc = defaultHistoryPath
 )
 
+func defaultHistoryPath() string {
+	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
+		return filepath.Join(runtimeDir, "just-talk-plus", "history.json")
+	}
+	return filepath.Join(os.TempDir(), "just-talk-plus-history.json")
+}
+
+// loadHistory 恢复本次系统运行期间保存的历史。运行时目录通常会在系统重启后清理。
+func loadHistory() {
+	data, err := os.ReadFile(historyPathFunc())
+	if err != nil {
+		return
+	}
+	var entries []HistoryEntry
+	if json.Unmarshal(data, &entries) != nil {
+		return
+	}
+	entries = trimHistory(entries)
+	historyMu.Lock()
+	history = entries
+	historyMu.Unlock()
+}
+
 // recordHistory 记录一条成功上屏/复制的识别文本。
-func recordHistory(text string) {
+func recordHistory(text string, upstreamLogID ...string) {
 	if text == "" {
 		return
+	}
+	logID := ""
+	if len(upstreamLogID) > 0 {
+		logID = upstreamLogID[0]
 	}
 	historyMu.Lock()
 	defer historyMu.Unlock()
 	// 与最新一条去重（避免同一次识别的重复记录）
-	if len(history) > 0 && history[0].Text == text {
+	if len(history) > 0 && history[0].Text == text && history[0].UpstreamLogID == logID {
 		return
 	}
-	history = append([]HistoryEntry{{Text: text, Time: time.Now()}}, history...)
-	if len(history) > historyCap {
-		history = history[:historyCap]
+	history = trimHistory(append([]HistoryEntry{{Text: text, Time: time.Now(), UpstreamLogID: logID}}, history...))
+	saveHistoryLocked()
+}
+
+func trimHistory(entries []HistoryEntry) []HistoryEntry {
+	filtered := make([]HistoryEntry, 0, min(len(entries), historyCap))
+	for _, entry := range entries {
+		if entry.Text == "" {
+			continue
+		}
+		filtered = append(filtered, entry)
+		if len(filtered) == historyCap {
+			break
+		}
 	}
+	return filtered
+}
+
+func saveHistoryLocked() {
+	path := historyPathFunc()
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return
+	}
+	data, err := json.Marshal(history)
+	if err != nil {
+		return
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".history-*")
+	if err != nil {
+		return
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return
+	}
+	if err := temporary.Chmod(0600); err != nil {
+		_ = temporary.Close()
+		return
+	}
+	if err := temporary.Close(); err != nil {
+		return
+	}
+	if err := os.Rename(temporaryName, path); err == nil {
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	_ = os.Rename(temporaryName, path)
 }
 
 // History 返回最近的识别结果（最新在前）。

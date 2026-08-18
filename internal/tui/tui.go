@@ -895,21 +895,24 @@ func (m *Model) renderHistory() string {
 		text := truncateText(e.Text, 60)
 		ts := e.Time.Format("15:04:05")
 		b.WriteString(marker + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
+		if e.UpstreamLogID != "" {
+			b.WriteString("    " + dStyle.Render("豆包 LogID: "+e.UpstreamLogID) + "\n")
+		}
 	}
 	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · enter 复制到剪贴板") + "\n")
 	return b.String()
 }
 
-// renderHistoryEmpty 历史为空时的提示：说明何时会出现内容，以及仅存内存不持久化。
+// renderHistoryEmpty 历史为空时的提示：说明运行期滚动保存方式。
 func (m *Model) renderHistoryEmpty() string {
 	msg := strings.Join([]string{
 		"  暂无识别结果",
 		"",
 		"  完成一次语音识别（上屏或复制到剪贴板）后，",
-		"  结果会显示在这里，最多保留最近 10 条。",
+		"  结果会显示在这里，最多保留最近 50 条。",
 		"",
-		"  历史仅保存在内存中：",
-		"  退出 Just Talk Plus 后会清空，不会保留到下次启动。",
+		"  历史保存在系统运行时目录：",
+		"  程序重启后可恢复，系统重启后会自动清理。",
 	}, "\n")
 	return dStyle.Render(msg) + "\n"
 }

@@ -330,7 +330,7 @@ func TestHistoryEmptyHint(t *testing.T) {
 	m := readyModel(config.Default())
 	m.switchTab(tabHistory)
 	out := m.View()
-	for _, want := range []string{"暂无识别结果", "内存", "下次启动"} {
+	for _, want := range []string{"暂无识别结果", "运行时目录", "系统重启"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("history empty hint missing %q:\n%s", want, out)
 		}

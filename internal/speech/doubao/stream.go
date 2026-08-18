@@ -37,6 +37,7 @@ type StreamSession struct {
 	params    speech.StreamParams
 	logger    *slog.Logger
 	conn      *websocket.Conn
+	logID     string
 	writeSlot chan struct{}
 	resultCh  chan speech.StreamResult
 	done      chan struct{}
@@ -84,11 +85,12 @@ func (s *StreamSession) Connect(ctx context.Context) error {
 		return fmt.Errorf("websocket dial: %w", err)
 	}
 	s.conn = conn
+	s.logID = logIDFromResponse(resp)
 	if err := s.sendFullClientRequest(ctx); err != nil {
 		conn.Close(websocket.StatusInternalError, "init failed")
 		return fmt.Errorf("send init: %w", err)
 	}
-	s.logger.Info("ASR connected")
+	s.logger.Info("ASR connected", "upstream_log_id", s.logID)
 	// 接收循环随连接启动，解析结果/关闭 final 与 done。
 	go s.ReceiveLoop(ctx)
 	return nil
@@ -119,6 +121,16 @@ func (s *StreamSession) LastText() string {
 	s.textMu.RLock()
 	defer s.textMu.RUnlock()
 	return s.lastText
+}
+
+// UpstreamLogID 返回豆包握手响应中的 X-Tt-Logid，供历史记录和排障使用。
+func (s *StreamSession) UpstreamLogID() string { return s.logID }
+
+func logIDFromResponse(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Header.Get("X-Tt-Logid")
 }
 
 // ReceiveLoop 消费服务端消息直到连接断开或错误帧；调用方以 goroutine 运行。

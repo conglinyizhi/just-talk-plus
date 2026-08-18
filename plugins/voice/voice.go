@@ -338,6 +338,7 @@ func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	p.logger = env.Logger()
 	p.cfg.Store(env.Config())
 	loadTUIStats()
+	loadHistory()
 	setupMicTest(p.logger, env.Config(), env.Config().Voice.Gain, env.Config().Voice.AutoGain)
 	return p.registerFromConfig(env.Config())
 }
@@ -920,7 +921,8 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				audioDuration = time.Since(session.startedAt)
 			}
 			recordTUIStats(text, audioDuration)
-			p.dispatchTextOutput(text, session.sessionID)
+			upstreamLogID := speech.UpstreamLogID(session.asrClient)
+			p.dispatchTextOutput(text, session.sessionID, upstreamLogID)
 		}
 		p.logger.Debug("finish session: closing ASR client")
 		closeDone := make(chan error, 1)
@@ -940,7 +942,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	p.logger.Debug("finish session: done")
 }
 
-func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64) {
+func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstreamLogID string) {
 	// 输出层统一处理：省略句尾标点、删除中文间空格、中文排版自动空格（上屏/复制前，含历史记录）
 	vc := p.cfg.Load().Voice
 	text = cleanTrailingPunct(text, vc)
@@ -1013,7 +1015,7 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64) {
 			p.logger.Debug("text output: no action configured", "text_len", len(text))
 		}
 		p.logger.Debug("latency anchor: output complete", "session_id", sessionID, "total_after_queue_ms", time.Since(queuedAt).Milliseconds())
-		recordHistory(text)
+		recordHistory(text, upstreamLogID)
 	}()
 }
 
