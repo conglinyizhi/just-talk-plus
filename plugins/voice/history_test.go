@@ -6,9 +6,12 @@
 package voice
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 func useTestHistoryStore(t *testing.T) string {
@@ -94,5 +97,20 @@ func TestHistoryLoadsRuntimeSnapshot(t *testing.T) {
 	}
 	if items[0].UpstreamLogID != "doubao-log-restore" {
 		t.Fatalf("loaded log ID = %q", items[0].UpstreamLogID)
+	}
+}
+
+func TestSaveRecordingAudioCreatesWAV(t *testing.T) {
+	useTestHistoryStore(t)
+	path := saveRecordingAudio([]byte{0, 0, 1, 0}, speech.PCMRate, 7)
+	if path == "" {
+		t.Fatal("recording path is empty")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(data, []byte("RIFF")) {
+		t.Fatalf("recording is not WAV: %q", data[:min(len(data), 4)])
 	}
 }
