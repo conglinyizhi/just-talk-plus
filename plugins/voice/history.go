@@ -73,8 +73,27 @@ func recordHistory(text string, upstreamLogID ...string) {
 	recordHistoryEntry(text, logID, "")
 }
 
+// noResultText 是有录音但 ASR 未返回文本的历史条目占位文本。
+const noResultText = "[无结果]"
+
 func recordHistoryWithRecording(text, upstreamLogID, recordingPath string) bool {
 	return recordHistoryEntry(text, upstreamLogID, recordingPath)
+}
+
+// recordNoResultHistory 记录一条「有录音但 ASR 未返回文本」的历史，便于回放该段录音。
+// 与 recordHistoryEntry 不同：连续多条此类记录不去重（每条对应一次独立录音），
+// 且没有可回放的录音文件时（recordingPath 为空）不记录。
+func recordNoResultHistory(upstreamLogID, recordingPath string) bool {
+	if recordingPath == "" {
+		return false
+	}
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	previous := history
+	history = trimHistory(append([]HistoryEntry{{Text: noResultText, Time: time.Now(), UpstreamLogID: upstreamLogID, RecordingPath: recordingPath}}, history...))
+	removeDiscardedRecordings(previous, history)
+	saveHistoryLocked()
+	return true
 }
 
 func recordHistoryEntry(text, logID, recordingPath string) bool {
