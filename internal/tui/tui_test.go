@@ -6,9 +6,11 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/conglinyizhi/just-talk-plus/config"
@@ -66,7 +68,7 @@ func TestBuildTabFields(t *testing.T) {
 	m := New(config.Default())
 
 	general := tabKeys(m.tabField[tabGeneral])
-	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms", "diagnostics_startup_runs"} {
+	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms", "stop_after_silence", "diagnostics_startup_runs"} {
 		if !general[want] {
 			t.Fatalf("general missing %q: %v", want, general)
 		}
@@ -337,6 +339,78 @@ func TestHistoryEmptyHint(t *testing.T) {
 	}
 }
 
+// TestHistoryWindow 验证滚动窗口几何：光标始终可见、窗口行数不超上限、
+// 头尾边界与越界钳制。这是长历史列表能正常浏览的基础。
+func TestHistoryWindow(t *testing.T) {
+	if s, e := historyWindow(nil, 0, 10); s != 0 || e != 0 {
+		t.Fatalf("empty: (%d,%d), want (0,0)", s, e)
+	}
+	mk := func(n int) []voice.HistoryEntry {
+		h := make([]voice.HistoryEntry, n)
+		for i := range h {
+			h[i] = voice.HistoryEntry{Text: fmt.Sprintf("text-%d", i)}
+		}
+		return h
+	}
+	hist := mk(50)
+
+	// 光标在头部：窗口从 0 开始
+	if s, e := historyWindow(hist, 0, 10); s != 0 || e < 1 || e > 10 {
+		t.Fatalf("cursor 0: (%d,%d), want start=0 and end in (0,10]", s, e)
+	}
+	// 光标在中间：窗口包含光标且条数不超 maxRows
+	if s, e := historyWindow(hist, 25, 10); s > 25 || e <= 25 || e-s > 10 {
+		t.Fatalf("cursor 25: (%d,%d), must contain cursor within 10 rows", s, e)
+	}
+	// 光标在尾部：窗口到 end=50
+	if s, e := historyWindow(hist, 49, 10); e != 50 || s >= 49 {
+		t.Fatalf("cursor 49: (%d,%d), want end=50", s, e)
+	}
+	// 光标越界被钳制到最后一条
+	if s, e := historyWindow(hist, 999, 10); e != 50 || s >= 49 {
+		t.Fatalf("cursor 999: (%d,%d), want end=50", s, e)
+	}
+	// 遍历所有位置：光标必须始终在窗口内
+	for c := 0; c < 50; c++ {
+		if s, e := historyWindow(hist, c, 8); s > c || e <= c {
+			t.Fatalf("cursor %d: window (%d,%d) misses cursor", c, s, e)
+		}
+	}
+	// 带 LogID 的条目占 2 行：窗口按渲染行数（而非条数）限制
+	logHist := make([]voice.HistoryEntry, 50)
+	for i := range logHist {
+		logHist[i] = voice.HistoryEntry{Text: "t"}
+		if i%2 == 0 {
+			logHist[i].UpstreamLogID = "L"
+		}
+	}
+	s, e := historyWindow(logHist, 25, 10)
+	rows := 0
+	for i := s; i < e; i++ {
+		rows++
+		if logHist[i].UpstreamLogID != "" {
+			rows++
+		}
+	}
+	if rows > 10 || s > 25 || e <= 25 {
+		t.Fatalf("logID cursor 25: window (%d,%d) rows=%d, want <=10 with cursor", s, e, rows)
+	}
+}
+
+// TestHistoryMenuShowsIndex 验证二级菜单显示序号与时间戳，
+// 让操作对象与列表条目可对照（长列表下不迷路）。
+func TestHistoryMenuShowsIndex(t *testing.T) {
+	m := readyModel(config.Default())
+	entry := voice.HistoryEntry{Text: "hello world", Time: time.Date(2026, 1, 2, 15, 4, 5, 0, time.Local), RecordingPath: "/tmp/a.wav"}
+	m.openHistoryMenu(36, entry)
+	out := stripANSI(m.renderHistoryMenu())
+	for _, want := range []string{"#37", "15:04:05", "hello world", "复制识别文本", "播放录音", "文件管理器"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("menu missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // ---- 渠道选择弹层 ----
 
 func TestEnginePickerFlow(t *testing.T) {
@@ -401,6 +475,35 @@ func TestConfigOverlayFlow(t *testing.T) {
 	}
 	if got := cfg.Voice.EngineConfigs["doubao-stream"]["model_version"]; got != "2.0" {
 		t.Fatalf("model_version = %q", got)
+	}
+}
+
+func TestConfigOverlaySavesDoubaoTransmissionMode(t *testing.T) {
+	cfg := config.Default()
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	found := false
+	for i := range ov.fields {
+		if ov.fields[i].key != "ec.stream_mode" {
+			continue
+		}
+		found = true
+		if got := ov.fields[i].selectValue(); got != "async" {
+			t.Fatalf("default stream mode = %q, want async", got)
+		}
+		ov.fields[i].optIdx = 1
+		break
+	}
+	if !found {
+		t.Fatal("stream mode field not found")
+	}
+	m.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["doubao-stream"]["stream_mode"]; got != "nostream" {
+		t.Fatalf("stream_mode = %q, want nostream", got)
 	}
 }
 
@@ -577,6 +680,27 @@ func TestApplyFieldsTo(t *testing.T) {
 	}
 }
 
+func TestSyncNoiseCalibrationUpdatesFieldAndRuntime(t *testing.T) {
+	m := New(config.Default())
+	var reloaded *config.Config
+	m.OnSave = func(cfg *config.Config) error {
+		reloaded = cfg
+		return nil
+	}
+	m.noiseCalibrationVersion = 7
+	m.syncNoiseCalibrationSnapshot(8, 0.0234)
+
+	if got := fieldByKey(m, "noise_threshold").input.Value(); got != "0.0234" {
+		t.Fatalf("noise threshold field = %q", got)
+	}
+	if m.cfg.Voice.NoiseThreshold != 0.0234 {
+		t.Fatalf("config noise threshold = %.4f", m.cfg.Voice.NoiseThreshold)
+	}
+	if reloaded != m.cfg {
+		t.Fatal("noise calibration should reload the runtime configuration")
+	}
+}
+
 // ---- 字段值渲染 ----
 
 func TestFieldValue(t *testing.T) {
@@ -728,6 +852,26 @@ func TestTruncateText(t *testing.T) {
 	}
 	if got := truncateText("short", 10); got != "short" {
 		t.Fatalf("short: %q", got)
+	}
+}
+
+func TestTruncateTextTail(t *testing.T) {
+	if got := truncateTextTail("你好世界", 5); got != "…世界" {
+		t.Fatalf("tail truncate: %q", got)
+	}
+	if got := truncateTextTail("short", 10); got != "short" {
+		t.Fatalf("short: %q", got)
+	}
+}
+
+func TestFormatLogLineKeepsStreamingTranscriptTail(t *testing.T) {
+	m := New(config.Default())
+	m.w = 16
+	if got := m.formatLogLine("\r🎤 这是很长很长的实时识别文本"); got != "🎤 …识别文本" {
+		t.Fatalf("formatted log = %q", got)
+	}
+	if got := m.formatLogLine("✅ 配置已保存"); got != "✅ 配置已保存" {
+		t.Fatalf("non-streaming log = %q", got)
 	}
 }
 
