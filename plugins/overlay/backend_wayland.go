@@ -4,17 +4,46 @@ package overlay
 
 /*
 #cgo LDFLAGS: -lwayland-client
+#cgo LDFLAGS: -lcairo
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-client.h>
 #include <wayland-client-protocol.h>
+#include <cairo/cairo.h>
 #include "xdg-shell-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 extern void goOverlayRegistryGlobal(uintptr_t handle, struct wl_registry *registry, uint32_t name, char *interface, uint32_t version);
 extern void goOverlayLayerConfigure(uintptr_t handle, struct zwlr_layer_surface_v1 *surface, uint32_t serial, uint32_t width, uint32_t height);
 extern void goOverlayLayerClosed(uintptr_t handle, struct zwlr_layer_surface_v1 *surface);
+
+static void draw_wayland_system_text(unsigned char *data, int width, int height, const char *text, double font_size, double x, double y) {
+    cairo_surface_t *surface = cairo_image_surface_create_for_data(data, CAIRO_FORMAT_ARGB32, width, height, width * 4);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) return;
+    cairo_t *cr = cairo_create(surface);
+    cairo_select_font_face(cr, "DejaVu Sans Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, font_size);
+    cairo_set_source_rgba(cr, 0.96, 0.96, 0.96, 1.0);
+    cairo_move_to(cr, x, y);
+    cairo_show_text(cr, text);
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
+    cairo_surface_destroy(surface);
+}
+
+static double wayland_system_text_width(const char *text, double font_size) {
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(surface);
+    cairo_select_font_face(cr, "DejaVu Sans Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, font_size);
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, text, &extents);
+    double width = extents.x_advance;
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+    return width;
+}
 
 static void registry_global_cb(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
 	goOverlayRegistryGlobal((uintptr_t)data, registry, name, (char*)interface, version);
@@ -302,7 +331,6 @@ func (b *waylandBackend) createBuffer() error {
 func (b *waylandBackend) draw(label string, color statusColor) {
 	clear(b.data)
 	bg := rgba{20, 20, 20, 215}
-	fg := rgba{245, 245, 245, 255}
 	dot := rgba{uint8(color.R >> 8), uint8(color.G >> 8), uint8(color.B >> 8), 255}
 	radius := b.h / 2
 	for y := 0; y < b.h; y++ {
@@ -315,23 +343,22 @@ func (b *waylandBackend) draw(label string, color statusColor) {
 		}
 	}
 	dotSize := b.scaled(14)
-	gap := b.scaled(14)
-	textScale := b.scaled(3)
-	textW := bitmapTextWidth(label, textScale)
-	contentW := dotSize + gap + textW
-	dotX := (b.w - contentW) / 2
-	if dotX < 0 {
-		dotX = 0
-	}
+	fontSize := 14 * b.scale
+	text := C.CString(label)
+	textW := int(C.wayland_system_text_width(text, C.double(fontSize)))
+	C.free(unsafe.Pointer(text))
+	dotX := b.scaled(14)
 	dotY := (b.h - dotSize) / 2
 	b.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textH := 7 * textScale
-	textX := dotX + dotSize + gap
-	textY := (b.h - textH) / 2
-	if maxX := b.w - b.scaled(14) - textW; textX > maxX {
-		textX = maxX
-	}
-	b.drawText(textX, textY, label, textScale, fg)
+	textX := (b.w - textW) / 2
+	textY := (b.h-int(fontSize))/2 - b.scaled(1)
+	b.drawSystemText(textX, textY+int(fontSize), label, fontSize)
+}
+
+func (b *waylandBackend) drawSystemText(x, y int, label string, fontSize float64) {
+	text := C.CString(label)
+	defer C.free(unsafe.Pointer(text))
+	C.draw_wayland_system_text((*C.uchar)(unsafe.Pointer(&b.data[0])), C.int(b.w), C.int(b.h), text, C.double(fontSize), C.double(x), C.double(y))
 }
 
 type rgba struct {

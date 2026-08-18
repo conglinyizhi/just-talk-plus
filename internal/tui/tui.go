@@ -999,6 +999,16 @@ func (m *Model) renderVoiceStatus() string {
 	if status.Detail != "" {
 		parts = append(parts, vStyle.Render(status.Detail))
 	}
+	if status.RecorderReady || status.ASRReady {
+		recorderState, asrState := "off", "off"
+		if status.RecorderReady {
+			recorderState = "on"
+		}
+		if status.ASRReady {
+			asrState = "on"
+		}
+		parts = append(parts, fmt.Sprintf("MIC %s  ASR %s", recorderState, asrState))
+	}
 	if !status.StopAt.IsZero() {
 		remaining := time.Until(status.StopAt)
 		if remaining < 0 {

@@ -146,7 +146,7 @@ func Default() *Config {
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
-			Engine: "doubao-stream",
+			Engine: "doubao-stream", StopDelayMs: 800,
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

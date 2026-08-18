@@ -4,6 +4,14 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 胶囊文字增大并改为状态灯与文字整体居中布局，Linux 使用系统等宽字体测量实际文字宽度，Windows/macOS 同步放大系统字体，避免文字偏左且没有占满胶囊。
+
+- 胶囊状态现在使用系统字体和等宽数字倒计时（如 `STOP 06.0s`），并额外显示 `MIC ON` 与 `ASR ON/..`，区分麦克风是否真的在采集、ASR 会话是否已经连接；Linux ARGB 胶囊使用 Cairo 系统字体渲染。
+
+- 录音现在先在本地采集并缓存音频，检测到有效声音后才连接 ASR，再补发缓存的开头音频；适合有明显传输延迟的网络麦克风，也避免用户长时间静音时提前建立识别连接。胶囊进度条补齐点阵字形并扩大显示宽度。
+
+- 录音停止延迟现在会在胶囊弹窗中显示实时进度条（每 50ms 刷新），并修复未配置或负值延时被当成立即停止的问题；`6000ms` 等有效配置会完整等待，延时上限为 60 秒。音频发送排空等待从 4 秒放宽到 15 秒，适配网络麦克风的长尾延迟。
+
 - Added opt-in in-memory diagnostics: the `[高级] 诊断收集` TUI setting enables collection for the current run, the next three starts, or persistently; `--diagnostics` enables one invocation. `K` exports an enabled run's local snapshot to Kate, while normal launches retain no diagnostic log.
 
 - Adaptive gain now gates on the unamplified microphone level, raises consistently weak speech toward a useful range within a few audio blocks, and uses a soft limiter plus immediate gain back-off to protect louder speech.

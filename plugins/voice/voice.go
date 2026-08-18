@@ -7,6 +7,7 @@
 package voice
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,10 +33,23 @@ import (
 
 const (
 	defaultStopDelayMs = 800
+	maxStopDelayMs     = 60 * 1000
 	errorHoldDuration  = 10 * time.Second
 	audioSendTimeout   = 3 * time.Second
-	audioDrainTimeout  = 4 * time.Second
+	audioDrainTimeout  = 15 * time.Second
+	voiceTriggerRMS    = 0.015
+	voiceTriggerPeak   = 0.05
 )
+
+func normalizeStopDelayMs(delayMs int) int {
+	if delayMs <= 0 {
+		return defaultStopDelayMs
+	}
+	if delayMs > maxStopDelayMs {
+		return maxStopDelayMs
+	}
+	return delayMs
+}
 
 var (
 	cancelRecordingCombo = hotkey.Combo{Mods: hotkey.ModNone, Key: hotkey.KeyEscape}
@@ -58,7 +72,10 @@ type TUIVoiceStatus struct {
 	Detail          string
 	Recording       bool
 	Stopping        bool
+	RecorderReady   bool
+	ASRReady        bool
 	StopAt          time.Time
+	StopDelayMs     int
 	ErrorUntil      time.Time
 	UpdatedAt       time.Time
 	SessionID       uint64
@@ -365,7 +382,7 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	sameRegistration := oldCombo == combo && oldMode == mode
 	p.combo = combo
 	p.mode = mode
-	p.stopDelayMs = vc.StopDelayMs
+	p.stopDelayMs = normalizeStopDelayMs(vc.StopDelayMs)
 	p.mu.Unlock()
 
 	p.logger.Info("config_reloaded", "hotkey", combo, "mode", mode,
@@ -484,7 +501,7 @@ func (p *VoicePlugin) startStopDelay() {
 	}
 	p.holdReleased = false
 	p.stopping, p.userStopped = true, true
-	delay := time.Duration(p.stopDelayMs) * time.Millisecond
+	delay := time.Duration(normalizeStopDelayMs(p.stopDelayMs)) * time.Millisecond
 	p.stopAt = time.Now().Add(delay)
 	p.stopTimer = time.AfterFunc(delay, func() {
 		p.stopRecordingAsync()
@@ -601,6 +618,10 @@ func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams
 }
 
 func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams) {
+	prebuffer, detected := p.waitForVoice(ctx, rec)
+	if !detected {
+		return
+	}
 	client, engineInfo, err := p.newSession(ctx, params)
 	if err != nil {
 		wasCanceled := ctx.Err() != nil
@@ -663,7 +684,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 
 	go func() {
 		defer close(audioDone)
-		p.streamAudio(ctx, rec, client)
+		p.streamAudio(ctx, rec, client, prebuffer)
 	}()
 	go func() {
 		for result := range client.Results() {
@@ -820,7 +841,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				audioDrained = false
 				p.logger.Warn("finish session: audio stream drain timed out")
 				if !p.sessionCanceled(session.sessionID) {
-					p.publishError("停止录音超时: 等待音频发送结束超过 4s", session.sessionID)
+					p.publishError(fmt.Sprintf("停止录音超时: 等待音频发送结束超过 %s", audioDrainTimeout), session.sessionID)
 				}
 			}
 		}
@@ -1011,7 +1032,7 @@ func (p *VoicePlugin) publishStatusLocked() {
 		stopping = true
 		stopAt = p.stopAt
 	case p.recording && p.asrClient == nil && p.asrCancel != nil:
-		state, detail = "connecting", "录音中，正在连接 ASR"
+		state, detail = "connecting", "录音中，等待声音后连接 ASR"
 	case p.recording:
 		state, detail = "recording", "录音中"
 	case p.pendingDone > 0:
@@ -1061,7 +1082,10 @@ func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recordin
 	setTUIStatus(func(s *TUIVoiceStatus) {
 		s.State, s.Detail = state, detail
 		s.Recording, s.Stopping = recording, stopping
+		s.RecorderReady = p.recorder != nil && p.recording
+		s.ASRReady = p.asrClient != nil
 		s.StopAt = stopAt
+		s.StopDelayMs = p.stopDelayMs
 		s.ErrorUntil = p.errorUntil
 		s.SessionID = sessionID
 		s.PendingFinishes = pendingDone
@@ -1136,7 +1160,43 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession) {
+func (p *VoicePlugin) waitForVoice(ctx context.Context, rec *Recorder) ([]byte, bool) {
+	buf := make([]byte, 6400)
+	var prebuffer bytes.Buffer
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false
+		default:
+		}
+		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
+		if n > 0 {
+			if micTest.autoGain.Process(rawPeak, rawRMS, gainedPeak, limited, time.Now()) {
+				rec.SetGain(micTest.autoGain.Gain())
+			}
+			_, _ = prebuffer.Write(buf[:n])
+			if gainedRMS >= voiceTriggerRMS || gainedPeak >= voiceTriggerPeak {
+				return prebuffer.Bytes(), true
+			}
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+}
+
+func (p *VoicePlugin) streamAudio(ctx context.Context, rec *Recorder, client speech.StreamSession, initial []byte) {
+	if len(initial) > 0 {
+		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
+		sendErr := client.SendAudio(sendCtx, initial, false)
+		sendCancel()
+		if sendErr != nil {
+			if ctx.Err() == nil {
+				p.logger.Error("send buffered audio error", "error", sendErr)
+			}
+			return
+		}
+	}
 	buf := make([]byte, 6400)
 	for {
 		select {

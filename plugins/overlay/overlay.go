@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -54,7 +55,7 @@ func (p *Plugin) Start(ctx context.Context) error {
 	p.backend = b
 	defer p.backend.Close()
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	p.logger.Info("overlay started")
 	for {
@@ -95,16 +96,40 @@ func (p *Plugin) sync(status voice.TUIVoiceStatus) {
 func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, statusColor, bool) {
 	switch status.State {
 	case "connecting":
-		return "CON", statusColor{R: 245 << 8, G: 190 << 8, B: 70 << 8}, true
+		return captureASRLabel(status), statusColor{R: 245 << 8, G: 190 << 8, B: 70 << 8}, true
 	case "recording":
-		return "REC", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
+		return captureASRLabel(status), statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	case "stopping_delayed":
-		return "STP", statusColor{R: 255 << 8, G: 140 << 8, B: 60 << 8}, true
+		return stopDelayLabel(status), statusColor{R: 255 << 8, G: 140 << 8, B: 60 << 8}, true
 	case "stopping":
-		return "WAI", statusColor{R: 255 << 8, G: 160 << 8, B: 70 << 8}, true
+		return "ASR WAIT", statusColor{R: 255 << 8, G: 160 << 8, B: 70 << 8}, true
 	case "error":
 		return "ERR", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	default:
 		return "IDL", statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}, idleVisible
 	}
+}
+
+func captureASRLabel(status voice.TUIVoiceStatus) string {
+	if status.RecorderReady && status.ASRReady {
+		return "MIC ON  ASR ON"
+	}
+	if status.RecorderReady {
+		return "MIC ON  ASR .."
+	}
+	return "MIC ..  ASR .."
+}
+
+func stopDelayLabel(status voice.TUIVoiceStatus) string {
+	remaining := 0.0
+	if status.StopDelayMs > 0 && !status.StopAt.IsZero() {
+		remaining = time.Until(status.StopAt).Seconds()
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining > 99.9 {
+		remaining = 99.9
+	}
+	return fmt.Sprintf("STOP %04.1fs", remaining)
 }

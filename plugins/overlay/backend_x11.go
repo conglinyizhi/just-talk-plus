@@ -2,7 +2,7 @@
 
 package overlay
 
-// #cgo LDFLAGS: -lX11 -lXext -lXinerama -lXrender
+// #cgo LDFLAGS: -lX11 -lXext -lXinerama -lXrender -lcairo
 // #include <X11/Xlib.h>
 // #include <X11/Xatom.h>
 // #include <X11/Xutil.h>
@@ -11,6 +11,37 @@ package overlay
 // #include <X11/extensions/shape.h>
 // #include <stdlib.h>
 // #include <stdio.h>
+// #include <cairo/cairo.h>
+//
+// static double draw_system_text(unsigned char *data, int width, int height, const char *text, double font_size, double x, double y) {
+//     cairo_surface_t *surface = cairo_image_surface_create_for_data(data, CAIRO_FORMAT_ARGB32, width, height, width * 4);
+//     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) return 0;
+//     cairo_t *cr = cairo_create(surface);
+//     cairo_select_font_face(cr, "DejaVu Sans Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+//     cairo_set_font_size(cr, font_size);
+//     cairo_text_extents_t extents;
+//     cairo_text_extents(cr, text, &extents);
+//     cairo_set_source_rgba(cr, 0.96, 0.96, 0.96, 1.0);
+//     cairo_move_to(cr, x, y);
+//     cairo_show_text(cr, text);
+//     cairo_destroy(cr);
+//     cairo_surface_flush(surface);
+//     cairo_surface_destroy(surface);
+//     return extents.x_advance;
+// }
+//
+// static double system_text_width(const char *text, double font_size) {
+//     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+//     cairo_t *cr = cairo_create(surface);
+//     cairo_select_font_face(cr, "DejaVu Sans Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+//     cairo_set_font_size(cr, font_size);
+//     cairo_text_extents_t extents;
+//     cairo_text_extents(cr, text, &extents);
+//     double width = extents.x_advance;
+//     cairo_destroy(cr);
+//     cairo_surface_destroy(surface);
+//     return width;
+// }
 //
 // static void set_override_redirect(Display *dpy, Window win) {
 //     XSetWindowAttributes attrs;
@@ -109,7 +140,7 @@ import (
 )
 
 const (
-	basePillW  = 122
+	basePillW  = 170
 	basePillH  = 42
 	baseMargin = 28
 )
@@ -304,24 +335,31 @@ func (b *x11Backend) draw(label string, color statusColor) {
 		}
 	}
 	dotSize := b.scaled(14)
-	gap := b.scaled(14)
 	textScale := b.scaled(3)
-	textW := bitmapTextWidth(label, textScale)
-	contentW := dotSize + gap + textW
-	dotX := (b.w - contentW) / 2
-	if dotX < 0 {
-		dotX = 0
-	}
+	fontSize := 14 * b.scale
+	textW := p.systemTextWidth(label, fontSize)
+	dotX := b.scaled(14)
 	dotY := (b.h - dotSize) / 2
 	p.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textH := 7 * textScale
-	textX := dotX + dotSize + gap
-	textY := (b.h - textH) / 2
-	if maxX := b.w - b.scaled(14) - textW; textX > maxX {
-		textX = maxX
+	textX := (b.w - int(textW)) / 2
+	textY := (b.h-int(fontSize))/2 - b.scaled(1)
+	if !p.drawSystemText(textX, textY, label, fontSize) {
+		p.drawText(textX, textY, label, textScale, fg)
 	}
-	p.drawText(textX, textY, label, textScale, fg)
 	b.putImage(p.data)
+}
+
+func (p *argbCanvas) drawSystemText(x, y int, label string, fontSize float64) bool {
+	text := C.CString(label)
+	defer C.free(unsafe.Pointer(text))
+	C.draw_system_text((*C.uchar)(unsafe.Pointer(&p.data[0])), C.int(p.w), C.int(p.h), text, C.double(fontSize), C.double(x), C.double(y+int(fontSize)))
+	return true
+}
+
+func (p *argbCanvas) systemTextWidth(label string, fontSize float64) int {
+	text := C.CString(label)
+	defer C.free(unsafe.Pointer(text))
+	return int(C.system_text_width(text, C.double(fontSize)))
 }
 
 func (b *x11Backend) drawShape(label string, color statusColor) {
@@ -333,14 +371,9 @@ func (b *x11Backend) drawShape(label string, color statusColor) {
 	C.XSetForeground(b.dpy, b.gc, bg)
 	C.XFillRectangle(b.dpy, C.Drawable(b.win), b.gc, 0, 0, C.uint(b.w), C.uint(b.h))
 	dotSize := b.scaled(14)
-	gap := b.scaled(14)
 	textScale := b.scaled(3)
 	textW := bitmapTextWidth(label, textScale)
-	contentW := dotSize + gap + textW
-	dotX := (b.w - contentW) / 2
-	if dotX < 0 {
-		dotX = 0
-	}
+	dotX := b.scaled(14)
 	dotY := (b.h - dotSize) / 2
 	C.XSetForeground(b.dpy, b.gc, dotEdge)
 	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX), C.int(dotY), C.uint(dotSize), C.uint(dotSize), 0, 360*64)
@@ -349,11 +382,8 @@ func (b *x11Backend) drawShape(label string, color statusColor) {
 	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX+inset), C.int(dotY+inset), C.uint(dotSize-2*inset), C.uint(dotSize-2*inset), 0, 360*64)
 	C.XSetForeground(b.dpy, b.gc, fg)
 	textH := 7 * textScale
-	textX := dotX + dotSize + gap
+	textX := (b.w - textW) / 2
 	textY := (b.h - textH) / 2
-	if maxX := b.w - b.scaled(14) - textW; textX > maxX {
-		textX = maxX
-	}
 	drawBitmapText(b, textX, textY, label, textScale)
 }
 
@@ -513,6 +543,11 @@ func bitmapTextWidth(s string, scale int) int {
 }
 
 var glyphs = map[rune][7]byte{
+	' ': {0, 0, 0, 0, 0, 0, 0},
+	'#': {0b01010, 0b11111, 0b01010, 0b01010, 0b11111, 0b01010, 0b01010},
+	'-': {0, 0, 0, 0b11111, 0, 0, 0},
+	'[': {0b01110, 0b01000, 0b01000, 0b01000, 0b01000, 0b01000, 0b01110},
+	']': {0b01110, 0b00010, 0b00010, 0b00010, 0b00010, 0b00010, 0b01110},
 	'A': {0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001},
 	'C': {0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110},
 	'D': {0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110},

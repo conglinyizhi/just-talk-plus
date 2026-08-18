@@ -192,7 +192,7 @@ func newBackend(cfg config.OverlayConfig) (backend, error) {
 	if scale <= 0 {
 		scale = 1
 	}
-	contentWidth := overlayScaled(128, scale, 116)
+	contentWidth := overlayScaled(190, scale, 178)
 	contentHeight := overlayScaled(42, scale, 38)
 	shadowPad := overlayScaled(10, scale, 8)
 	b := &windowsOverlayBackend{
@@ -568,8 +568,8 @@ func (b *windowsOverlayBackend) drawOverlayText(screenDC uintptr, pixels []byte,
 	mask := unsafe.Slice((*byte)(unsafe.Pointer(bits)), int(textWidth*textHeight*4))
 	clear(mask)
 
-	fontName, _ := windows.UTF16PtrFromString("Segoe UI Semibold")
-	fontHeight := overlayScaled(11, b.scale, 10) * ss
+	fontName, _ := windows.UTF16PtrFromString("Consolas")
+	fontHeight := overlayScaled(14, b.scale, 13) * ss
 	font, _, _ := procCreateFontW.Call(
 		uintptr(uint32(-fontHeight)), 0, 0, 0, fontWeightSemiBold,
 		0, 0, 0, defaultCharset, 0, 0, antialiasedQuality, 0,

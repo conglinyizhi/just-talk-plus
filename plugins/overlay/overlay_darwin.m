@@ -54,22 +54,18 @@
 	[pill fill];
 
 	CGFloat dotSize = 14.0 * scale;
-	CGFloat dotX = 20.0 * scale;
+	CGFloat dotX = 18.0 * scale;
 	CGFloat dotY = (NSHeight(bounds) - dotSize) / 2.0;
 
 	NSDictionary *attrs = @{
-		NSFontAttributeName: [NSFont boldSystemFontOfSize:13.0 * scale],
+		NSFontAttributeName: [NSFont fontWithName:@"Menlo-Bold" size:15.0 * scale],
 		NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed:0.96 green:0.96 blue:0.96 alpha:1.0],
 	};
 	NSSize textSize = [label sizeWithAttributes:attrs];
-	CGFloat gap = 14.0 * scale;
-	CGFloat contentW = dotSize + gap + textSize.width;
-	dotX = (NSWidth(bounds) - contentW) / 2.0;
-	if (dotX < 0) dotX = 0;
 	NSBezierPath *dot = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(dotX, dotY, dotSize, dotSize)];
 	[dotColor setFill];
 	[dot fill];
-	CGFloat textX = dotX + dotSize + gap;
+	CGFloat textX = (NSWidth(bounds) - textSize.width) / 2.0;
 	CGFloat textY = (NSHeight(bounds) - textSize.height) / 2.0;
 	[label drawAtPoint:NSMakePoint(textX, textY) withAttributes:attrs];
 }
@@ -109,7 +105,7 @@ static void jt_overlay_move(jt_overlay_t *overlay) {
 	NSScreen *screen = [NSScreen mainScreen];
 	if (screen == nil) return;
 	NSRect frame = [screen visibleFrame];
-	CGFloat w = 122.0 * overlay->scale;
+	CGFloat w = 190.0 * overlay->scale;
 	CGFloat h = 42.0 * overlay->scale;
 	CGFloat margin = 28.0 * overlay->scale;
 	CGFloat x = NSMaxX(frame) - w - margin;
@@ -144,7 +140,7 @@ void *jt_overlay_create(const char *position, double scale) {
 		overlay->scale = scaleCopy <= 0 ? 1.0 : scaleCopy;
 		snprintf(overlay->position, sizeof(overlay->position), "%s", positionCopy == NULL ? "top-right" : positionCopy);
 
-		CGFloat w = 122.0 * overlay->scale;
+		CGFloat w = 190.0 * overlay->scale;
 		CGFloat h = 42.0 * overlay->scale;
 		overlay->panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, w, h)
 			styleMask:NSWindowStyleMaskBorderless
