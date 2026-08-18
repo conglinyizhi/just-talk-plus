@@ -285,9 +285,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "峰值上限", key: "auto_gain_max_peak", help: "输出峰值超过此值开始回撤增益；留空 = 默认 0.65", fType: fString, input: ti(agcFloat(vc.AutoGainMaxPeak)), indent: 1},
 		{label: "每块最大升高", key: "auto_gain_max_rise", help: "每块（约 200ms）增益最大升高倍数；留空 = 默认 1.15", fType: fString, input: ti(agcFloat(vc.AutoGainMaxRise)), indent: 1},
 		{label: "增益上限", key: "auto_gain_max_gain", help: "AGC 最大放大倍数；留空 = 默认 25（上限 100）", fType: fString, input: ti(agcInt(vc.AutoGainMaxGain)), indent: 1},
-		{label: "噪声门控", key: "noise_gate", help: "低于噪声阈值的音频不发送到远程 ASR", fType: fToggle, boolVal: vc.NoiseGate},
-		{label: "噪声阈值", key: "noise_threshold", help: "增益后 RMS 阈值，建议先执行一次底噪检测再微调", fType: fString, input: ti(fmt.Sprintf("%.4f", vc.NoiseThreshold))},
-		{label: "自动底噪", key: "noise_floor_auto", help: "开启后停止判定的阈值随环境底噪自动漂移，无需手动校准；噪声门控仍用下方阈值", fType: fToggle, boolVal: vc.NoiseFloorAuto},
+		{label: "噪声阈值", key: "noise_threshold", help: "底噪阈值（RMS）：开头超过它开始录音，结束持续低于它满停止延迟即停止", fType: fString, input: ti(fmt.Sprintf("%.4f", vc.NoiseThreshold))},
+		{label: "自动底噪", key: "noise_floor_auto", help: "开启后停止判定的阈值随环境底噪自动漂移，无需手动校准", fType: fToggle, boolVal: vc.NoiseFloorAuto},
 		{label: "判定容差", key: "noise_deadband", help: "停止判定时高于底噪阈值多少才算人声（默认 0.1）；调太大会把正常说话判成噪音，导致提前截断丢字", fType: fString, input: ti(fmt.Sprintf("%g", vc.NoiseDeadband))},
 		{label: "保留录音文件", key: "save_recordings", help: "将成功识别时实际发往 ASR 的音频以 WAV 保留在系统运行时目录，最多随历史保留 50 条", fType: fToggle, boolVal: vc.SaveRecordings},
 		{label: "检测当前底噪", key: "noise_calibrate", help: "采集约 3 秒环境底噪，自动计算并保存噪声阈值", fType: fAction},
@@ -756,8 +755,6 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.StopAfterSilence = f.boolVal
 			case "auto_gain":
 				vc.AutoGain = f.boolVal
-			case "noise_gate":
-				vc.NoiseGate = f.boolVal
 			case "noise_threshold":
 				fmt.Sscanf(f.input.Value(), "%f", &vc.NoiseThreshold)
 			case "noise_floor_auto":
