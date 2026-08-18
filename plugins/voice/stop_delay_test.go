@@ -3,7 +3,11 @@
 
 package voice
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/conglinyizhi/just-talk-plus/config"
+)
 
 func TestNormalizeStopDelayMs(t *testing.T) {
 	for _, test := range []struct {
@@ -21,5 +25,32 @@ func TestNormalizeStopDelayMs(t *testing.T) {
 				t.Fatalf("normalizeStopDelayMs(%d) = %d, want %d", test.in, got, test.want)
 			}
 		})
+	}
+}
+
+func TestStopAfterSilenceExtendsOnVoice(t *testing.T) {
+	p := NewVoicePlugin()
+	if err := p.Init(&fakeEnv{cfg: config.Default()}); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	p.recording = true
+	p.stopping = true
+	p.stopAfterSilence = true
+	p.stopDelayMs = 6000
+	p.noiseThreshold = 0.015
+	p.armStopTimerLocked()
+	firstDeadline := p.stopAt
+	p.mu.Unlock()
+	p.noteStopActivity(0.02, 0.02)
+	p.mu.Lock()
+	stopAt := p.stopAt
+	stopTimer := p.stopTimer
+	p.mu.Unlock()
+	if !stopAt.After(firstDeadline) {
+		t.Fatalf("voice activity should extend stop deadline: %s <= %s", stopAt, firstDeadline)
+	}
+	if stopTimer != nil {
+		stopTimer.Stop()
 	}
 }
