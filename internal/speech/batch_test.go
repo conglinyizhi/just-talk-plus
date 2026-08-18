@@ -64,7 +64,7 @@ func (blockingStub) Transcribe(ctx context.Context, _ TranscribeRequest) (*Trans
 
 func TestEncodeWAV(t *testing.T) {
 	pcm := []byte{0x01, 0x02, 0x03, 0x04}
-	wav := encodeWAV(pcm)
+	wav := EncodeWAV(pcm)
 	if len(wav) != 44+len(pcm) {
 		t.Fatalf("len=%d", len(wav))
 	}
@@ -183,5 +183,15 @@ func TestBatchSessionCloseCancelsTranscribe(t *testing.T) {
 	case <-sess.Done():
 	case <-time.After(2 * time.Second):
 		t.Fatal("Done not closed after Close")
+	}
+}
+
+func TestEncodeWAVWithSampleRate(t *testing.T) {
+	wav := EncodeWAVWithSampleRate([]byte{0, 0}, 8000)
+	if got := binary.LittleEndian.Uint32(wav[24:28]); got != 8000 {
+		t.Fatalf("sample rate = %d, want 8000", got)
+	}
+	if got := binary.LittleEndian.Uint32(wav[28:32]); got != 16000 {
+		t.Fatalf("byte rate = %d, want 16000", got)
 	}
 }
