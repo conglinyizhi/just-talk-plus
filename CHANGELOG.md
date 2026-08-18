@@ -4,6 +4,10 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- `make dev` 的 Air 热重载现在隐藏 watcher/build 日志并关闭自动清屏；Linux/macOS 会在运行时将前台终端交给 Bubble Tea TUI，并在退出或热重载时交还，避免 Air 与 TUI 争抢终端。
+
+- 在 `make dev` 中按 `q` 正常退出 TUI 时，Air 会继续监听文件变更而不会自动重启程序。
+
 - 新增噪声门控：可在输入设置中启用 `noise_gate`，低于 `noise_threshold` 的增益后 RMS 音频不会发送到远程 ASR；新增“检测当前底噪”动作，采样约 3 秒环境噪声后自动计算并持久化阈值，也支持手动调整。
 
 - 底噪检测完成后会在 TUI/日志中明确报告成功、保存的阈值，或失败/无有效样本等结果。

@@ -142,6 +142,17 @@ Windows selects its native backend automatically. Check the microphone and confi
 .\build\just-talk-plus.exe --doctor
 ```
 
+For a fast development loop, use Air hot reload (install `air` first):
+
+```bash
+go install github.com/air-verse/air@latest
+make dev
+make dev ARGS="--no-tui --verbose"
+```
+
+Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
+On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
+
 ## Configuration
 
 Default config path:

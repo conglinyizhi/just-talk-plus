@@ -1,4 +1,4 @@
-.PHONY: build install test clean run
+.PHONY: build install test clean run dev
 
 APP_NAME := just-talk-plus
 CMD_DIR := ./cmd/just-talk-plus
@@ -17,6 +17,12 @@ install: build
 ARGS ?=
 run: build
 	$(BUILD_DIR)/$(APP_NAME) $(ARGS)
+
+# Fast development loop. Requires https://github.com/air-verse/air.
+# Pass application flags with: make dev ARGS="--no-tui --verbose"
+dev:
+	@command -v air >/dev/null 2>&1 || (echo "air is required: go install github.com/air-verse/air@latest"; exit 1)
+	air -c .air.toml $(if $(ARGS),-build.args_bin "$(ARGS)",)
 
 # Test
 test:

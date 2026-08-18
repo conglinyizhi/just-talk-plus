@@ -142,6 +142,17 @@ Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 .\build\just-talk-plus.exe --doctor
 ```
 
+开发调试可使用 Air 热重载（需先安装 `air`）：
+
+```bash
+go install github.com/air-verse/air@latest
+make dev
+make dev ARGS="--no-tui --verbose"
+```
+
+代码或配置变更后会自动重新构建并重启调试 CLI，临时二进制位于 `tmp/`。
+在 Linux/macOS 上，Air 会通过终端入口程序将前台终端临时交给 TUI，并在退出或热重载时交还给 Air；这样 Bubble Tea 可正常接收按键。如果需要观察 Air 自身日志，可临时执行 `air -c .air.toml -log.main_only false`。
+
 ## 配置
 
 默认配置路径：
