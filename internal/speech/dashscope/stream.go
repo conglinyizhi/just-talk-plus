@@ -74,10 +74,11 @@ type StreamSession struct {
 	final     chan struct{}
 	finalOnce sync.Once
 
-	textMu   sync.RWMutex
-	doneText []string // 已结束的句子
-	pending  string   // 当前未结束句子（中间结果）
-	lastText string
+	textMu    sync.RWMutex
+	doneText  []string // 已结束的句子
+	pending   string   // 当前未结束句子（中间结果）
+	lastText  string
+	audioSent func([]byte)
 }
 
 // SetLogger 覆盖默认日志器（供插件注入带上下文的 logger）。
@@ -86,6 +87,11 @@ func (s *StreamSession) SetLogger(l *slog.Logger) {
 		s.logger = l
 	}
 }
+
+// SetAudioSentObserver 设置已成功写入上游连接的音频观察器。
+func (s *StreamSession) SetAudioSentObserver(observer func([]byte)) { s.audioSent = observer }
+
+func (s *StreamSession) AudioSentSampleRate() int { return s.cfg.SampleRate }
 
 // Connect 建立连接并启动识别任务；task-started 前不会返回。
 func (s *StreamSession) Connect(ctx context.Context) error {
@@ -154,6 +160,9 @@ func (s *StreamSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) 
 		}
 		if err := s.conn.Write(ctx, websocket.MessageBinary, data[i:end]); err != nil {
 			return fmt.Errorf("dashscope send audio: %w", err)
+		}
+		if s.audioSent != nil {
+			s.audioSent(data[i:end])
 		}
 	}
 	if isLast {
