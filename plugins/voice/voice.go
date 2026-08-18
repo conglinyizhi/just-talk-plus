@@ -1032,6 +1032,12 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				recordingPath = saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
 			}
 			p.dispatchTextOutput(text, session.sessionID, upstreamLogID, recordingPath)
+		} else if session.userStopped && session.recordedAudio != nil && p.claimSessionOutput(session.sessionID) {
+			// 无识别结果但已连接 ASR 且有录音：记录一条 [无结果] 历史供回放。
+			recordingPath := saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
+			if recordingPath != "" {
+				recordNoResultHistory(speech.UpstreamLogID(session.asrClient), recordingPath)
+			}
 		}
 		p.logger.Debug("finish session: closing ASR client")
 		closeDone := make(chan error, 1)
