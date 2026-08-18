@@ -109,6 +109,29 @@ func TestBuildTabFields(t *testing.T) {
 			t.Fatalf("%s indent = %d, want 1 (sub of 自动上屏)", key, f.indent)
 		}
 	}
+	// 自适应增益子项：4 个参数均为缩进项（indent 1）
+	for _, key := range []string{"auto_gain_target_peak", "auto_gain_max_peak", "auto_gain_max_rise", "auto_gain_max_gain"} {
+		f := fieldByKey(m, key)
+		if f == nil {
+			t.Fatalf("mic tab missing AGC param %q", key)
+		}
+		if f.indent != 1 {
+			t.Fatalf("%s indent = %d, want 1 (sub of 自适应增益)", key, f.indent)
+		}
+	}
+	// 显示 tab（overlay）
+	overlay := tabKeys(m.tabField[tabOverlay])
+	for _, want := range []string{"overlay_enabled", "overlay_position", "overlay_idle_visible", "overlay_scale"} {
+		if !overlay[want] {
+			t.Fatalf("overlay tab missing %q: %v", want, overlay)
+		}
+	}
+	// 通用 tab 的调试项
+	for _, want := range []string{"debug_enabled", "debug_hotkeys"} {
+		if !general[want] {
+			t.Fatalf("general missing %q: %v", want, general)
+		}
+	}
 }
 
 // ---- tab 切换 ----
@@ -316,15 +339,20 @@ func TestHistoryTab(t *testing.T) {
 	}
 	// 空历史 enter 不 panic
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	// 左键回退到输出，右键回绕到通用
+	// 左键回退到输出
 	m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
 	if m.tab != tabOutput {
 		t.Fatalf("left from history = %d, want tabOutput", m.tab)
 	}
+	// 右键到显示 tab，再右回绕到通用
 	m.switchTab(tabHistory)
 	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if m.tab != tabOverlay {
+		t.Fatalf("right from history = %d, want tabOverlay", m.tab)
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
 	if m.tab != tabGeneral {
-		t.Fatalf("right from history = %d, want tabGeneral", m.tab)
+		t.Fatalf("right wrap from overlay = %d, want tabGeneral", m.tab)
 	}
 }
 
@@ -677,6 +705,94 @@ func TestApplyFieldsTo(t *testing.T) {
 	}
 	if !next.Voice.OmitTrailingPunct {
 		t.Fatal("omit_trailing_punct should be true")
+	}
+}
+
+func TestApplyAGCParams(t *testing.T) {
+	peak := 0.5
+	cfg := config.Default()
+	cfg.Voice.AutoGainTargetPeak = &peak
+	m := New(cfg)
+
+	// 初始显示值来自配置
+	if got := fieldByKey(m, "auto_gain_target_peak").input.Value(); got != "0.5" {
+		t.Fatalf("field init = %q, want 0.5", got)
+	}
+	// 默认 nil 时显示为空
+	if got := fieldByKey(m, "auto_gain_max_peak").input.Value(); got != "" {
+		t.Fatalf("default field = %q, want empty", got)
+	}
+
+	// 改值写回
+	fieldByKey(m, "auto_gain_target_peak").input.SetValue("0.6")
+	next := *cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.AutoGainTargetPeak == nil || *next.Voice.AutoGainTargetPeak != 0.6 {
+		t.Fatalf("target = %v, want 0.6", next.Voice.AutoGainTargetPeak)
+	}
+
+	// 清空 → nil（回内置默认）
+	fieldByKey(m, "auto_gain_target_peak").input.SetValue("")
+	next = *cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.AutoGainTargetPeak != nil {
+		t.Fatalf("empty should reset to nil, got %v", *next.Voice.AutoGainTargetPeak)
+	}
+
+	// 非法输入 → 保持原值
+	fieldByKey(m, "auto_gain_target_peak").input.SetValue("oops")
+	next = *cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.AutoGainTargetPeak == nil || *next.Voice.AutoGainTargetPeak != peak {
+		t.Fatalf("invalid should keep %v, got %v", peak, next.Voice.AutoGainTargetPeak)
+	}
+
+	// 整数参数
+	fieldByKey(m, "auto_gain_max_gain").input.SetValue("30")
+	next = *cfg
+	m.applyFieldsTo(&next)
+	if next.Voice.AutoGainMaxGain == nil || *next.Voice.AutoGainMaxGain != 30 {
+		t.Fatalf("max gain = %v, want 30", next.Voice.AutoGainMaxGain)
+	}
+}
+
+func TestApplyOverlayFields(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+
+	fieldByKey(m, "overlay_enabled").boolVal = false
+	fieldByKey(m, "overlay_position").optIdx = idxOf(overlayPositions, "top-right")
+	fieldByKey(m, "overlay_idle_visible").boolVal = true
+	fieldByKey(m, "overlay_scale").input.SetValue("1.5")
+	next := *cfg
+	m.applyFieldsTo(&next)
+	if next.Overlay.Enabled {
+		t.Fatal("overlay should be disabled")
+	}
+	if next.Overlay.Position != "top-right" {
+		t.Fatalf("position = %q, want top-right", next.Overlay.Position)
+	}
+	if !next.Overlay.IdleVisible {
+		t.Fatal("idle_visible should be true")
+	}
+	if next.Overlay.Scale != 1.5 {
+		t.Fatalf("scale = %v, want 1.5", next.Overlay.Scale)
+	}
+}
+
+func TestApplyDebugFields(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+
+	fieldByKey(m, "debug_enabled").boolVal = true
+	fieldByKey(m, "debug_hotkeys").input.SetValue("Alt+F8, F10")
+	next := *cfg
+	m.applyFieldsTo(&next)
+	if !next.Debug.Enabled {
+		t.Fatal("debug should be enabled")
+	}
+	if len(next.Debug.Hotkeys) != 2 || next.Debug.Hotkeys[0] != "Alt+F8" || next.Debug.Hotkeys[1] != "F10" {
+		t.Fatalf("hotkeys = %v", next.Debug.Hotkeys)
 	}
 }
 
