@@ -121,7 +121,13 @@ func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedP
 			rawPeak, rawRMS = analyzePCM(p[:n])
 		}
 		if g := r.Gain(); g > 1 {
-			limited = applyGain(p[:n], g)
+			scale := float64(g)
+			if measure {
+				// 响亮块先按 safePeakCap/rawPeak 整体线性预缩放，保留 headroom、
+				// 避免逐样本软限幅造成的削波失真；limited 供 AGC 下一块回撤。
+				scale, limited = effectiveGainForPeak(rawPeak, g)
+			}
+			limited = applyGain(p[:n], scale) || limited
 		}
 		r.limited.Store(limited)
 		if measure {
@@ -163,7 +169,7 @@ func (r *Recorder) Stop() ([]byte, error) {
 			n, err := stdout.Read(buf)
 			if n > 0 {
 				if g > 1 {
-					applyGain(buf[:n], g)
+					applyGain(buf[:n], float64(g))
 				}
 				r.drainBuf.Write(buf[:n])
 			}
@@ -179,13 +185,36 @@ func (r *Recorder) Stop() ([]byte, error) {
 	return remaining, nil
 }
 
-// applyGain multiplies s16le samples and soft-limits peaks before they reach
-// hard clipping. It reports whether compression was applied to any sample.
-func applyGain(pcm []byte, gain int) (limited bool) {
+// safePeakCap 是单块放大后的峰值上限。响亮块按 safePeakCap/rawPeak 整体线性
+// 缩放并保留该 headroom，避免进入逐样本 soft limiter 造成当前块失真；AGC 在
+// 下一块据此回撤增益。
+const safePeakCap = 0.80
+
+// effectiveGainForPeak 计算 rawPeak 对应的块可安全使用的实际缩放：
+// min(配置/AGC gain, safePeakCap/rawPeak)。rawPeak <= 0（静音）不设上限、
+// 不除零，原样返回配置增益。limited 为 true 表示安全增益低于配置增益
+// （该块太响，需回撤下一块增益）。
+func effectiveGainForPeak(rawPeak float64, configured int) (scale float64, limited bool) {
+	if rawPeak <= 0 {
+		return float64(configured), false
+	}
+	safe := safePeakCap / rawPeak
+	if float64(configured) <= safe {
+		return float64(configured), false
+	}
+	return safe, true
+}
+
+// applyGain multiplies s16le samples by scale and soft-limits any residual
+// peaks before they reach hard clipping. It reports whether compression was
+// applied to any sample. The measured read path pre-scales loud blocks with
+// effectiveGainForPeak so they stay under safePeakCap linearly; the soft
+// limiter here is a last-resort guard for unmeasured drain data.
+func applyGain(pcm []byte, scale float64) (limited bool) {
 	const softLimit = 0.92
 	for i := 0; i+1 < len(pcm); i += 2 {
 		s := float64(int16(pcm[i])|int16(pcm[i+1])<<8) / 32767.0
-		x := s * float64(gain)
+		x := s * scale
 		abs := math.Abs(x)
 		if abs > softLimit {
 			limited = true
