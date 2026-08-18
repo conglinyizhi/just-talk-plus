@@ -747,6 +747,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	if len(prebuffer) == 0 {
 		return
 	}
+	firstVoiceAt := time.Now()
 	client, engineInfo, err := p.newSession(ctx, params)
 	if err != nil {
 		wasCanceled := ctx.Err() != nil
@@ -818,6 +819,13 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.recordedAudioRate = audioRate
 	p.publishStatusLocked()
 	p.mu.Unlock()
+
+	// 测量「第一声被检测到」到「音频开始发送给 ASR」的延迟，供参考调整停止延迟。
+	p.logger.Info("voice latency: first voice to audio send",
+		"session_id", sessionID,
+		"engine", engineInfo.Name(),
+		"voice_to_send_ms", time.Since(firstVoiceAt).Milliseconds(),
+	)
 
 	go func() {
 		defer close(audioDone)
