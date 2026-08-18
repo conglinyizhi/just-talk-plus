@@ -13,6 +13,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -100,9 +101,10 @@ const (
 	tabMic
 	tabOutput
 	tabHistory
+	tabOverlay
 )
 
-var tabNames = []string{"通用", "引擎", "输入", "输出", "历史"}
+var tabNames = []string{"通用", "引擎", "输入", "输出", "历史", "显示"}
 
 // ---- 弹层状态 ----
 
@@ -266,6 +268,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "有声后停止", key: "stop_after_silence", help: "停止请求后，检测到有效人声会重置倒计时；静音满「停止延迟」才截断录音", fType: fToggle, boolVal: vc.StopAfterSilence},
 		{label: diagnosticLabel, key: "diagnostics_startup_runs", help: "仅用于排查异常：在本机保存最近 512 KiB 日志，按 K 导出。默认关闭；选择次数后会在对应启动完成后自动关闭", fType: fSelect, opts: diagnosticOptions, optIdx: diagnosticOptionIndex},
+		{label: "[高级] 调试插件", key: "debug_enabled", help: "调试用：注册调试热键并打印按键事件；日常无需开启", fType: fToggle, boolVal: cfg.Debug.Enabled},
+		{label: "[高级] 调试热键", key: "debug_hotkeys", help: "逗号分隔多个热键（如 Alt+F8, F10）；按下时在终端打印热键事件", fType: fString, input: ti(strings.Join(cfg.Debug.Hotkeys, ", "))},
 	}
 
 	engineTab := []field{
@@ -277,6 +281,10 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	mic := []field{
 		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
+		{label: "目标峰值", key: "auto_gain_target_peak", help: "AGC 输出目标峰值 0..1；留空 = 内置默认 0.42（宁小勿爆）；调高更响、调低更保守", fType: fString, input: ti(agcFloat(vc.AutoGainTargetPeak)), indent: 1},
+		{label: "峰值上限", key: "auto_gain_max_peak", help: "输出峰值超过此值开始回撤增益；留空 = 默认 0.65", fType: fString, input: ti(agcFloat(vc.AutoGainMaxPeak)), indent: 1},
+		{label: "每块最大升高", key: "auto_gain_max_rise", help: "每块（约 200ms）增益最大升高倍数；留空 = 默认 1.15", fType: fString, input: ti(agcFloat(vc.AutoGainMaxRise)), indent: 1},
+		{label: "增益上限", key: "auto_gain_max_gain", help: "AGC 最大放大倍数；留空 = 默认 25（上限 100）", fType: fString, input: ti(agcInt(vc.AutoGainMaxGain)), indent: 1},
 		{label: "噪声门控", key: "noise_gate", help: "低于噪声阈值的音频不发送到远程 ASR", fType: fToggle, boolVal: vc.NoiseGate},
 		{label: "噪声阈值", key: "noise_threshold", help: "增益后 RMS 阈值，建议先执行一次底噪检测再微调", fType: fString, input: ti(fmt.Sprintf("%.4f", vc.NoiseThreshold))},
 		{label: "保留录音文件", key: "save_recordings", help: "将成功识别时实际发往 ASR 的音频以 WAV 保留在系统运行时目录，最多随历史保留 50 条", fType: fToggle, boolVal: vc.SaveRecordings},
@@ -295,12 +303,39 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "上屏失败不写入", key: "no_clipboard_on_fail", help: "上屏失败时也还原原内容，识别文本不留在剪贴板", fType: fToggle, boolVal: vc.NoClipboardOnFail, indent: 1},
 	}
 
+	overlay := []field{
+		{label: "显示胶囊", key: "overlay_enabled", help: "录制状态悬浮胶囊（状态点 + 文字）", fType: fToggle, boolVal: cfg.Overlay.Enabled},
+		{label: "位置", key: "overlay_position", help: "胶囊在屏幕上的停靠位置", fType: fSelect, opts: overlayPositions, optIdx: idxOf(overlayPositions, cfg.Overlay.Position)},
+		{label: "空闲时可见", key: "overlay_idle_visible", help: "待机时也显示胶囊（更淡）", fType: fToggle, boolVal: cfg.Overlay.IdleVisible},
+		{label: "缩放", key: "overlay_scale", help: "胶囊缩放比例，如 1.0 / 1.25 / 1.5", fType: fString, input: ti(fmt.Sprintf("%g", cfg.Overlay.Scale))},
+	}
+
 	return map[tabID][]field{
 		tabGeneral: general,
 		tabEngine:  engineTab,
 		tabMic:     mic,
 		tabOutput:  output,
+		tabOverlay: overlay,
 	}
+}
+
+// overlayPositions 胶囊支持的屏幕停靠位置（与各后端 anchor/margins 实现对应）。
+var overlayPositions = []string{"top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}
+
+// agcFloat 把可选的 AGC 浮点参数转为显示文本；nil（走内置默认）显示为空。
+func agcFloat(p *float64) string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("%g", *p)
+}
+
+// agcInt 把可选的 AGC 整数参数转为显示文本；nil（走内置默认）显示为空。
+func agcInt(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *p)
 }
 
 // channelConfigFields 构建「引擎配置」弹层里的字段：凭据 + 该引擎的全部专属设置。
@@ -599,7 +634,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.switchTab((m.tab + 1) % tabID(len(tabNames)))
 	case k == "L":
 		m.logExpanded = !m.logExpanded
-	case len(k) == 1 && k[0] >= '1' && k[0] <= '5':
+	case len(k) == 1 && k[0] >= '1' && k[0] <= '6':
 		m.switchTab(tabID(k[0] - '1'))
 	}
 	return nil
@@ -734,9 +769,63 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				default:
 					next.Diagnostics.StartupRuns = 0
 				}
+			case "auto_gain_target_peak":
+				if v, ok := parseAGCFloat(f.input.Value()); ok {
+					vc.AutoGainTargetPeak = v
+				}
+			case "auto_gain_max_peak":
+				if v, ok := parseAGCFloat(f.input.Value()); ok {
+					vc.AutoGainMaxPeak = v
+				}
+			case "auto_gain_max_rise":
+				if v, ok := parseAGCFloat(f.input.Value()); ok {
+					vc.AutoGainMaxRise = v
+				}
+			case "auto_gain_max_gain":
+				if v, ok := parseAGCInt(f.input.Value()); ok {
+					vc.AutoGainMaxGain = v
+				}
+			case "overlay_enabled":
+				next.Overlay.Enabled = f.boolVal
+			case "overlay_position":
+				next.Overlay.Position = f.selectValue()
+			case "overlay_idle_visible":
+				next.Overlay.IdleVisible = f.boolVal
+			case "overlay_scale":
+				fmt.Sscanf(f.input.Value(), "%f", &next.Overlay.Scale)
+			case "debug_enabled":
+				next.Debug.Enabled = f.boolVal
+			case "debug_hotkeys":
+				next.Debug.Hotkeys = splitList(f.input.Value())
 			}
 		}
 	}
+}
+
+// parseAGCFloat 解析 AGC 浮点参数：空字符串 = nil（走内置默认）；非法输入返回 ok=false（保持原值）。
+func parseAGCFloat(s string) (*float64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, true
+	}
+	fv, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, false
+	}
+	return &fv, true
+}
+
+// parseAGCInt 解析 AGC 整数参数：空字符串 = nil（走内置默认）；非法输入返回 ok=false（保持原值）。
+func parseAGCInt(s string) (*int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, true
+	}
+	iv, err := strconv.Atoi(s)
+	if err != nil {
+		return nil, false
+	}
+	return &iv, true
 }
 
 func (m *Model) diagnosticsCurrentEnabled() bool {
@@ -857,7 +946,7 @@ func (m *Model) View() string {
 // helpLine 底部键位帮助行（固定显示在屏幕最后一行）。
 // 导航遵循 vim 规范：h 左 / j 下 / k 上 / l 右；方向键等效。
 func (m *Model) helpLine() string {
-	return hStyle.Render("  j/k 或 ↑/↓ 选择 · h/l 或 ←/→ 分组 · 1-5 分组 · e 编辑 · s 保存 · L 日志 · K 导出诊断 · q 退出")
+	return hStyle.Render("  j/k 或 ↑/↓ 选择 · h/l 或 ←/→ 分组 · 1-6 分组 · e 编辑 · s 保存 · L 日志 · K 导出诊断 · q 退出")
 }
 
 // renderBase 渲染主界面（不含模态弹层与底部帮助行）。
