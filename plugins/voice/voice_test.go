@@ -56,3 +56,31 @@ func TestConfigReloadSync(t *testing.T) {
 		t.Fatalf("cleanTrailingPunct after reload = %q, want 你好", got)
 	}
 }
+
+func TestTUILogSnapshotPreservesAppendOrder(t *testing.T) {
+	tuilogMu.Lock()
+	originalLog := TUILog
+	originalBuffer := TUILogBuf
+	TUILog = nil
+	TUILogBuf = nil
+	tuilogMu.Unlock()
+	t.Cleanup(func() {
+		tuilogMu.Lock()
+		TUILog = originalLog
+		TUILogBuf = originalBuffer
+		tuilogMu.Unlock()
+	})
+
+	AppendTUILog("first")
+	AppendTUILog("second")
+	AppendTUILog("third")
+	logs := TUILogSnapshot()
+	if len(logs) != 3 || logs[0] != "first" || logs[2] != "third" {
+		t.Fatalf("logs = %v", logs)
+	}
+
+	logs[0] = "changed"
+	if got := TUILogSnapshot()[0]; got != "first" {
+		t.Fatalf("snapshot mutated shared buffer: %q", got)
+	}
+}
