@@ -338,6 +338,7 @@ type VoicePlugin struct {
 	noiseDeadband          float64
 	noiseFloorAuto         bool
 	noiseFloor             float64 // 自动底噪模式下的动态底噪基准（初始化 = noiseThreshold）
+	voiceToSendMs          int64  // 本次会话：第一声被检测到 → 音频开始发送的延迟
 	recordedAudio          *bytes.Buffer
 	recordedAudioRate      int
 	pendingDone            int
@@ -361,6 +362,7 @@ type recordingSession struct {
 	userStopped       bool
 	startedAt         time.Time
 	noiseThreshold    float64
+	voiceToSendMs     int64
 	recordedAudio     *bytes.Buffer
 	recordedAudioRate int
 }
@@ -699,6 +701,7 @@ func (p *VoicePlugin) startRecording() {
 	p.startedAt = startedAt
 	p.stopping = false
 	p.stopAt = time.Time{}
+	p.voiceToSendMs = 0
 	p.clearErrorLocked()
 	p.asrCancel = cancel
 	shouldStopImmediately := p.mode == "hold" && p.holdReleased
@@ -820,9 +823,10 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.publishStatusLocked()
 	p.mu.Unlock()
 
-	// 测量「第一声被检测到」到「音频开始发送给 ASR」的延迟，供参考调整停止延迟。
-	pout("🎙 语音延迟: 检测到第一声 → 音频开始发送 %dms (引擎: %s)",
-		time.Since(firstVoiceAt).Milliseconds(), engineInfo.Name())
+	// 测量「第一声被检测到」到「音频开始发送给 ASR」的延迟，会话结束时在屏幕日志显示。
+	p.mu.Lock()
+	p.voiceToSendMs = time.Since(firstVoiceAt).Milliseconds()
+	p.mu.Unlock()
 
 	go func() {
 		defer close(audioDone)
@@ -955,12 +959,14 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		userStopped:       p.userStopped,
 		startedAt:         p.startedAt,
 		noiseThreshold:    p.noiseThreshold,
+		voiceToSendMs:     p.voiceToSendMs,
 		recordedAudio:     p.recordedAudio,
 		recordedAudioRate: p.recordedAudioRate,
 	}
 	p.sessionGen++
 	p.recorder, p.asrClient, p.asrCancel, p.audioDone, p.recordedAudio = nil, nil, nil, nil, nil
 	p.recordedAudioRate = speech.PCMRate
+	p.voiceToSendMs = 0
 	p.startedAt = time.Time{}
 	p.recording, p.stopping, p.userStopped = false, false, false
 	p.holdReleased = false
@@ -1086,6 +1092,9 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	}
 	if session.asrCancel != nil {
 		session.asrCancel()
+	}
+	if session.voiceToSendMs > 0 {
+		pout("🎙 语音延迟: 检测到第一声 → 音频开始发送 %dms", session.voiceToSendMs)
 	}
 	p.logger.Debug("finish session: done")
 }
