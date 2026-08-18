@@ -17,6 +17,7 @@ It is built for people who want to type less and speak more while coding, chatti
 - Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), Qianwen DashScope Fun-ASR realtime streaming (8k models auto-downsampled), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
 - Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
 - Recognition history panel: the latest 50 submitted/copied results are kept as a rolling runtime snapshot and can be re-copied to the clipboard. It survives app restarts and is cleared after a system restart.
+- Optional recording retention: enable Input → Keep recording files to retain the WAV actually sent to ASR for each successful recognition (noise-gated chunks are excluded). Press Enter on the History tab to copy text, play it with `ffplay`, or reveal it in the file manager.
 - Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
 - CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
 - CJK typographic auto-spacing (on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters/digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces around full-width punctuation, and convert full-width digits to half-width.
@@ -174,7 +175,14 @@ Recommended hotkey config:
 mode = "toggle"
 push_to_talk = "Alt+Super"
 gain = 1
-auto_gain = true   # adaptive gain: quickly lifts weak voiced input and backs off when limiting engages
+auto_gain = true   # adaptive gain: slowly lifts weak voiced input; loud blocks are pre-scaled to prevent clipping, and gain backs off gradually
+# auto_gain_target_peak = 0.42  # target output peak (default 0.42)
+# auto_gain_max_peak = 0.65     # start backing off when output peak exceeds this (default 0.65)
+# auto_gain_max_rise = 1.15     # max rise per block (~200ms, default 1.15)
+# auto_gain_max_gain = 25       # gain cap in multiples (default 25, max 100)
+stop_delay_ms = 3000  # silence wait duration after requesting stop
+stop_after_silence = true  # reset the wait while voice keeps arriving; stop only after this much silence
+# For delayed microphones, set this at least to the device's maximum transport delay. Audio keeps buffering while ASR connects and is replayed in order.
 omit_trailing_punct = false  # strip trailing "。" before output (master toggle)
 # omit_trailing_all = false  # sub: strip all trailing punctuation (incl. ASCII)
 # omit_trailing_ascii = false  # sub: additionally strip ASCII . ! ?
@@ -245,10 +253,10 @@ api_key = "…"
 # access_key = "…"
 # Access mode:
 model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
-stream_mode = "async"      # nostream | async (default async; bidirectional + second-pass)
+stream_mode = "async"      # async=bidirectional (low latency, live results) | nostream=one-way (final result after complete audio)
 # --- Recognition quality options (all in the TUI "engine config" overlay, Doubao only) ---
 # enable_lid = true         # mixed Chinese/English and dialect recognition (recommended for code-switching; language must be auto or zh-CN)
-# enable_nonstream = true   # second-pass recognition for more accurate finals (async only)
+# enable_nonstream = true   # second-pass recognition for more accurate finals (async/bidirectional only)
 # enable_itn = true         # number normalization (一九七零年 → 1970年)
 # enable_punc = true        # punctuation
 # enable_ddc = false        # semantic smoothing (drops fillers/repetitions)
