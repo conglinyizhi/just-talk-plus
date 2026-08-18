@@ -81,7 +81,7 @@ func TestBuildTabFields(t *testing.T) {
 		t.Fatalf("engine tab: %v", engineTab)
 	}
 	mic := tabKeys(m.tabField[tabMic])
-	for _, want := range []string{"mic_test", "auto_gain"} {
+	for _, want := range []string{"mic_test", "auto_gain", "noise_gate", "noise_threshold", "noise_floor_auto", "noise_deadband"} {
 		if !mic[want] {
 			t.Fatalf("mic tab missing %q: %v", want, mic)
 		}
@@ -793,6 +793,26 @@ func TestApplyDebugFields(t *testing.T) {
 	}
 	if len(next.Debug.Hotkeys) != 2 || next.Debug.Hotkeys[0] != "Alt+F8" || next.Debug.Hotkeys[1] != "F10" {
 		t.Fatalf("hotkeys = %v", next.Debug.Hotkeys)
+	}
+}
+
+func TestApplyNoiseFields(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg)
+
+	// 默认容差 0.1 显示在字段里
+	if got := fieldByKey(m, "noise_deadband").input.Value(); got != "0.1" {
+		t.Fatalf("noise_deadband init = %q, want 0.1", got)
+	}
+	fieldByKey(m, "noise_floor_auto").boolVal = true
+	fieldByKey(m, "noise_deadband").input.SetValue("0.05")
+	next := *cfg
+	m.applyFieldsTo(&next)
+	if !next.Voice.NoiseFloorAuto {
+		t.Fatal("noise_floor_auto should be true")
+	}
+	if next.Voice.NoiseDeadband != 0.05 {
+		t.Fatalf("noise_deadband = %v, want 0.05", next.Voice.NoiseDeadband)
 	}
 }
 
