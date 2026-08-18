@@ -114,3 +114,49 @@ func TestSaveRecordingAudioCreatesWAV(t *testing.T) {
 		t.Fatalf("recording is not WAV: %q", data[:min(len(data), 4)])
 	}
 }
+
+func TestRecordNoResultHistory(t *testing.T) {
+	useTestHistoryStore(t)
+
+	// 无录音文件时不记录
+	if recordNoResultHistory("", "") {
+		t.Fatal("empty recording path should not be recorded")
+	}
+	if len(History()) != 0 {
+		t.Fatal("history should stay empty")
+	}
+
+	// 连续多条无结果不去重（每次对应一次独立录音），且带占位文本
+	first := filepath.Join(t.TempDir(), "rec-1.wav")
+	second := filepath.Join(t.TempDir(), "rec-2.wav")
+	if !recordNoResultHistory("log-a", first) {
+		t.Fatal("first no-result entry should be recorded")
+	}
+	if !recordNoResultHistory("log-b", second) {
+		t.Fatal("second no-result entry should be recorded")
+	}
+	items := History()
+	if len(items) != 2 {
+		t.Fatalf("len=%d, want 2", len(items))
+	}
+	if items[0].Text != noResultText || items[1].Text != noResultText {
+		t.Fatalf("texts = %q / %q, want %q", items[0].Text, items[1].Text, noResultText)
+	}
+	// 最新在前，且各自保留录音路径与上游 log ID
+	if items[0].RecordingPath != second || items[1].RecordingPath != first {
+		t.Fatalf("recording paths reversed: %q / %q", items[0].RecordingPath, items[1].RecordingPath)
+	}
+	if items[0].UpstreamLogID != "log-b" || items[1].UpstreamLogID != "log-a" {
+		t.Fatalf("log IDs = %q / %q", items[0].UpstreamLogID, items[1].UpstreamLogID)
+	}
+
+	// 与普通识别历史共存
+	recordHistory("正常识别", "log-c")
+	items = History()
+	if len(items) != 3 {
+		t.Fatalf("len=%d, want 3", len(items))
+	}
+	if items[0].Text != "正常识别" {
+		t.Fatalf("latest text = %q, want 正常识别", items[0].Text)
+	}
+}
