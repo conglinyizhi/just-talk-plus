@@ -23,6 +23,15 @@ type statusColor struct {
 	B uint16
 }
 
+func capsuleContentLayout(width, dotSize, gap, textWidth int) (dotX, textX int) {
+	contentWidth := dotSize + gap + textWidth
+	dotX = (width - contentWidth) / 2
+	if dotX < 0 {
+		dotX = 0
+	}
+	return dotX, dotX + dotSize + gap
+}
+
 type Plugin struct {
 	logger      *slog.Logger
 	cfg         config.OverlayConfig
