@@ -11,6 +11,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 )
 
@@ -26,6 +27,30 @@ func openURL(url string) error {
 	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open browser: %w", err)
+	}
+	return nil
+}
+
+func playRecording(path string) (openedFolder bool, err error) {
+	player, lookupErr := exec.LookPath("ffplay")
+	if lookupErr == nil {
+		return false, exec.Command(player, "-nodisp", "-autoexit", path).Start()
+	}
+	return true, revealRecording(path)
+}
+
+func revealRecording(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	case "windows":
+		cmd = exec.Command("explorer", "/select,"+path)
+	default:
+		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open recording location: %w", err)
 	}
 	return nil
 }
