@@ -14,6 +14,26 @@ func TestCalibratedNoiseThreshold(t *testing.T) {
 	}
 }
 
+func TestNoiseCalibrationSnapshot(t *testing.T) {
+	micTest.mu.Lock()
+	originalVersion := micTest.noiseCalibrationVersion
+	originalThreshold := micTest.level.NoiseThreshold
+	micTest.noiseCalibrationVersion = 42
+	micTest.level.NoiseThreshold = 0.0234
+	micTest.mu.Unlock()
+	t.Cleanup(func() {
+		micTest.mu.Lock()
+		micTest.noiseCalibrationVersion = originalVersion
+		micTest.level.NoiseThreshold = originalThreshold
+		micTest.mu.Unlock()
+	})
+
+	version, threshold := NoiseCalibrationSnapshot()
+	if version != 42 || threshold != 0.0234 {
+		t.Fatalf("snapshot = (%d, %.4f), want (42, 0.0234)", version, threshold)
+	}
+}
+
 func TestVoiceAboveNoise(t *testing.T) {
 	if voiceAboveNoise(0.01, 0.02, 0.015) {
 		t.Fatal("quiet input should remain below noise threshold")
