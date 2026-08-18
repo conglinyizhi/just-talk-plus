@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"time"
 )
 
 type candidate struct {
@@ -43,10 +45,22 @@ func startCommandCapture(logger *slog.Logger, device string) (io.ReadCloser, str
 		return nil, "", nil, err
 	}
 	stop := func() error {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if cmd.Process == nil {
+			return cmd.Wait()
 		}
-		return cmd.Wait()
+		// 先让 arecord/parecord 正常结束，以便其将音频服务中已经抵达的
+		// 尾部缓冲写入 stdout。极少数命令不响应时再用 Kill 兜底，避免停止
+		// 流程无限等待。
+		_ = cmd.Process.Signal(os.Interrupt)
+		waitDone := make(chan error, 1)
+		go func() { waitDone <- cmd.Wait() }()
+		select {
+		case err := <-waitDone:
+			return err
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			return <-waitDone
+		}
 	}
 	return stdout, name, stop, nil
 }
