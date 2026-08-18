@@ -40,9 +40,15 @@ type BatchSession struct {
 	final     chan struct{}
 	finalOnce sync.Once
 
-	textMu   sync.RWMutex
-	lastText string
+	textMu    sync.RWMutex
+	lastText  string
+	audioSent func([]byte)
 }
+
+// SetAudioSentObserver 设置已被批处理会话接受、将作为转写请求音频的数据观察器。
+func (s *BatchSession) SetAudioSentObserver(observer func([]byte)) { s.audioSent = observer }
+
+func (s *BatchSession) AudioSentSampleRate() int { return PCMRate }
 
 // NewBatchSession 包装一个批处理引擎。
 func NewBatchSession(engine Engine, params StreamParams) *BatchSession {
@@ -84,6 +90,9 @@ func (s *BatchSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) e
 	}
 	if len(pcm) > 0 {
 		s.buf = append(s.buf, pcm...)
+		if s.audioSent != nil {
+			s.audioSent(pcm)
+		}
 	}
 	if !isLast {
 		s.mu.Unlock()
@@ -112,7 +121,7 @@ func (s *BatchSession) finish(ctx context.Context, audio []byte) {
 		return
 	}
 	req := TranscribeRequest{
-		Audio:       encodeWAV(audio),
+		Audio:       EncodeWAV(audio),
 		ContentType: PCMContentType,
 		Lang:        s.params.Lang,
 	}
@@ -156,19 +165,25 @@ func (s *BatchSession) Close() error {
 	return nil
 }
 
-// encodeWAV 把 16 kHz 16-bit 单声道 PCM 打包成 WAV（RIFF/WAVE）。
-func encodeWAV(pcm []byte) []byte {
+// EncodeWAV 把 16 kHz 16-bit 单声道 PCM 打包成 WAV（RIFF/WAVE）。
+func EncodeWAV(pcm []byte) []byte { return EncodeWAVWithSampleRate(pcm, PCMRate) }
+
+// EncodeWAVWithSampleRate 把单声道 16-bit PCM 打包成给定采样率的 WAV。
+func EncodeWAVWithSampleRate(pcm []byte, sampleRate int) []byte {
+	if sampleRate <= 0 {
+		sampleRate = PCMRate
+	}
 	dataLen := len(pcm)
 	out := make([]byte, 44+dataLen)
 	copy(out, "RIFF")
 	binary.LittleEndian.PutUint32(out[4:8], uint32(36+dataLen))
 	copy(out[8:12], "WAVE")
 	copy(out[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(out[16:20], 16)          // fmt chunk size
-	binary.LittleEndian.PutUint16(out[20:22], 1)           // PCM
-	binary.LittleEndian.PutUint16(out[22:24], PCMChannels) // channels
-	binary.LittleEndian.PutUint32(out[24:28], PCMRate)     // sample rate
-	binary.LittleEndian.PutUint32(out[28:32], PCMByteRate) // byte rate
+	binary.LittleEndian.PutUint32(out[16:20], 16)                               // fmt chunk size
+	binary.LittleEndian.PutUint16(out[20:22], 1)                                // PCM
+	binary.LittleEndian.PutUint16(out[22:24], PCMChannels)                      // channels
+	binary.LittleEndian.PutUint32(out[24:28], uint32(sampleRate))               // sample rate
+	binary.LittleEndian.PutUint32(out[28:32], uint32(sampleRate*PCMBlockAlign)) // byte rate
 	binary.LittleEndian.PutUint16(out[32:34], PCMBlockAlign)
 	binary.LittleEndian.PutUint16(out[34:36], PCMBits)
 	copy(out[36:40], "data")
