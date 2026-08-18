@@ -33,19 +33,20 @@ type MicLevel struct {
 // micTestState 麦克风测试模式状态。
 // 测试录音与正常录音共用同一 AutoGain 与增益，TUI 中的调整对后续正常录音即时生效。
 type micTestState struct {
-	active        bool // TUI 调试面板是否打开
-	testing       bool // 测试录音是否进行中
-	recorder      *Recorder
-	cancel        context.CancelFunc
-	autoGain      *AutoGain
-	logger        *slog.Logger
-	device        string
-	cfg           *config.Config // 非 nil 时手动调增益会持久化到配置
-	mu            sync.Mutex
-	level         MicLevel
-	peakHold      peakHoldTracker
-	rmsHold       peakHoldTracker
-	gainedRMSHold peakHoldTracker
+	active                  bool // TUI 调试面板是否打开
+	testing                 bool // 测试录音是否进行中
+	recorder                *Recorder
+	cancel                  context.CancelFunc
+	autoGain                *AutoGain
+	logger                  *slog.Logger
+	device                  string
+	cfg                     *config.Config // 非 nil 时手动调增益会持久化到配置
+	mu                      sync.Mutex
+	level                   MicLevel
+	noiseCalibrationVersion uint64
+	peakHold                peakHoldTracker
+	rmsHold                 peakHoldTracker
+	gainedRMSHold           peakHoldTracker
 }
 
 var micTest micTestState
@@ -101,6 +102,7 @@ func StartNoiseCalibration() bool {
 				threshold := calibratedNoiseThreshold(levels)
 				micTest.mu.Lock()
 				micTest.level.NoiseThreshold = threshold
+				micTest.noiseCalibrationVersion++
 				if cfg != nil {
 					cfg.Voice.NoiseThreshold = threshold
 				}
@@ -169,7 +171,7 @@ func setupMicTest(logger *slog.Logger, cfg *config.Config, gain int, autoGainOn 
 	micTest.cfg = cfg
 	micTest.level.NoiseThreshold = normalizeNoiseThreshold(cfg.Voice.NoiseThreshold)
 	if micTest.autoGain == nil {
-		micTest.autoGain = NewAutoGain(autoGainOn, gain)
+		micTest.autoGain = NewAutoGainWithParams(autoGainOn, gain, autoGainParamsFromVoice(cfg.Voice))
 	}
 }
 
@@ -222,6 +224,14 @@ func MicTestLevel() MicLevel {
 	micTest.mu.Lock()
 	defer micTest.mu.Unlock()
 	return micTest.level
+}
+
+// NoiseCalibrationSnapshot 返回最近一次成功完成的底噪校准版本与阈值。
+// TUI 用版本号识别异步校准完成，并同步配置输入框和运行时语音设置。
+func NoiseCalibrationSnapshot() (uint64, float64) {
+	micTest.mu.Lock()
+	defer micTest.mu.Unlock()
+	return micTest.noiseCalibrationVersion, micTest.level.NoiseThreshold
 }
 
 // GetMicGain 返回当前实际增益（含自适应增益的动态调整）。
