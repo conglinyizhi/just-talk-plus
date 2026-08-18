@@ -59,6 +59,18 @@ func normalizeNoiseThreshold(threshold float64) float64 {
 	return threshold
 }
 
+// normalizeNoiseDeadband 收敛停止判定容差：0 = 无死区；上限 0.2（调太大会把
+// 正常说话判成噪音，导致提前截断丢字）。
+func normalizeNoiseDeadband(deadband float64) float64 {
+	if deadband <= 0 {
+		return 0
+	}
+	if deadband > 0.2 {
+		return 0.2
+	}
+	return deadband
+}
+
 func voiceAboveNoise(gainedRMS, gainedPeak, threshold float64) bool {
 	return gainedRMS >= threshold || gainedPeak >= threshold*3
 }
@@ -324,6 +336,9 @@ type VoicePlugin struct {
 	stopAfterSilence       bool
 	noiseGate              bool
 	noiseThreshold         float64
+	noiseDeadband          float64
+	noiseFloorAuto         bool
+	noiseFloor             float64 // 自动底噪模式下的动态底噪基准（初始化 = noiseThreshold）
 	recordedAudio          *bytes.Buffer
 	recordedAudioRate      int
 	pendingDone            int
@@ -426,6 +441,9 @@ func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	p.stopAfterSilence = vc.StopAfterSilence
 	p.noiseGate = vc.NoiseGate
 	p.noiseThreshold = normalizeNoiseThreshold(vc.NoiseThreshold)
+	p.noiseDeadband = normalizeNoiseDeadband(vc.NoiseDeadband)
+	p.noiseFloorAuto = vc.NoiseFloorAuto
+	p.noiseFloor = p.noiseThreshold
 	p.mu.Unlock()
 
 	p.logger.Info("config_reloaded", "hotkey", combo, "mode", mode,
@@ -578,11 +596,30 @@ func (p *VoicePlugin) stopRecordingWhenDue(generation uint64) {
 func (p *VoicePlugin) noteStopActivity(gainedRMS, gainedPeak float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.stopAfterSilence || !p.recording || !p.stopping || !voiceAboveNoise(gainedRMS, gainedPeak, p.noiseThreshold) {
+	if !p.stopAfterSilence || !p.recording || !p.stopping || !p.voiceActivityLocked(gainedRMS, gainedPeak) {
 		return
 	}
 	p.armStopTimerLocked()
 	p.publishStatusLocked()
+}
+
+// voiceActivityLocked 停止阶段的人声判定：底噪基准 + 判定容差（死区）。
+// 自动底噪开启时，判定为底噪的块会缓慢更新底噪基准，让阈值随环境漂移
+// （快跟底噪、人声块不更新），从而不需要手动校准；容差避免环境噪声在
+// 阈值附近波动导致倒计时反复重置。
+func (p *VoicePlugin) voiceActivityLocked(rms, peak float64) bool {
+	base := p.noiseThreshold
+	if p.noiseFloorAuto {
+		base = p.noiseFloor
+		if rms < base+p.noiseDeadband {
+			p.noiseFloor += (rms - p.noiseFloor) * 0.3
+		}
+	}
+	t := base + p.noiseDeadband
+	if t > 0.2 {
+		t = 0.2
+	}
+	return rms >= t || peak >= t*3
 }
 
 func (p *VoicePlugin) cancelStopDelay() {
