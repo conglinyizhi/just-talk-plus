@@ -26,3 +26,13 @@ func TestStopDelayLabelProgress(t *testing.T) {
 		t.Fatalf("completed stop-delay label = %q", label)
 	}
 }
+
+func TestCapsuleContentLayoutCentersStatusGroup(t *testing.T) {
+	dotX, textX := capsuleContentLayout(160, 14, 10, 80)
+	if dotX != 28 || textX != 52 {
+		t.Fatalf("layout = dot %d, text %d", dotX, textX)
+	}
+	if groupCenter := (dotX + textX + 80) / 2; groupCenter != 80 {
+		t.Fatalf("group center = %d, want 80", groupCenter)
+	}
+}
