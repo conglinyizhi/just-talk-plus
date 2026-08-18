@@ -10,8 +10,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 // historyCap 运行期滚动保存的最近识别结果条数。
@@ -22,6 +25,7 @@ type HistoryEntry struct {
 	Text          string
 	Time          time.Time
 	UpstreamLogID string
+	RecordingPath string
 }
 
 var (
@@ -35,6 +39,10 @@ func defaultHistoryPath() string {
 		return filepath.Join(runtimeDir, "just-talk-plus", "history.json")
 	}
 	return filepath.Join(os.TempDir(), "just-talk-plus-history.json")
+}
+
+func recordingDir() string {
+	return filepath.Join(filepath.Dir(historyPathFunc()), "recordings")
 }
 
 // loadHistory 恢复本次系统运行期间保存的历史。运行时目录通常会在系统重启后清理。
@@ -62,14 +70,61 @@ func recordHistory(text string, upstreamLogID ...string) {
 	if len(upstreamLogID) > 0 {
 		logID = upstreamLogID[0]
 	}
+	recordHistoryEntry(text, logID, "")
+}
+
+func recordHistoryWithRecording(text, upstreamLogID, recordingPath string) bool {
+	return recordHistoryEntry(text, upstreamLogID, recordingPath)
+}
+
+func recordHistoryEntry(text, logID, recordingPath string) bool {
+	if text == "" {
+		return false
+	}
 	historyMu.Lock()
 	defer historyMu.Unlock()
 	// 与最新一条去重（避免同一次识别的重复记录）
 	if len(history) > 0 && history[0].Text == text && history[0].UpstreamLogID == logID {
-		return
+		return false
 	}
-	history = trimHistory(append([]HistoryEntry{{Text: text, Time: time.Now(), UpstreamLogID: logID}}, history...))
+	previous := history
+	history = trimHistory(append([]HistoryEntry{{Text: text, Time: time.Now(), UpstreamLogID: logID, RecordingPath: recordingPath}}, history...))
+	removeDiscardedRecordings(previous, history)
 	saveHistoryLocked()
+	return true
+}
+
+func saveRecordingAudio(pcm []byte, sampleRate int, sessionID uint64) string {
+	if len(pcm) == 0 {
+		return ""
+	}
+	dir := recordingDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return ""
+	}
+	name := "recording-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + strconv.FormatUint(sessionID, 10) + ".wav"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, speech.EncodeWAVWithSampleRate(pcm, sampleRate), 0600); err != nil {
+		return ""
+	}
+	return path
+}
+
+func removeDiscardedRecordings(previous, current []HistoryEntry) {
+	kept := make(map[string]struct{}, len(current))
+	for _, entry := range current {
+		if entry.RecordingPath != "" {
+			kept[entry.RecordingPath] = struct{}{}
+		}
+	}
+	for _, entry := range previous {
+		if entry.RecordingPath == "" {
+			continue
+		}
+		if _, ok := kept[entry.RecordingPath]; !ok {
+			_ = os.Remove(entry.RecordingPath)
+		}
+	}
 }
 
 func trimHistory(entries []HistoryEntry) []HistoryEntry {
@@ -139,5 +194,8 @@ func CopyHistoryEntry(i int) error {
 	}
 	text := history[i].Text
 	historyMu.Unlock()
-	return writeClipboard(text)
+	return CopyHistoryText(text)
 }
+
+// CopyHistoryText 把指定的历史文本复制到剪贴板。
+func CopyHistoryText(text string) error { return writeClipboard(text) }
