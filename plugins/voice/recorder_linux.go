@@ -28,23 +28,62 @@ func pickCommand() (*exec.Cmd, string, error) {
 func pickCommandWithDevice(device string) (*exec.Cmd, string, error) {
 	if device != "" {
 		if isPulseSource(device) {
+			device = usablePulseSource(device)
 			return firstFound([]candidate{
-				{"parecord", append(parecordBase(), "-d", device, "-")},
+				{"parecord", append(parecordBase(), "-d", device)},
 				{"arecord", append(arecordBase(), "-D", "pipewire", "-")},
 				{"arecord", append(arecordBase(), "-D", "pulse", "-")},
 			})
 		}
 		return firstFound([]candidate{
 			{"arecord", append(arecordBase(), "-D", device, "-")},
-			{"parecord", append(parecordBase(), "-d", device, "-")},
+			{"parecord", append(parecordBase(), "-d", device)},
+		})
+	}
+	if source, ok := defaultPulseSource(); ok {
+		return firstFound([]candidate{
+			{"parecord", append(parecordBase(), "-d", source)},
+			{"arecord", append(arecordBase(), "-D", "pipewire", "-")},
+			{"arecord", append(arecordBase(), "-D", "pulse", "-")},
 		})
 	}
 	return firstFound([]candidate{
+		{"parecord", parecordBase()},
 		{"arecord", append(arecordBase(), "-D", "pipewire", "-")},
 		{"arecord", append(arecordBase(), "-D", "pulse", "-")},
 		{"arecord", append(arecordBase(), "-")},
-		{"parecord", append(parecordBase(), "-")},
 	})
+}
+
+func defaultPulseSource() (string, bool) {
+	path, err := exec.LookPath("pactl")
+	if err != nil {
+		return "", false
+	}
+	out, err := exec.Command(path, "get-default-source").Output()
+	if err != nil {
+		return "", false
+	}
+	source := strings.TrimSpace(string(out))
+	source = usablePulseSource(source)
+	return source, source != ""
+}
+
+func usablePulseSource(source string) string {
+	if source != "virtual_mic_source" {
+		return source
+	}
+	if path, err := exec.LookPath("pactl"); err == nil {
+		if out, err := exec.Command(path, "list", "short", "sources").Output(); err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 && fields[1] == "virtual_mic.monitor" {
+					return "virtual_mic.monitor"
+				}
+			}
+		}
+	}
+	return source
 }
 
 func errNoBackend(candidates []candidate) error {
@@ -53,7 +92,9 @@ func errNoBackend(candidates []candidate) error {
 
 // isPulseSource 判断设备名是否为 PipeWire/PulseAudio 源名（而非 ALSA hw/plughw）。
 func isPulseSource(device string) bool {
-	return strings.HasPrefix(device, "alsa_input.") || strings.HasPrefix(device, "input.")
+	return strings.HasPrefix(device, "alsa_input.") ||
+		strings.HasPrefix(device, "input.") ||
+		strings.Contains(device, "virtual_mic")
 }
 
 // ListDevices 返回可用录音设备：优先系统音频服务（PipeWire/PulseAudio）源，

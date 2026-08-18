@@ -137,6 +137,13 @@ func (r *Recorder) read(p []byte, measure bool) (n int, rawPeak, rawRMS, gainedP
 	if errors.Is(err, os.ErrClosed) {
 		err = io.EOF
 	}
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			r.logger.Warn("recorder read reached EOF", "backend", r.Backend())
+		} else {
+			r.logger.Error("recorder read failed", "backend", r.Backend(), "error", err)
+		}
+	}
 	return n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err
 }
 
@@ -154,7 +161,10 @@ func (r *Recorder) Stop() ([]byte, error) {
 	r.mu.Unlock()
 
 	if stopFunc != nil {
-		_ = stopFunc()
+		r.logger.Debug("recorder stop requested", "backend", r.backend)
+		if err := stopFunc(); err != nil {
+			r.logger.Error("recorder stop failed", "backend", r.backend, "error", err)
+		}
 	}
 
 	r.readMu.Lock()
@@ -174,6 +184,9 @@ func (r *Recorder) Stop() ([]byte, error) {
 				r.drainBuf.Write(buf[:n])
 			}
 			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					r.logger.Warn("recorder drain failed", "backend", r.backend, "error", err)
+				}
 				break
 			}
 		}
