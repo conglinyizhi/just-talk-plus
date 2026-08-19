@@ -8,6 +8,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
@@ -40,7 +41,7 @@ func TestStreamAudioDrainsQueuedAudioAfterDelayedConnection(t *testing.T) {
 	client := &recordingStreamSession{}
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(client.audio(), want) {
@@ -60,11 +61,30 @@ func TestStreamAudioRecordsBelowThresholdAsIs(t *testing.T) {
 	client.SetAudioSentObserver(func(pcm []byte) { _, _ = audit.Write(pcm) })
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, &audit); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, &audit, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(audit.Bytes(), want) {
 		t.Fatalf("audited audio = %v, want %v", audit.Bytes(), want)
+	}
+}
+
+// TestStreamAudioRecordsVoiceToSendLatency 验证「按下录音 → 音频开始发送」的总延迟
+// 在第一次音频成功发送后写入 p.voiceToSendMs：起点是 startedAt（按下录音时刻），
+// 而不是检测到第一声的时刻。
+func TestStreamAudioRecordsVoiceToSendLatency(t *testing.T) {
+	queue := newAudioQueue()
+	queue.Push(audioChunk{pcm: []byte{3, 4}, gainedPeak: 0.1, gainedRMS: 0.1})
+	queue.Close(nil)
+	client := &recordingStreamSession{}
+	p := NewVoicePlugin()
+
+	startedAt := time.Now().Add(-1500 * time.Millisecond)
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, startedAt); err != nil {
+		t.Fatal(err)
+	}
+	if p.voiceToSendMs < 1400 || p.voiceToSendMs > 5000 {
+		t.Fatalf("voiceToSendMs = %dms, want ~1500ms measured from startedAt", p.voiceToSendMs)
 	}
 }
 

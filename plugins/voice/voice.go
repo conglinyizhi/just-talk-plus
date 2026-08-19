@@ -338,7 +338,7 @@ type VoicePlugin struct {
 	noiseDeadband          float64
 	noiseFloorAuto         bool
 	noiseFloor             float64 // 自动底噪模式下的动态底噪基准（初始化 = noiseThreshold）
-	voiceToSendMs          int64  // 本次会话：第一声被检测到 → 音频开始发送的延迟
+	voiceToSendMs          int64   // 本次会话：按下录音 → 音频开始发送的延迟
 	recordedAudio          *bytes.Buffer
 	recordedAudioRate      int
 	pendingDone            int
@@ -710,7 +710,7 @@ func (p *VoicePlugin) startRecording() {
 
 	audioQueue := newAudioQueue()
 	go p.captureAudio(ctx, rec, audioQueue)
-	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params, audioQueue, recordedAudio)
+	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params, audioQueue, recordedAudio, startedAt)
 	if shouldStopImmediately {
 		p.startStopDelay()
 	}
@@ -736,7 +736,7 @@ func (p *VoicePlugin) newSession(ctx context.Context, params speech.StreamParams
 	return speech.NewBatchSession(eng, params), eng, nil
 }
 
-func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams, audioQueue *audioQueue, recordedAudio *bytes.Buffer) {
+func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc, sessionID, sessionGen uint64, rec *Recorder, params speech.StreamParams, audioQueue *audioQueue, recordedAudio *bytes.Buffer, startedAt time.Time) {
 	p.mu.Lock()
 	noiseThreshold := p.noiseThreshold
 	p.mu.Unlock()
@@ -750,7 +750,6 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	if len(prebuffer) == 0 {
 		return
 	}
-	firstVoiceAt := time.Now()
 	client, engineInfo, err := p.newSession(ctx, params)
 	if err != nil {
 		wasCanceled := ctx.Err() != nil
@@ -823,14 +822,9 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	p.publishStatusLocked()
 	p.mu.Unlock()
 
-	// 测量「第一声被检测到」到「音频开始发送给 ASR」的延迟，会话结束时在屏幕日志显示。
-	p.mu.Lock()
-	p.voiceToSendMs = time.Since(firstVoiceAt).Milliseconds()
-	p.mu.Unlock()
-
 	go func() {
 		defer close(audioDone)
-		if err := p.streamAudio(ctx, client, prebuffer, audioQueue, recordedAudio); err != nil && ctx.Err() == nil {
+		if err := p.streamAudio(ctx, client, prebuffer, audioQueue, recordedAudio, startedAt); err != nil && ctx.Err() == nil {
 			p.logger.Error("ASR audio stream interrupted", "session_id", sessionID, "error", err)
 			pout("❌ ASR 音频传输中断: %v", shortError(err))
 			p.failRecordingSession(sessionID, "ASR 音频传输中断: "+shortError(err))
@@ -1094,7 +1088,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		session.asrCancel()
 	}
 	if session.voiceToSendMs > 0 {
-		pout("🎙 语音延迟: 检测到第一声 → 音频开始发送 %dms", session.voiceToSendMs)
+		pout("🎙 语音延迟: 开始录音 → 音频开始发送 %dms", session.voiceToSendMs)
 	}
 	p.logger.Debug("finish session: done")
 }
@@ -1395,7 +1389,18 @@ func (p *VoicePlugin) waitForVoice(ctx context.Context, audioQueue *audioQueue, 
 	}
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSession, initial []byte, audioQueue *audioQueue, recordedAudio *bytes.Buffer) error {
+func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSession, initial []byte, audioQueue *audioQueue, recordedAudio *bytes.Buffer, startedAt time.Time) error {
+	voiceSent := false
+	markFirstSend := func() {
+		if voiceSent {
+			return
+		}
+		voiceSent = true
+		// 「按下录音」→「第一帧音频成功发送给 ASR」的总延迟，会话结束时在屏幕日志显示。
+		p.mu.Lock()
+		p.voiceToSendMs = time.Since(startedAt).Milliseconds()
+		p.mu.Unlock()
+	}
 	if len(initial) > 0 {
 		sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
 		sendErr := client.SendAudio(sendCtx, initial, false)
@@ -1404,6 +1409,7 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSessi
 			return fmt.Errorf("send buffered audio: %w", sendErr)
 		}
 		recordAudioAfterSend(client, recordedAudio, initial)
+		markFirstSend()
 	}
 	for {
 		chunk, err := audioQueue.Next(ctx)
@@ -1424,6 +1430,7 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSessi
 			return fmt.Errorf("send audio: %w", sendErr)
 		}
 		recordAudioAfterSend(client, recordedAudio, chunk.pcm)
+		markFirstSend()
 	}
 }
 
