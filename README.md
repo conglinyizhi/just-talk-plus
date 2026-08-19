@@ -6,38 +6,29 @@
 
 Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全局快捷键录音，把语音识别结果复制到剪贴板，或直接上屏到当前输入框，适合写代码、聊天、记笔记和处理长文本输入。
 
-## 截图
-
-![Just Talk Plus TUI](docs/screenshot-tui.png)
-
 ## 功能
 
-- 全局快捷键录音，支持 `toggle` 和 `hold` 两种模式。
-- 语音热键限定为适合作为全局快捷键的按键：支持纯修饰键、功能键、Tab、CapsLock、方向键和导航键等；不支持字母、数字、标点、空格等普通字符键。
-- 多语音引擎可选：豆包（火山引擎）流式 ASR（默认，边录边识别）、千问 DashScope Fun-ASR 实时流式（8k 模型自动降采样）、AuralWise 批处理转写、OpenAI 兼容 Whisper 接口（可指向本地 whisper / Groq 等端点）。
-- 麦克风调试面板：同一录音热键触发测试录音（不进识别），实时显示峰值/有效电平与软限幅，细粒度调整增益（`+`/`-`），并可切换只在有效人声期间调节的自适应增益。
-- Android 设备作为录音输入：内嵌 AndroidMic TCP 服务端（默认端口 54345，与 AndroidMic 协议兼容），手机端 AndroidMic 应用连接本机后即可把手机当麦克风，音频自动转为 16 kHz 16-bit 单声道交给识别管线；「输入 → Android 虚拟麦克风」可单独启停服务端、查看监听端口与连接情况，录音设备切换面板也可选 Android 设备档。
-- 识别历史面板：最近 50 条上屏/复制结果滚动保存在系统运行时目录，可选中重新复制到剪贴板；系统重启后自动清理。有录音但未识别出文本的会话会以 `[无结果]` 记入历史，便于回放录音。
-- 可选保留录音：开启「输入 → 保留录音文件」后，成功识别会保留实际发往 ASR 的对应 WAV（噪声门控丢弃的片段不会写入）；历史页回车可复制文本、用 `ffplay` 播放录音，或在文件管理器中显示文件。
-- 句尾标点省略：输出前统一处理，主开关省略句尾句号「。」，可扩展为切断句尾所有符号或额外省略英文 `.` `!` `?`。
-- 中文间空格清理：可选删除中文与中文之间的空格（说话停顿被识别成的小空隙），中文与英文/数字之间的空格按排版惯例保留。
-- 中文排版自动空格（默认开，遵循《[中文文案排版指北](https://github.com/sparanoid/chinese-copywriting-guidelines)》）：自动在中文与英文/数字之间补空格（如 `K3刚发布` → `K3 刚发布`）、全角标点两侧去空格、全角数字转半角。
-  - 两者分工：**删除中文间空格**（默认关）只删中文↔中文之间的空格；**中文排版自动空格**（默认开）只补中文↔英文/数字之间的空格。二者互不影响，可独立开关。
-- 上屏与复制相关选项归在「自动上屏」下（输出 tab）：**自动上屏**（模拟粘贴到输入框），其子项**复制到剪贴板**（识别结果写入剪贴板）、**上屏后还原剪贴板**（成功后还原原内容，尽量不污染剪贴板历史）、**上屏失败不写入**（失败时也还原，识别文本不留在剪贴板）——识别完成后按组合执行，减少污染剪贴板历史（如剪贴板管理器记录）。
-- Wayland / X11 / macOS / Windows 顶层录音状态胶囊提示。
-- TUI 配置界面基于组件库（list/help 等）并采用 tab 分组（通用/引擎/输入/输出/历史/显示），设置项再多也不撑高界面。
-- 热词增强识别（豆包），适合项目名、人名、英文术语和专有名词。
-- 录音历史统计，包括历史次数、总字数、平均速度和最近速度。
+- 全局热键录音（`toggle` / `hold`），流式识别后自动上屏或复制到剪贴板。
+- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点。
+- 中文输入优化：句尾标点省略、中文间空格清理、中英文间自动补空格。
+- Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
+- 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
+- 识别历史与可选录音保留，便于回放与复查。
+- 顶层录音状态胶囊；TUI 采用 tab 分组配置。
+
+## 测试状态
+
+目前主要在 Linux Wayland 后端 + 豆包流式 ASR（单向/双向）环境下开发与测试；其他平台、后端与引擎未充分验证，可能存在兼容性问题。
 
 ## 平台状态
 
 当前支持 Linux、macOS 和 Windows 桌面：
 
-| 平台 | 状态 | 说明 |
-| --- | --- | --- |
-| Linux Wayland | 已支持 | 已支持 Sway / wlroots 场景；快捷键基于 evdev，需要 input 权限 |
-| Linux X11 | 已支持 | 使用 X11 原生全局热键 |
-| macOS | 已支持 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard，胶囊显示使用 AppKit NSPanel |
+| 平台          | 状态   | 说明                                                                                                |
+| ------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| Linux Wayland | 已支持 | 已支持 Sway / wlroots 场景；快捷键基于 evdev，需要 input 权限                                       |
+| Linux X11     | 已支持 | 使用 X11 原生全局热键                                                                               |
+| macOS         | 已支持 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard，胶囊显示使用 AppKit NSPanel |
 | Windows 10/11 | 已支持 | 全局按键轮询及低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 自动上屏和 Win32 状态胶囊 |
 
 ## 构建
@@ -46,12 +37,30 @@ Just Talk Plus 依赖平台原生能力。Linux 和 macOS 构建需要启用 cgo
 
 Linux 构建依赖：
 
+Linux 构建会**同时编译 X11 与 Wayland 两个后端**（cgo），运行时按会话自动选择：`XDG_SESSION_TYPE=wayland`（或设置了 `WAYLAND_DISPLAY`）时优先 Wayland 后端，否则用 X11 后端；也可用 `JUST_TALK_PLUS_BACKEND=x11|wayland` 显式指定。因此编译期依赖需一次装齐两套：
+
 ```bash
 # Arch Linux
-sudo pacman -S --needed go gcc libx11 libxtst libxext wayland
+sudo pacman -S --needed go gcc cairo libx11 libxtst libxext libxinerama libxrender wayland
 
 # Debian / Ubuntu
-sudo apt install golang-go build-essential libx11-dev libxtst-dev libxext-dev libxinerama-dev libwayland-dev
+sudo apt install golang-go build-essential libcairo2-dev libx11-dev libxtst-dev libxext-dev libxinerama-dev libxrender-dev libwayland-dev
+```
+
+运行期工具按实际使用的后端安装：
+
+```bash
+# Wayland 会话：剪贴板（wl-copy/wl-paste）与自动上屏（wtype）
+# Arch Linux
+sudo pacman -S --needed wl-clipboard wtype
+# Debian / Ubuntu
+sudo apt install wl-clipboard wtype
+
+# X11 会话：剪贴板
+# Arch Linux
+sudo pacman -S --needed xclip
+# Debian / Ubuntu
+sudo apt install xclip
 ```
 
 macOS 构建依赖：
@@ -144,6 +153,14 @@ Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 .\build\just-talk-plus.exe --doctor
 ```
 
+### 使用 Android 手机作为麦克风
+
+PC 端（本项目）只提供内嵌的 TCP 服务端；手机端需要安装 AndroidMic 官方 APK 才能连接。
+
+- 到 [AndroidMic 官方 Release](https://github.com/teamclouday/AndroidMic/releases) 下载并安装手机端 APK
+- 本项目**不维护、不分发**手机端 APK，请直接使用官方原版
+- 手机与电脑需在同一局域网：先在 TUI「输入 → Android 虚拟麦克风」启动服务端，再在手机端填入电脑 IP 与端口（默认 `54345`）连接
+
 开发调试可使用 Air 热重载（需先安装 `air`）：
 
 ```bash
@@ -214,6 +231,8 @@ omit_trailing_punct = false  # 输出前省略句尾句号「。」（主设置�
 - 支持：非文本控制键和导航键，如 `Tab`、`Enter`、`Escape`、`Backspace`、`CapsLock`、`Up`、`Down`、`Left`、`Right`、`Home`、`End`、`PageUp`、`PageDown`、`Insert`、`Delete`。
 - 不支持：字母、数字、标点、空格、数字小键盘数字和符号等会输入文本的按键，如 `Alt+G`、`G`、`Alt+1`、`Alt+Space`。
 
+> 提示：若与本项目的上游 just-talk-go（Go 版）同时安装使用，两边默认录音热键相同（`Alt+Super`），请把两边的热键配置成不同的按键，避免同时触发。
+
 热词示例：
 
 ```toml
@@ -239,10 +258,10 @@ Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不�
 
 边录边识别，支持热词。豆包有两种接入方式：
 
-| 接入方式 | 模型版本 | 凭据 | 资源 ID（默认） |
-| --- | --- | --- | --- |
-| 豆包 1.0（旧版控制台） | `1.0` | `app_id` + `access_key`（或旧版平铺 `app_key` / `access_key`） | `volc.bigasr.sauc.*` |
-| 豆包 2.0（新版控制台） | `2.0` | `api_key` | `volc.seedasr.sauc.*` |
+| 接入方式               | 模型版本 | 凭据                                                           | 资源 ID（默认）       |
+| ---------------------- | -------- | -------------------------------------------------------------- | --------------------- |
+| 豆包 1.0（旧版控制台） | `1.0`    | `app_id` + `access_key`（或旧版平铺 `app_key` / `access_key`） | `volc.bigasr.sauc.*`  |
+| 豆包 2.0（新版控制台） | `2.0`    | `api_key`                                                      | `volc.seedasr.sauc.*` |
 
 新版凭据二选一：新版控制台创建应用后拿到 `X-Api-Key`，用 `api_key`；旧版控制台的 App ID + Access Token 用 `app_id` + `access_key`。示例：
 
@@ -345,7 +364,6 @@ TUI 主界面选择「麦克风调试」回车进入调试面板：
 
 > 说明：X11 会话下 `xclip` 不支持该敏感标记，X11 上屏仍通过「保存→粘贴→恢复」尽量还原剪贴板内容，但剪贴板管理器可能仍短暂记录一条；`wl-copy --sensitive` 需要 wl-clipboard ≥ 2.2（当前主流发行版均已包含）。
 
-
 ## 更新日志
 
 见 [CHANGELOG.md](CHANGELOG.md)。
@@ -359,3 +377,10 @@ Just Talk Plus 由 `conglinyizhi` 维护（基于 `whoamihappyhacking` 的原作
 ## 许可证
 
 Just Talk Plus 使用 GNU General Public License v3.0 开源。
+
+项目参考或移植了以下开源项目，版权与许可声明见 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)：
+
+- [Just Talk](https://github.com/whoamihappyhacking/just-talk)（GPL-3.0）——本项目的前身与上游，代码在其基础上继续开发。
+- [AndroidMic](https://github.com/teamclouday/AndroidMic)（GPL-3.0，作者 wiiznokes / teamclouday）——内嵌 TCP 服务端按其协议实现（Go 重写），把 Android 手机用作录音麦克风。
+
+其余依赖、协议头与移植来源见 THIRD_PARTY_NOTICES。

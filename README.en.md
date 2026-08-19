@@ -12,22 +12,17 @@ It is built for people who want to type less and speak more while coding, chatti
 
 ## Features
 
-- Global hotkey recording with `toggle` and `hold` modes.
-- Voice hotkeys are limited to keys suitable for global shortcuts: modifiers, function keys, Tab, CapsLock, arrow/navigation keys, and similar non-text keys. Letters, digits, punctuation, Space, and other text-producing keys are rejected.
-- Multiple ASR engines: Doubao (Volcano Engine) streaming ASR (default, live partial results), Qianwen DashScope Fun-ASR realtime streaming (8k models auto-downsampled), AuralWise batch transcription, and OpenAI-compatible Whisper endpoints (official API, Groq, local whisper servers, etc.).
-- Microphone debug panel: trigger a test recording with the same hotkey (no ASR), showing live peak/RMS level and clipping, fine-grained gain adjustment (`+`/`-`), and an adaptive-gain toggle (auto-lowers on clipping, slowly recovers when quiet).
-- Android device as a recording source: a built-in AndroidMic TCP server (default port 54345, protocol-compatible with AndroidMic) lets you connect your phone via the AndroidMic app and use it as the microphone; audio is converted to 16 kHz 16-bit mono for the ASR pipeline. Use Input → Android virtual mic to start/stop the server and view the listening port and connections; the mic debug device cycle also includes an Android device slot.
-- Recognition history panel: the latest 50 submitted/copied results are kept as a rolling runtime snapshot and can be re-copied to the clipboard. It survives app restarts and is cleared after a system restart. Sessions that recorded audio but produced no ASR text are also recorded as `[无结果]` for playback.
-- Optional recording retention: enable Input → Keep recording files to retain the WAV actually sent to ASR for each successful recognition (noise-gated chunks are excluded). Press Enter on the History tab to copy text, play it with `ffplay`, or reveal it in the file manager.
-- Trailing-punctuation omission: processed uniformly before output — the master toggle strips a trailing Chinese period "。", with sub-options to strip all trailing punctuation or additionally strip ASCII `.` `!` `?`.
-- CJK space cleanup: optionally drop spaces between two CJK characters (gaps caused by speaking pauses), while keeping spaces between CJK and Latin letters or digits per typographic convention.
-- CJK typographic auto-spacing (on by default, following the [Chinese Copywriting Guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)): automatically add a space between CJK and Latin letters/digits (e.g. `K3刚发布` → `K3 刚发布`), strip spaces around full-width punctuation, and convert full-width digits to half-width.
-  - Division of labor: **CJK space cleanup** (off by default) only removes spaces between two CJK characters; **CJK typographic auto-spacing** (on by default) only adds spaces between CJK and Latin letters/digits. They are independent and can be toggled separately.
-- Submit & copy options are grouped under 自动上屏 on the Output tab: **autotype** (simulate paste into the focused field) with sub-options **copy to clipboard** (write the result), **restore clipboard after autotype** (restore the original on success to keep clipboard history clean), and **do not write on autotype failure** (restore the original on failure too, so the text is never left in the clipboard) — executed in combination after each recognition to reduce pollution of your clipboard history (e.g. clipboard managers).
-- Always-on-top recording status overlay for Wayland, X11, macOS, and Windows.
-- Component-library TUI (list/help, etc.) organized into tab groups (General / Engine / Input / Output / History / Display), so more settings never stretch the screen height.
-- ASR hotwords (Doubao) for project names, people names, English terms, and domain-specific vocabulary.
-- Usage statistics for total sessions, total recognized characters, average speed, and recent speed.
+- Global-hotkey recording (`toggle` / `hold`); results are autotyped or copied to the clipboard.
+- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, and OpenAI-compatible endpoints.
+- Chinese input polish: trailing-punctuation omission, CJK space cleanup, and automatic CJK/Latin spacing.
+- An Android phone can serve as the microphone (built-in AndroidMic server; install the official APK on the phone).
+- Microphone debug panel: test recording, level/gain adjustment, adaptive gain.
+- Recognition history and optional recording retention for replay and review.
+- Always-on-top recording status overlay; tabbed TUI configuration.
+
+## Testing Status
+
+Currently developed and tested primarily on the Linux Wayland backend with Doubao streaming ASR (unidirectional and bidirectional). Other platforms, backends, and engines are not fully verified and may have compatibility issues.
 
 ## Platform Status
 
@@ -46,12 +41,30 @@ Just Talk Plus uses native platform APIs. Linux and macOS builds require cgo; Wi
 
 Linux build dependencies:
 
+The Linux build compiles **both the X11 and Wayland backends** (cgo) and picks one at runtime: a Wayland session (`XDG_SESSION_TYPE=wayland` or `WAYLAND_DISPLAY` set) prefers the Wayland backend, otherwise the X11 backend is used. You can also force it with `JUST_TALK_PLUS_BACKEND=x11|wayland`. So the compile-time dependencies include both sets at once:
+
 ```bash
 # Arch Linux
-sudo pacman -S --needed go gcc libx11 libxtst libxext wayland
+sudo pacman -S --needed go gcc cairo libx11 libxtst libxext libxinerama libxrender wayland
 
 # Debian / Ubuntu
-sudo apt install golang-go build-essential libx11-dev libxtst-dev libxext-dev libxinerama-dev libwayland-dev
+sudo apt install golang-go build-essential libcairo2-dev libx11-dev libxtst-dev libxext-dev libxinerama-dev libxrender-dev libwayland-dev
+```
+
+Runtime tools depend on the backend actually in use:
+
+```bash
+# Wayland session: clipboard (wl-copy/wl-paste) and autotype (wtype)
+# Arch Linux
+sudo pacman -S --needed wl-clipboard wtype
+# Debian / Ubuntu
+sudo apt install wl-clipboard wtype
+
+# X11 session: clipboard
+# Arch Linux
+sudo pacman -S --needed xclip
+# Debian / Ubuntu
+sudo apt install xclip
 ```
 
 macOS build dependencies:
@@ -144,6 +157,14 @@ Windows selects its native backend automatically. Check the microphone and confi
 .\build\just-talk-plus.exe --doctor
 ```
 
+### Using an Android Phone as a Microphone
+
+This project only provides the built-in TCP server on the PC side; the phone needs the official AndroidMic APK to connect.
+
+- Download and install the APK from the [AndroidMic official Releases](https://github.com/teamclouday/AndroidMic/releases)
+- This project does **not** maintain or distribute the phone-side APK — use the official one
+- Keep the phone and PC on the same LAN: start the server in TUI → Input → Android virtual mic first, then enter the PC's IP and port (default `54345`) on the phone
+
 For a fast development loop, use Air hot reload (install `air` first):
 
 ```bash
@@ -213,6 +234,8 @@ Voice hotkeys only support keys suitable for global shortcuts:
 - Supported: function keys `F1` through `F24`, such as `F9` and `Alt+F8`.
 - Supported: non-text control and navigation keys, such as `Tab`, `Enter`, `Escape`, `Backspace`, `CapsLock`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `Insert`, and `Delete`.
 - Not supported: letters, digits, punctuation, Space, numpad digits, and numpad symbols that can enter text, such as `Alt+G`, `G`, `Alt+1`, and `Alt+Space`.
+
+> Note: if you also run the upstream just-talk-go (Go version), both programs default to the same recording shortcut (`Alt+Super`). Configure different shortcuts in each to avoid triggering both at once.
 
 Hotword example:
 
@@ -359,3 +382,10 @@ This project does not accept pull requests. Issues are welcome for bug reports, 
 ## License
 
 Just Talk Plus is licensed under the GNU General Public License v3.0.
+
+The project references or ports the following open-source projects; their copyright and license statements are in [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES):
+
+- [Just Talk](https://github.com/whoamihappyhacking/just-talk) (GPL-3.0) — the predecessor and upstream of this project; the codebase is developed on top of it.
+- [AndroidMic](https://github.com/teamclouday/AndroidMic) (GPL-3.0, by wiiznokes / teamclouday) — the built-in TCP server implements its protocol (rewritten in Go) to use an Android phone as a recording microphone.
+
+See THIRD_PARTY_NOTICES for remaining dependencies, protocol headers, and ported sources.
