@@ -13,7 +13,7 @@ It is built for people who want to type less and speak more while coding, chatti
 ## Features
 
 - Global-hotkey recording (`toggle` / `hold`); results are autotyped or copied to the clipboard.
-- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, and OpenAI-compatible endpoints.
+- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, and Xiaomi MiMo.
 - Chinese input polish: trailing-punctuation omission, CJK space cleanup, and automatic CJK/Latin spacing.
 - An Android phone can serve as the microphone (built-in AndroidMic server; install the official APK on the phone).
 - Microphone debug panel: test recording, level/gain adjustment, adaptive gain.
@@ -338,7 +338,20 @@ api_key = "sk-…"        # DASHSCOPE_API_KEY
 # language = "zh-CN"
 ```
 
-Batch engines (auralwise / openai) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
+Xiaomi MiMo speech recognition (whole-recording transcription; uses the OpenAI Chat Completions + input_audio shape). Docs and pricing: [MiMo Speech Recognition](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition):
+
+```toml
+[voice]
+engine = "mimo-asr"
+
+[voice.engine_configs.mimo-asr]
+api_key = "…"                          # Xiaomi MiMo API Key
+# base_url = "https://api.xiaomimimo.com/v1"   # default
+# model = "mimo-v2.5-asr"                     # default
+# language = "auto"                            # auto / zh / en; empty = auto
+```
+
+Batch engines (auralwise / openai / mimo-asr) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 
 ### Microphone Debug And Recognition History
 

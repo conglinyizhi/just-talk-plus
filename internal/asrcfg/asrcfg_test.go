@@ -114,7 +114,7 @@ func TestTypesUserFacing(t *testing.T) {
 		seen[typ] = true
 	}
 	// 只暴露规范引擎名，不暴露 null 与旧别名
-	for _, want := range []string{"doubao-stream", "auralwise", "openai", "dashscope"} {
+	for _, want := range []string{"doubao-stream", "auralwise", "openai", "dashscope", "mimo-asr"} {
 		if !seen[want] {
 			t.Fatalf("missing engine type %q in %v", want, types)
 		}

@@ -9,7 +9,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 ## 功能
 
 - 全局热键录音（`toggle` / `hold`），流式识别后自动上屏或复制到剪贴板。
-- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点。
+- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo。
 - 中文输入优化：句尾标点省略、中文间空格清理、中英文间自动补空格。
 - Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
 - 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
@@ -334,7 +334,20 @@ api_key = "sk-…"        # DASHSCOPE_API_KEY
 # language = "zh-CN"
 ```
 
-批处理引擎（auralwise / openai）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+小米 MiMo 语音识别（整段录音识别，走 OpenAI Chat Completions + input_audio 形态）。文档与价格见 [MiMo 语音识别文档](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition)：
+
+```toml
+[voice]
+engine = "mimo-asr"
+
+[voice.engine_configs.mimo-asr]
+api_key = "…"                          # 小米 MiMo API Key
+# base_url = "https://api.xiaomimimo.com/v1"   # 默认即可
+# model = "mimo-v2.5-asr"                     # 默认即可
+# language = "auto"                            # auto / zh / en；空 = 自动
+```
+
+批处理引擎（auralwise / openai / mimo-asr）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 ### 麦克风调试与识别历史
 

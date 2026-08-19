@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 新增小米 MiMo 语音识别引擎（`mimo-asr`）：整段录音转写，走 OpenAI Chat Completions + input_audio 形态（复用新的 `chataudio` 通用客户端，后续接入同形态云厂商只需配置即可）；TUI 引擎选择、引擎配置弹层与「相关链接」同步更新，README 双语补充。
+
 - 新增 Android 设备录音输入：内嵌 AndroidMic TCP 服务端（默认端口 54345，与 AndroidMic 协议兼容），手机端 AndroidMic 应用连接本机后即可把手机当麦克风，音频自动转换为 16 kHz 16-bit 单声道交给识别管线；「输入 → Android 虚拟麦克风」可单独启停服务端、查看监听端口与连接；麦克风调试面板的设备切换新增 Android 设备档，配置 `[voice] androidmic_port` 可改端口（重启生效）。服务端所有内部错误独立隔离，不会带崩主应用。
 
 - 修正「语音延迟」指标口径：会话日志里的语音延迟由「检测到第一声 → 音频开始发送」改为「开始录音（按下按键）→ 音频开始发送」。起算点提前到按下录音那一刻，把等待检测到第一声的时间一并计入，与体感一致；终点为第一帧音频成功发送给 ASR 的时刻。

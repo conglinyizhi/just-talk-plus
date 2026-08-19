@@ -132,6 +132,9 @@ var engineLinks = map[string][]docLink{
 		// 模型库属于千问平台（qwen3-asr-flash-realtime 等模型），归 dashscope 名下，不标 OpenAI
 		{name: "千问实时 ASR 模型库", url: "https://www.qianwenai.com/models?search=asr"},
 	},
+	"mimo-asr": {
+		{name: "MiMo 语音识别文档", url: "https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition"},
+	},
 }
 
 // pickerState 渠道选择弹层状态；nil 表示未打开。
@@ -158,6 +161,10 @@ var engineChannels = []pickerItem{
 	{
 		name:     "dashscope",
 		subtitle: "千问 Fun-ASR 实时流式，边录边出字；8k 模型自动降采样",
+	},
+	{
+		name:     "mimo-asr",
+		subtitle: "小米 MiMo 语音识别，整段识别；价格见官网",
 	},
 }
 
@@ -398,6 +405,13 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "API Key", key: "ec.api_key", help: "必填（sk-…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.openai.com/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 whisper-1", fType: fString, input: ti(ec["model"])},
+		}
+	case "mimo-asr":
+		fields = []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（小米 MiMo API Key）", fType: fString, input: ti(ec["api_key"])},
+			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.xiaomimimo.com/v1", fType: fString, input: ti(ec["base_url"])},
+			{label: "模型", key: "ec.model", help: "默认 mimo-v2.5-asr", fType: fString, input: ti(ec["model"])},
+			{label: "语言", key: "ec.language", help: "auto / zh / en；空 = 自动", fType: fString, input: ti(ec["language"])},
 		}
 	case "dashscope":
 		rateOpts := []string{"16000", "8000"}
