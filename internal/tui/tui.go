@@ -1034,10 +1034,17 @@ func (m *Model) renderBase() string {
 		if len(logs) > maxLogs {
 			s = len(logs) - maxLogs
 		}
-		if s < len(logs) {
-			b.WriteString(lStyle.Render("── 日志 (L 展开) ──") + "\n")
-			for _, l := range logs[s:] {
-				b.WriteString("  " + dStyle.Render(m.formatLogLine(l)) + "\n")
+		b.WriteString(lStyle.Render("── 日志 (L 展开) ──") + "\n")
+		// 折叠时固定 3 行内容；不足补空行，保证日志区恒占 4 行（标题 + 3 内容）。
+		for i, l := range logs[s:] {
+			b.WriteString("  " + dStyle.Render(m.formatLogLine(l)) + "\n")
+			if i == 2 && !m.logExpanded {
+				break
+			}
+		}
+		if !m.logExpanded {
+			for n := len(logs[s:]); n < 3; n++ {
+				b.WriteString("\n")
 			}
 		}
 	}
@@ -1111,13 +1118,12 @@ func (m *Model) historyRows() int {
 		rows = 3
 	}
 	if m.showLogs {
-		logs := voice.TUILogSnapshot()
-		logRows := len(logs)
-		if !m.logExpanded && logRows > 3 {
-			logRows = 3
-		}
-		if logRows > 0 {
-			logRows++ // “── 日志 ──”标题行
+		// 日志区固定占位：折叠时标题 1 行 + 内容 3 行，不足补空，保证布局稳定、
+		// 不因日志条数变化挤压历史列表底部的“▼ 以下 N 条”提示。
+		logRows := 4
+		if m.logExpanded {
+			logs := voice.TUILogSnapshot()
+			logRows = len(logs) + 1
 		}
 		rows -= logRows
 		if rows < 3 {
@@ -1183,7 +1189,13 @@ func (m *Model) renderHistory(rows int) string {
 	if m.cursor >= len(hist) {
 		m.cursor = len(hist) - 1
 	}
-	start, end := historyWindow(hist, m.cursor, rows)
+	// 窗口条目行数预算：从总行数里预留 ▲/▼ 指示与底部按键提示（各 1 行），
+	// 保证列表底部的“▼ 以下 N 条”始终可见，不被日志区或屏幕边界挤掉。
+	windowRows := rows - 3
+	if windowRows < 1 {
+		windowRows = 1
+	}
+	start, end := historyWindow(hist, m.cursor, windowRows)
 	var b strings.Builder
 	if start > 0 {
 		b.WriteString(dStyle.Render(fmt.Sprintf("  ▲ 以上 %d 条", start)) + "\n")
