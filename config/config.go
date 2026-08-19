@@ -88,7 +88,10 @@ type VoiceConfig struct {
 	SaveRecordings     bool     `toml:"save_recordings"`  // 保存最近历史对应的运行期录音 WAV
 	StopDelayMs        int      `toml:"stop_delay_ms"`
 	StopAfterSilence   bool     `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
-	Language           string   `toml:"language"`
+	// HotkeyCooldownMs 一次录音会话结束后的热键冷却（毫秒）：冷却期内再按
+	// 录音热键静默忽略，防止结束瞬间误触导致秒开秒关。默认 100ms。
+	HotkeyCooldownMs int    `toml:"hotkey_cooldown_ms"`
+	Language         string `toml:"language"`
 	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
 	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
 	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
@@ -167,7 +170,7 @@ func Default() *Config {
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
 			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015, NoiseDeadband: 0.1,
-			AndroidMicPort: 54345, // AndroidMicAutoStart 默认关闭：不主动占用端口
+			AndroidMicPort: 54345, HotkeyCooldownMs: 100, // 热键冷却默认 100ms；AndroidMicAutoStart 默认关闭
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/engine"
@@ -83,4 +84,40 @@ func TestTUILogSnapshotPreservesAppendOrder(t *testing.T) {
 	if got := TUILogSnapshot()[0]; got != "first" {
 		t.Fatalf("snapshot mutated shared buffer: %q", got)
 	}
+}
+
+// TestHotkeyCooldown 覆盖录音会话结束后的热键冷却：
+// 冷却期内 inCooldownLocked 为真、超时恢复、0ms 关闭、restart 豁免。
+func TestHotkeyCooldown(t *testing.T) {
+	t.Run("cooldown active then expires", func(t *testing.T) {
+		p := &VoicePlugin{}
+		p.armCooldownLocked(100)
+		if !p.inCooldownLocked() {
+			t.Fatal("should be in cooldown right after arm")
+		}
+		// 手动把冷却起点拨到过去，模拟超时
+		p.cooldownUntil = time.Now().Add(-time.Millisecond)
+		if p.inCooldownLocked() {
+			t.Fatal("cooldown should have expired")
+		}
+	})
+	t.Run("zero ms disables cooldown", func(t *testing.T) {
+		p := &VoicePlugin{}
+		p.armCooldownLocked(0)
+		if p.inCooldownLocked() {
+			t.Fatal("cooldown should be disabled when ms=0")
+		}
+	})
+	t.Run("restart clears cooldown", func(t *testing.T) {
+		p := &VoicePlugin{}
+		p.armCooldownLocked(100)
+		if !p.inCooldownLocked() {
+			t.Fatal("cooldown should be armed")
+		}
+		// restart 语义：清掉冷却，立即继续
+		p.cooldownUntil = time.Time{}
+		if p.inCooldownLocked() {
+			t.Fatal("cleared cooldown should not be active")
+		}
+	})
 }

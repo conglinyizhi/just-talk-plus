@@ -280,6 +280,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
 		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
+		{label: "热键冷却(ms)", key: "hotkey_cooldown_ms", help: "一次录音结束后，冷却期内再按热键静默忽略，防误触秒开秒关；0 = 关闭", fType: fString, input: ti(fmt.Sprintf("%d", vc.HotkeyCooldownMs))},
 		{label: "有声后停止", key: "stop_after_silence", help: "停止请求后，检测到有效人声会重置倒计时；静音满「停止延迟」才截断录音", fType: fToggle, boolVal: vc.StopAfterSilence},
 		{label: diagnosticLabel, key: "diagnostics_startup_runs", help: "仅用于排查异常：在本机保存最近 512 KiB 日志，按 K 导出。默认关闭；选择次数后会在对应启动完成后自动关闭", fType: fSelect, opts: diagnosticOptions, optIdx: diagnosticOptionIndex},
 		{label: "[高级] 调试插件", key: "debug_enabled", help: "调试用：注册调试热键并打印按键事件；日常无需开启", fType: fToggle, boolVal: cfg.Debug.Enabled},
@@ -813,6 +814,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.NoClipboardOnFail = f.boolVal
 			case "stop_delay_ms":
 				fmt.Sscanf(f.input.Value(), "%d", &vc.StopDelayMs)
+			case "hotkey_cooldown_ms":
+				fmt.Sscanf(f.input.Value(), "%d", &vc.HotkeyCooldownMs)
 			case "stop_after_silence":
 				vc.StopAfterSilence = f.boolVal
 			case "auto_gain":

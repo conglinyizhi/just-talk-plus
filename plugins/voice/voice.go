@@ -334,6 +334,8 @@ type VoicePlugin struct {
 	audioDone              <-chan struct{}
 	stopDelayMs            int
 	stopAfterSilence       bool
+	hotkeyCooldownMs       int
+	cooldownUntil          time.Time // 录音会话结束后的热键冷却截止时间（锁内访问）
 	noiseThreshold         float64
 	noiseDeadband          float64
 	noiseFloorAuto         bool
@@ -664,12 +666,33 @@ func (p *VoicePlugin) markHoldReleased() {
 	}
 }
 
+// inCooldownLocked 是否处于录音会话结束后的热键冷却期（调用方须持有锁）。
+func (p *VoicePlugin) inCooldownLocked() bool {
+	return p.hotkeyCooldownMs > 0 && time.Now().Before(p.cooldownUntil)
+}
+
+// armCooldownLocked 记录一次录音会话结束后的热键冷却起点（调用方须持有锁）。
+func (p *VoicePlugin) armCooldownLocked(ms int) {
+	p.hotkeyCooldownMs = ms
+	if ms > 0 {
+		p.cooldownUntil = time.Now().Add(time.Duration(ms) * time.Millisecond)
+	} else {
+		p.cooldownUntil = time.Time{}
+	}
+}
+
 func (p *VoicePlugin) startRecording() {
 	p.mu.Lock()
 	p.cancelStopDelayOnlyLocked()
 	if p.recording || p.asrClient != nil {
 		p.mu.Unlock()
 		pout("⚠️  已经在录音中")
+		return
+	}
+	// 一次录音会话结束后的冷却期内，热键静默忽略（默认 100ms，不打扰）。
+	if p.inCooldownLocked() {
+		p.mu.Unlock()
+		p.logger.Debug("voice hotkey ignored during cooldown", "remaining_ms", time.Until(p.cooldownUntil).Milliseconds())
 		return
 	}
 	vc := p.cfg.Load().Voice
@@ -852,6 +875,8 @@ func (p *VoicePlugin) restartRecording() {
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
 	p.publishStatusLocked()
+	// restart 是用户主动“继续”当前会话，不受会话结束冷却限制。
+	p.cooldownUntil = time.Time{}
 	p.mu.Unlock()
 	if session != nil {
 		go p.finishRecordingSession(session)
@@ -966,6 +991,8 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 	p.startedAt = time.Time{}
 	p.recording, p.stopping, p.userStopped = false, false, false
 	p.holdReleased = false
+	// 会话结束：记录热键冷却起点（startRecording 在冷却期内静默忽略）。
+	p.armCooldownLocked(p.cfg.Load().Voice.HotkeyCooldownMs)
 	return session
 }
 
