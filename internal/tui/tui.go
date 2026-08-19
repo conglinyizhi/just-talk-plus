@@ -13,6 +13,7 @@ package tui
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -290,6 +291,7 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 
 	mic := []field{
 		{label: "Android 虚拟麦克风", key: "androidmic_panel", help: "内嵌 TCP 服务端：接收 Android 设备音频作为录音输入；可启动/停止/查看状态与连接", fType: fAction},
+		{label: "启动时自动启用", key: "androidmic_auto_start", help: "开启后应用启动即自动监听服务端，手机随时可连；默认关闭，避免不知情时占用端口", fType: fToggle, boolVal: vc.AndroidMicAutoStart, indent: 1},
 		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备（含 Android 设备）", fType: fAction},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 		{label: "目标峰值", key: "auto_gain_target_peak", help: "AGC 输出目标峰值 0..1；留空 = 内置默认 0.42（宁小勿爆）；调高更响、调低更保守", fType: fString, input: ti(agcFloat(vc.AutoGainTargetPeak)), indent: 1},
@@ -814,6 +816,8 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				fmt.Sscanf(f.input.Value(), "%f", &vc.NoiseDeadband)
 			case "save_recordings":
 				vc.SaveRecordings = f.boolVal
+			case "androidmic_auto_start":
+				vc.AndroidMicAutoStart = f.boolVal
 			case "diagnostics_startup_runs":
 				switch f.selectValue() {
 				case "后续 3 次启动":
@@ -2176,6 +2180,39 @@ func (m *Model) handleAndroidPanelKey(k string) tea.Cmd {
 	return nil
 }
 
+// localIPv4Addrs 返回本机非回环的 IPv4 地址（局域网内手机可连接的地址）。
+// 用于 Android 虚拟麦克风面板展示“手机连接”入口，避免用户手动查 IP。
+func localIPv4Addrs() []string {
+	var out []string
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			out = append(out, ip.String())
+		}
+	}
+	return out
+}
+
 // renderAndroidPanel 渲染 AndroidMic 服务端管理面板（模态）。
 func (m *Model) renderAndroidPanel() string {
 	st := voice.AndroidMicStatus()
@@ -2185,8 +2222,19 @@ func (m *Model) renderAndroidPanel() string {
 	}
 
 	statusLine := "○ 未启动"
+	connectLine := "服务端未启动"
 	if st.Running {
-		statusLine = fmt.Sprintf("● 监听中 (0.0.0.0:%d)", st.Port)
+		statusLine = fmt.Sprintf("● 监听中 (端口 %d)", st.Port)
+		ips := localIPv4Addrs()
+		if len(ips) > 0 {
+			addrs := make([]string, len(ips))
+			for i, ip := range ips {
+				addrs[i] = fmt.Sprintf("%s:%d", ip, st.Port)
+			}
+			connectLine = strings.Join(addrs, "  ")
+		} else {
+			connectLine = fmt.Sprintf("0.0.0.0:%d", st.Port)
+		}
 	}
 	clientLine := "无客户端"
 	if len(st.Clients) == 1 {
@@ -2203,11 +2251,13 @@ func (m *Model) renderAndroidPanel() string {
 	lines := []string{
 		" " + lStyle.Render("📱 Android 虚拟麦克风（内嵌 TCP 服务端）"),
 		"  状态: " + vStyle.Render(statusLine),
+		"  手机连接: " + vStyle.Render(connectLine),
 		"  连接: " + vStyle.Render(clientLine),
 		"  录音输入: " + vStyle.Render(inputLine),
 		"",
 		"  AndroidMic 协议服务端：手机端 AndroidMic 应用连接",
 		"  「电脑IP:端口」后，即可把手机当 Just Talk Plus 的麦克风。",
+		"  手机需与电脑在同一局域网。",
 		"",
 		" " + dStyle.Render("[s] 启动  |  [t] 停止  |  esc 退出"),
 	}

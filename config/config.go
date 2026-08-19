@@ -67,9 +67,12 @@ type VoiceConfig struct {
 	Device     string `toml:"device"`
 	// AndroidMicPort 内嵌 AndroidMic TCP 服务端监听端口（device 为
 	// "androidmic" 时作为录音输入源；默认与 AndroidMic 桌面端一致 54345）。
-	AndroidMicPort int  `toml:"androidmic_port"`
-	Gain           int  `toml:"gain"`
-	AutoGain       bool `toml:"auto_gain"` // 自适应增益：爆音自动降低、安静恢复
+	AndroidMicPort int `toml:"androidmic_port"`
+	// AndroidMicAutoStart 启动时自动启用内嵌服务端（默认关闭：新用户
+	// 不认识该功能时，避免默默占用端口）。
+	AndroidMicAutoStart bool `toml:"androidmic_auto_start"`
+	Gain                int  `toml:"gain"`
+	AutoGain            bool `toml:"auto_gain"` // 自适应增益：爆音自动降低、安静恢复
 	// 以下自适应增益参数均为可选（nil = 使用内置保守默认值），写入 config.toml 后重启生效：
 	//   auto_gain_target_peak 目标输出峰值（默认 0.42）
 	//   auto_gain_max_peak    输出峰值超过此值开始回撤增益（默认 0.65）
@@ -164,7 +167,7 @@ func Default() *Config {
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
 			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015, NoiseDeadband: 0.1,
-			AndroidMicPort: 54345,
+			AndroidMicPort: 54345, // AndroidMicAutoStart 默认关闭：不主动占用端口
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

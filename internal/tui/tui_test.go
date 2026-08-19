@@ -805,6 +805,7 @@ func TestApplyFieldsTo(t *testing.T) {
 	fieldByKey(m, "language").input.SetValue("ja-JP")
 	fieldByKey(m, "auto_submit").boolVal = false
 	fieldByKey(m, "omit_trailing_punct").boolVal = true
+	fieldByKey(m, "androidmic_auto_start").boolVal = true
 
 	next := *cfg
 	m.applyFieldsTo(&next)
@@ -816,6 +817,9 @@ func TestApplyFieldsTo(t *testing.T) {
 	}
 	if !next.Voice.OmitTrailingPunct {
 		t.Fatal("omit_trailing_punct should be true")
+	}
+	if !next.Voice.AndroidMicAutoStart {
+		t.Fatal("androidmic_auto_start should be true")
 	}
 }
 

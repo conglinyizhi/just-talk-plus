@@ -47,11 +47,12 @@ func openAndroidMicSource(logger *slog.Logger) (io.ReadCloser, func() error, err
 // isAndroidMicDevice 判断 device 是否指向内嵌 AndroidMic 服务端。
 func isAndroidMicDevice(device string) bool { return device == androidmic.DeviceName }
 
-// maybeAutoStartAndroidMic 在配置指向 Android 设备时自动启动服务端，
-// 保证 TUI / daemon 模式都能直接用；失败只记日志，不阻塞启动。
+// maybeAutoStartAndroidMic 在配置允许自动启用（androidmic_auto_start = true）
+// 时，插件启动即启动内嵌服务端，保证切到 androidmic 设备即可用；
+// 默认关闭，避免新用户不知情时被默默占用端口；失败只记日志，不阻塞启动。
 func (p *VoicePlugin) maybeAutoStartAndroidMic() {
 	vc := p.cfg.Load().Voice
-	if !isAndroidMicDevice(vc.Device) {
+	if !vc.AndroidMicAutoStart {
 		return
 	}
 	if err := AndroidMicStart(vc.AndroidMicPort); err != nil {
