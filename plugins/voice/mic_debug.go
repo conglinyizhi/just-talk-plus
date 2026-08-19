@@ -234,6 +234,13 @@ func NoiseCalibrationSnapshot() (uint64, float64) {
 	return micTest.noiseCalibrationVersion, micTest.level.NoiseThreshold
 }
 
+// SetNoiseCalibratingForTest 仅用于测试：直接设置底噪检测进行中标志。
+func SetNoiseCalibratingForTest(on bool) {
+	micTest.mu.Lock()
+	micTest.level.NoiseCalibrating = on
+	micTest.mu.Unlock()
+}
+
 // GetMicGain 返回当前实际增益（含自适应增益的动态调整）。
 func GetMicGain() int {
 	ensureAutoGain()

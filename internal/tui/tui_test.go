@@ -1283,3 +1283,35 @@ func TestLinkPickerShowsAllEngines(t *testing.T) {
 		t.Fatal("esc should close link picker")
 	}
 }
+
+// TestVoiceStatusNoiseCalibrating 验证底噪检测进行中，顶部状态区显示「底噪检测中」。
+func TestVoiceStatusNoiseCalibrating(t *testing.T) {
+	m := readyModel(config.Default())
+	voice.SetNoiseCalibratingForTest(true)
+	defer voice.SetNoiseCalibratingForTest(false)
+
+	out := m.renderVoiceStatus()
+	if !strings.Contains(out, "底噪检测中") {
+		t.Fatalf("status should show 底噪检测中 while calibrating:\n%s", out)
+	}
+
+	// 检测结束恢复待机
+	voice.SetNoiseCalibratingForTest(false)
+	out = m.renderVoiceStatus()
+	if strings.Contains(out, "底噪检测中") {
+		t.Fatalf("status should not show 底噪检测中 after calibration:\n%s", out)
+	}
+}
+
+// freePort 返回一个当前空闲的随机端口（先监听 :0 取号再释放）。
+// 测试用它启动 AndroidMic 服务端，避免与用户正在运行的实例（默认 54345）争端口。
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("freePort: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port
+}

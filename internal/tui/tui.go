@@ -1391,6 +1391,8 @@ func (m *Model) renderVoiceStatus() string {
 	status := voice.TUIStatus()
 	label := "待机"
 	style := dStyle
+	// 底噪检测进行中：顶部状态优先显示检测进度，让用户在任意 tab 都能看到。
+	calibrating := voice.MicTestLevel().NoiseCalibrating
 	switch status.State {
 	case "connecting":
 		label, style = "连接中", wStyle
@@ -1403,8 +1405,11 @@ func (m *Model) renderVoiceStatus() string {
 	case "error":
 		label, style = "错误", eStyle
 	}
+	if calibrating {
+		label, style = "底噪检测中", wStyle
+	}
 	parts := []string{style.Render(label)}
-	if status.Detail != "" {
+	if status.Detail != "" && !calibrating {
 		parts = append(parts, vStyle.Render(status.Detail))
 	}
 	if status.RecorderReady || status.ASRReady {
