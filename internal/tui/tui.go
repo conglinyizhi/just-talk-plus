@@ -546,6 +546,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+		case "pgup", "pgdown":
+			// 翻页：步长取当前可见窗口条目数，保证翻完光标仍在可视区。
+			start, end := historyWindow(hist, m.cursor, m.historyRows())
+			page := end - start
+			if k == "pgup" {
+				m.cursor -= page
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+			} else {
+				m.cursor += page
+				if m.cursor > len(hist)-1 {
+					m.cursor = len(hist) - 1
+				}
+			}
+		case "home":
+			m.cursor = 0
+		case "end":
+			m.cursor = len(hist) - 1
 		case "enter":
 			if m.cursor >= 0 && m.cursor < len(hist) {
 				if hist[m.cursor].RecordingPath != "" {
@@ -1168,7 +1187,7 @@ func (m *Model) renderHistory(rows int) string {
 	if end < len(hist) {
 		b.WriteString(dStyle.Render(fmt.Sprintf("  ▼ 以下 %d 条", len(hist)-end)) + "\n")
 	}
-	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · enter 复制/录音操作") + "\n")
+	b.WriteString(dStyle.Render("  j/k 或 ↑/↓ 选择 · PgUp/PgDn 翻页 · Home/End 首尾 · enter 复制/录音操作") + "\n")
 	return b.String()
 }
 

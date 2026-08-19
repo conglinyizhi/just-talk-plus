@@ -204,6 +204,13 @@ func History() []HistoryEntry {
 	return out
 }
 
+// SetHistoryForTest 仅用于测试：直接替换历史快照，便于构造列表导航场景。
+func SetHistoryForTest(entries []HistoryEntry) {
+	historyMu.Lock()
+	history = append([]HistoryEntry(nil), entries...)
+	historyMu.Unlock()
+}
+
 // CopyHistoryEntry 把第 i 条历史复制到剪贴板。
 func CopyHistoryEntry(i int) error {
 	historyMu.Lock()

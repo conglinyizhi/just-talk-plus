@@ -378,6 +378,53 @@ func TestHistoryEmptyHint(t *testing.T) {
 	}
 }
 
+// TestHistoryPageKeys 验证历史列表翻页与首尾跳转按键：
+// PgUp/PgDn 翻页（步长 = 当前可见窗口条目数），Home/End 跳首尾。
+func TestHistoryPageKeys(t *testing.T) {
+	m := readyModel(config.Default())
+	m.switchTab(tabHistory)
+	entries := make([]voice.HistoryEntry, 40)
+	for i := range entries {
+		entries[i] = voice.HistoryEntry{Text: fmt.Sprintf("entry %d", i)}
+	}
+	voice.SetHistoryForTest(entries)
+	defer voice.SetHistoryForTest(nil)
+
+	// Home → 第一条
+	m.cursor = 25
+	m.handleKey(tea.KeyMsg{Type: tea.KeyHome})
+	if m.cursor != 0 {
+		t.Fatalf("home cursor = %d, want 0", m.cursor)
+	}
+	// End → 最后一条
+	m.handleKey(tea.KeyMsg{Type: tea.KeyEnd})
+	if m.cursor != 39 {
+		t.Fatalf("end cursor = %d, want 39", m.cursor)
+	}
+	// PgUp 从末尾回一页：步长为窗口条目数，光标应回到窗口顶部附近
+	m.handleKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.cursor >= 39 {
+		t.Fatalf("pgup cursor = %d, want < 39", m.cursor)
+	}
+	// PgDn 再翻回底部
+	m.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.cursor != 39 {
+		t.Fatalf("pgdown cursor = %d, want 39", m.cursor)
+	}
+	// 顶部 PgUp 钳制到 0
+	m.cursor = 2
+	m.handleKey(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.cursor != 0 {
+		t.Fatalf("pgup clamp cursor = %d, want 0", m.cursor)
+	}
+	// 底部 PgDn 钳制到末尾
+	m.cursor = 38
+	m.handleKey(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.cursor != 39 {
+		t.Fatalf("pgdown clamp cursor = %d, want 39", m.cursor)
+	}
+}
+
 // TestHistoryWindow 验证滚动窗口几何：光标始终可见、窗口行数不超上限、
 // 头尾边界与越界钳制。这是长历史列表能正常浏览的基础。
 func TestHistoryWindow(t *testing.T) {
