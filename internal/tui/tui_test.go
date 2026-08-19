@@ -7,6 +7,7 @@ package tui
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"testing"
@@ -758,6 +759,8 @@ func TestAndroidPanelStartStop(t *testing.T) {
 	if !m.androidPanel {
 		t.Fatal("androidmic_panel should open panel")
 	}
+	// 用随机空闲端口启动，避免与用户正在运行的实例（默认 54345）冲突。
+	m.cfg.Voice.AndroidMicPort = freePort(t)
 	defer func() { _ = voice.AndroidMicStop() }()
 
 	// s 启动
@@ -787,7 +790,9 @@ func TestAndroidPanelRender(t *testing.T) {
 	m := readyModel(config.Default())
 	m.androidPanel = true
 	defer func() { _ = voice.AndroidMicStop() }()
-	_ = voice.AndroidMicStart(0)
+	if err := voice.AndroidMicStart(freePort(t)); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
 	out := m.renderAndroidPanel()
 	if !strings.Contains(out, "Android 虚拟麦克风") {
 		t.Fatalf("panel title missing:\n%s", out)

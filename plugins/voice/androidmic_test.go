@@ -33,13 +33,14 @@ func encodeTestPacket(buffer []byte, rate uint32) []byte {
 
 // TestRecorderFromAndroidMicSource 端到端：device=androidmic 时，
 // Recorder 从内嵌服务端读取客户端（模拟 Android 端）发送的音频。
+// 用随机空闲端口启动服务端，避免与用户正在运行的实例（默认 54345）争端口。
 func TestRecorderFromAndroidMicSource(t *testing.T) {
 	_ = AndroidMicStop()
-	if err := AndroidMicStart(0); err != nil {
+	port := freePort(t)
+	if err := AndroidMicStart(port); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
 	defer func() { _ = AndroidMicStop() }()
-	port := AndroidMicStatus().Port
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rec := NewRecorderWithDevice(logger, AndroidMicDeviceName(), 1)
@@ -86,4 +87,17 @@ func TestRecorderFromAndroidMicSource(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("timeout waiting for audio from androidmic source")
+}
+
+// freePort 返回一个当前空闲的随机端口（先监听 :0 取号再释放）。
+// 测试用它启动内嵌服务端，避免与用户正在运行的实例（默认 54345）争端口。
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("freePort: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	return port
 }
