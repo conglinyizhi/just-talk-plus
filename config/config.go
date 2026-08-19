@@ -61,12 +61,15 @@ type OverlayConfig struct {
 }
 
 type VoiceConfig struct {
-	Enabled          bool    `toml:"enabled"`
-	Mode             string  `toml:"mode"`
-	PushToTalk       string  `toml:"push_to_talk"`
-	Device           string  `toml:"device"`
-	Gain             int     `toml:"gain"`
-	AutoGain         bool    `toml:"auto_gain"`       // 自适应增益：爆音自动降低、安静恢复
+	Enabled    bool   `toml:"enabled"`
+	Mode       string `toml:"mode"`
+	PushToTalk string `toml:"push_to_talk"`
+	Device     string `toml:"device"`
+	// AndroidMicPort 内嵌 AndroidMic TCP 服务端监听端口（device 为
+	// "androidmic" 时作为录音输入源；默认与 AndroidMic 桌面端一致 54345）。
+	AndroidMicPort int  `toml:"androidmic_port"`
+	Gain           int  `toml:"gain"`
+	AutoGain       bool `toml:"auto_gain"` // 自适应增益：爆音自动降低、安静恢复
 	// 以下自适应增益参数均为可选（nil = 使用内置保守默认值），写入 config.toml 后重启生效：
 	//   auto_gain_target_peak 目标输出峰值（默认 0.42）
 	//   auto_gain_max_peak    输出峰值超过此值开始回撤增益（默认 0.65）
@@ -76,13 +79,13 @@ type VoiceConfig struct {
 	AutoGainMaxPeak    *float64 `toml:"auto_gain_max_peak"`
 	AutoGainMaxRise    *float64 `toml:"auto_gain_max_rise"`
 	AutoGainMaxGain    *int     `toml:"auto_gain_max_gain"`
-	NoiseThreshold   float64 `toml:"noise_threshold"` // 底噪阈值（RMS）：用于开头开始录音与结束停止判定
-	NoiseDeadband    float64 `toml:"noise_deadband"`  // 停止判定容差：高于底噪阈值多少才算人声（默认 0.1）
-	NoiseFloorAuto   bool    `toml:"noise_floor_auto"` // 自动底噪：停止判定阈值随环境底噪自动漂移
-	SaveRecordings   bool    `toml:"save_recordings"` // 保存最近历史对应的运行期录音 WAV
-	StopDelayMs      int     `toml:"stop_delay_ms"`
-	StopAfterSilence bool    `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
-	Language         string  `toml:"language"`
+	NoiseThreshold     float64  `toml:"noise_threshold"`  // 底噪阈值（RMS）：用于开头开始录音与结束停止判定
+	NoiseDeadband      float64  `toml:"noise_deadband"`   // 停止判定容差：高于底噪阈值多少才算人声（默认 0.1）
+	NoiseFloorAuto     bool     `toml:"noise_floor_auto"` // 自动底噪：停止判定阈值随环境底噪自动漂移
+	SaveRecordings     bool     `toml:"save_recordings"`  // 保存最近历史对应的运行期录音 WAV
+	StopDelayMs        int      `toml:"stop_delay_ms"`
+	StopAfterSilence   bool     `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
+	Language           string   `toml:"language"`
 	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
 	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
 	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
@@ -161,6 +164,7 @@ func Default() *Config {
 			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
 			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015, NoiseDeadband: 0.1,
+			AndroidMicPort: 54345,
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,

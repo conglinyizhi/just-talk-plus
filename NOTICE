@@ -19,6 +19,9 @@ Copyright (C) 2026 conglinyizhi
 
 - 语音引擎抽象层（internal/speech）移植自 go-human-handler 项目的
   backend/internal/speech 模块，并按本项目需求扩展了流式会话与批处理适配。
+- 内嵌 AndroidMic 服务端（internal/androidmic）按 AndroidMic 的 TCP 协议实现：
+  握手常量与消息格式参考 https://github.com/teamclouday/AndroidMic
+  （GPL-3.0-only，作者 wiiznokes / teamclouday），代码由本项目用 Go 重写。
 - 其余第三方依赖的版权声明见 THIRD_PARTY_NOTICES。
 - plugins/overlay 中包含的 xdg-shell 与 wlr-layer-shell 协议头文件版权
   归其原始作者所有（见文件内注释），随项目以 GPL-3.0 分发。

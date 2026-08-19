@@ -320,7 +320,18 @@ func TestTriggerAction(t *testing.T) {
 		}
 	}
 	m.switchTab(tabMic)
-	m.cursor = 0 // mic_test
+	// mic_test 不再是输入 tab 第一个字段（前面有 Android 虚拟麦克风），按 key 定位。
+	micIdx := -1
+	for i, f := range m.tabField[tabMic] {
+		if f.key == "mic_test" {
+			micIdx = i
+			break
+		}
+	}
+	if micIdx < 0 {
+		t.Fatal("mic_test field not found")
+	}
+	m.cursor = micIdx
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.micPanel == nil {
 		t.Fatal("mic_test enter should open panel")
@@ -664,6 +675,14 @@ func TestSwitchPanelDevice(t *testing.T) {
 	if got := voice.MicTestDevice(); got != "设备B" {
 		t.Fatalf("device after second ] = %q, want 设备B", got)
 	}
+	// ] → Android 设备（新增档位，位于系统设备之后）
+	m.switchPanelDevice(+1)
+	if got := voice.MicTestDevice(); got != voice.AndroidMicDeviceName() {
+		t.Fatalf("device after third ] = %q, want androidmic", got)
+	}
+	if !m.micPanel.androidSlot {
+		t.Fatal("androidSlot should be true on Android 档")
+	}
 	// ] → 回绕到自动
 	m.switchPanelDevice(+1)
 	if got := voice.MicTestDevice(); got != "" {
@@ -684,6 +703,51 @@ func TestSwitchPanelDevice(t *testing.T) {
 		t.Fatalf("panel key [ device = %q, want auto", got)
 	}
 	voice.SetMicTestDevice("")
+}
+
+func TestAndroidPanelStartStop(t *testing.T) {
+	m := readyModel(config.Default())
+	m.triggerAction("androidmic_panel")
+	if !m.androidPanel {
+		t.Fatal("androidmic_panel should open panel")
+	}
+	defer func() { _ = voice.AndroidMicStop() }()
+
+	// s 启动
+	m.handleAndroidPanelKey("s")
+	st := voice.AndroidMicStatus()
+	if !st.Running || st.Port <= 0 {
+		t.Fatalf("server should be running after s, got %+v", st)
+	}
+	// 再按 s 幂等
+	m.handleAndroidPanelKey("s")
+	if !voice.AndroidMicStatus().Running {
+		t.Fatal("server should stay running")
+	}
+	// t 停止
+	m.handleAndroidPanelKey("t")
+	if voice.AndroidMicStatus().Running {
+		t.Fatal("server should be stopped after t")
+	}
+	// esc 退出
+	m.handleAndroidPanelKey("esc")
+	if m.androidPanel {
+		t.Fatal("esc should close panel")
+	}
+}
+
+func TestAndroidPanelRender(t *testing.T) {
+	m := readyModel(config.Default())
+	m.androidPanel = true
+	defer func() { _ = voice.AndroidMicStop() }()
+	_ = voice.AndroidMicStart(0)
+	out := m.renderAndroidPanel()
+	if !strings.Contains(out, "Android 虚拟麦克风") {
+		t.Fatalf("panel title missing:\n%s", out)
+	}
+	if !strings.Contains(out, "监听中") {
+		t.Fatalf("panel should show listening state:\n%s", out)
+	}
 }
 
 // ---- 字段值写回 ----

@@ -70,7 +70,17 @@ func (r *Recorder) Start() error {
 		return nil
 	}
 
-	stdout, name, stopFunc, err := startCaptureWithDevice(r.logger, r.device)
+	var stdout io.ReadCloser
+	var stopFunc func() error
+	var name string
+	var err error
+	if isAndroidMicDevice(r.device) {
+		// Android 设备输入：从内嵌 TCP 服务端取 16 kHz 16-bit 单声道 PCM。
+		stdout, stopFunc, err = openAndroidMicSource(r.logger)
+		name = "androidmic"
+	} else {
+		stdout, name, stopFunc, err = startCaptureWithDevice(r.logger, r.device)
+	}
 	if err != nil {
 		return err
 	}

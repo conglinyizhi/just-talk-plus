@@ -378,6 +378,7 @@ func (p *VoicePlugin) Init(env engine.PluginEnv) error {
 	loadTUIStats()
 	loadHistory()
 	setupMicTest(p.logger, env.Config(), env.Config().Voice.Gain, env.Config().Voice.AutoGain)
+	// registerFromConfig 内部已处理 AndroidMic 服务端自动启动（覆盖初始与 reload）。
 	return p.registerFromConfig(env.Config())
 }
 
@@ -406,6 +407,7 @@ func (p *VoicePlugin) OnConfigReload(cfg *config.Config) error { return p.regist
 func (p *VoicePlugin) registerFromConfig(cfg *config.Config) error {
 	// 同步最新配置：TUI 保存后本进程内立即生效（热键注册之外的所有读取都走 p.cfg）
 	p.cfg.Store(cfg)
+	p.maybeAutoStartAndroidMic()
 	vc := cfg.Voice
 	if !vc.Enabled {
 		p.mu.Lock()

@@ -178,8 +178,10 @@ type linkPickerState struct {
 
 // micPanelState 麦克风调试面板；nil 表示未打开。
 // devIdx 当前设备在 m.devices 中的下标；-1 = 自动（系统默认）。
+// androidSlot 当前是否为 Android 设备（内嵌 AndroidMic 服务端）档。
 type micPanelState struct {
-	devIdx int
+	devIdx      int
+	androidSlot bool
 }
 
 type historyAction string
@@ -223,6 +225,7 @@ type Model struct {
 	linkPicker              *linkPickerState
 	micPanel                *micPanelState
 	historyMenu             *historyMenuState
+	androidPanel            bool // Android 虚拟麦克风服务端管理面板
 	noiseCalibrationVersion uint64
 }
 
@@ -279,7 +282,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 	}
 
 	mic := []field{
-		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备", fType: fAction},
+		{label: "Android 虚拟麦克风", key: "androidmic_panel", help: "内嵌 TCP 服务端：接收 Android 设备音频作为录音输入；可启动/停止/查看状态与连接", fType: fAction},
+		{label: "麦克风调试", key: "mic_test", help: "回车进入；同一录音热键触发测试，实时电平与增益调整，可切换设备（含 Android 设备）", fType: fAction},
 		{label: "自适应增益", key: "auto_gain", help: "爆音自动降低，安静后缓慢恢复", fType: fToggle, boolVal: vc.AutoGain},
 		{label: "目标峰值", key: "auto_gain_target_peak", help: "AGC 输出目标峰值 0..1；留空 = 内置默认 0.42（宁小勿爆）；调高更响、调低更保守", fType: fString, input: ti(agcFloat(vc.AutoGainTargetPeak)), indent: 1},
 		{label: "峰值上限", key: "auto_gain_max_peak", help: "输出峰值超过此值开始回撤增益；留空 = 默认 0.65", fType: fString, input: ti(agcFloat(vc.AutoGainMaxPeak)), indent: 1},
@@ -519,6 +523,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if m.micPanel != nil {
 		return m.handleMicPanelKey(k)
 	}
+	if m.androidPanel {
+		return m.handleAndroidPanelKey(k)
+	}
 	if m.historyMenu != nil {
 		return m.handleHistoryMenuKey(k)
 	}
@@ -674,9 +681,11 @@ func (m *Model) triggerAction(key string) {
 		m.openEnginePicker()
 	case "engine_config":
 		m.openChannelConfig()
+	case "androidmic_panel":
+		m.androidPanel = true
 	case "mic_test":
 		voice.StartMicTest()
-		m.micPanel = &micPanelState{devIdx: m.deviceIndex(voice.MicTestDevice())}
+		m.micPanel = &micPanelState{devIdx: m.deviceIndex(voice.MicTestDevice()), androidSlot: voice.MicTestDevice() == voice.AndroidMicDeviceName()}
 	case "noise_calibrate":
 		if voice.StartNoiseCalibration() {
 			m.logf("🎤 正在检测底噪，请保持安静约 3 秒")
@@ -934,7 +943,7 @@ func (m *Model) View() string {
 		return "loading..."
 	}
 	base := m.renderBase()
-	if m.picker == nil && m.configOverlay == nil && m.linkPicker == nil && m.micPanel == nil && m.historyMenu == nil {
+	if m.picker == nil && m.configOverlay == nil && m.linkPicker == nil && m.micPanel == nil && m.historyMenu == nil && !m.androidPanel {
 		// 无弹层：键位帮助行固定在屏幕最底部
 		return pinBottom(base, m.helpLine(), m.h)
 	}
@@ -948,6 +957,8 @@ func (m *Model) View() string {
 		overlay = m.renderConfigOverlay()
 	case m.micPanel != nil:
 		overlay = m.renderMicPanel()
+	case m.androidPanel:
+		overlay = m.renderAndroidPanel()
 	case m.historyMenu != nil:
 		overlay = m.renderHistoryMenu()
 	}
@@ -1900,6 +1911,7 @@ func (m *Model) deviceIndex(dev string) int {
 }
 
 // switchPanelDevice 在调试面板内切换录音设备（dir=±1 循环；-1 档 = 自动）。
+// 档位：0 = 自动，1..len(devices) = 系统设备，len(devices)+1 = Android 设备。
 // 切换会停止当前测试录音并持久化到配置。
 func (m *Model) switchPanelDevice(dir int) {
 	if m.micPanel == nil {
@@ -1909,16 +1921,21 @@ func (m *Model) switchPanelDevice(dir int) {
 		m.logf("⚠️  未检测到可用录音设备")
 		return
 	}
-	// 档位：0..len(devices) 对应 自动 + 各设备
-	steps := len(m.devices) + 1
-	slot := m.micPanel.devIdx + 1 + dir // 0 = 自动
+	steps := len(m.devices) + 2 // 自动 + 各设备 + Android 设备
+	slot := m.micPanel.devIdx + 1 + dir
+	if m.micPanel.androidSlot {
+		slot = len(m.devices) + 1 + dir
+	}
 	slot = ((slot % steps) + steps) % steps
 	dev := ""
-	if slot > 0 {
+	if slot > 0 && slot <= len(m.devices) {
 		dev = m.devices[slot-1]
+	} else if slot > len(m.devices) {
+		dev = voice.AndroidMicDeviceName()
 	}
 	voice.SetMicTestDevice(dev)
 	m.micPanel.devIdx = slot - 1
+	m.micPanel.androidSlot = dev == voice.AndroidMicDeviceName()
 	m.logf("🎤 录音设备: %s", displayDeviceName(dev))
 }
 
@@ -2096,7 +2113,89 @@ func displayDeviceName(dev string) string {
 	if dev == "" {
 		return "自动"
 	}
+	if dev == voice.AndroidMicDeviceName() {
+		return "Android 设备 (AndroidMic)"
+	}
 	return dev
+}
+
+// ---- Android 虚拟麦克风服务端管理面板 ----
+
+// handleAndroidPanelKey 管理面板按键：s 启动 / t 停止 / esc 退出。
+func (m *Model) handleAndroidPanelKey(k string) tea.Cmd {
+	switch k {
+	case "s":
+		port := m.cfg.Voice.AndroidMicPort
+		if err := voice.AndroidMicStart(port); err != nil {
+			m.logf("❌ AndroidMic 服务端启动失败: %v", err)
+		} else {
+			m.logf("✅ AndroidMic 服务端已启动，监听端口 %d", voice.AndroidMicStatus().Port)
+		}
+	case "t":
+		if err := voice.AndroidMicStop(); err != nil {
+			m.logf("❌ AndroidMic 服务端停止失败: %v", err)
+		} else {
+			m.logf("🛑 AndroidMic 服务端已停止")
+		}
+	case "esc", "q":
+		m.androidPanel = false
+	}
+	return nil
+}
+
+// renderAndroidPanel 渲染 AndroidMic 服务端管理面板（模态）。
+func (m *Model) renderAndroidPanel() string {
+	st := voice.AndroidMicStatus()
+	width := 84
+	if m.w > 0 && width > m.w-4 {
+		width = m.w - 4
+	}
+
+	statusLine := "○ 未启动"
+	if st.Running {
+		statusLine = fmt.Sprintf("● 监听中 (0.0.0.0:%d)", st.Port)
+	}
+	clientLine := "无客户端"
+	if len(st.Clients) == 1 {
+		clientLine = "1 个客户端: " + st.Clients[0]
+	} else if len(st.Clients) > 1 {
+		clientLine = fmt.Sprintf("%d 个客户端: %s", len(st.Clients), strings.Join(st.Clients, ", "))
+	}
+
+	inputLine := "未指向本服务端"
+	if voice.MicTestDevice() == voice.AndroidMicDeviceName() {
+		inputLine = "已指向本服务端（麦克风调试面板可切换）"
+	}
+
+	lines := []string{
+		" " + lStyle.Render("📱 Android 虚拟麦克风（内嵌 TCP 服务端）"),
+		"  状态: " + vStyle.Render(statusLine),
+		"  连接: " + vStyle.Render(clientLine),
+		"  录音输入: " + vStyle.Render(inputLine),
+		"",
+		"  AndroidMic 协议服务端：手机端 AndroidMic 应用连接",
+		"  「电脑IP:端口」后，即可把手机当 Just Talk Plus 的麦克风。",
+		"",
+		" " + dStyle.Render("[s] 启动  |  [t] 停止  |  esc 退出"),
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Width(width - 2).
+		Render(strings.Join(lines, "\n"))
+
+	pad := 0
+	if m.w > 0 {
+		pad = (m.w - lipgloss.Width(box)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+	}
+	bl := strings.Split(box, "\n")
+	for i := range bl {
+		bl[i] = strings.Repeat(" ", pad) + bl[i]
+	}
+	return strings.Join(bl, "\n")
 }
 
 func SetProviderInfo(info hotkey.ProviderInfo) tea.Cmd {
