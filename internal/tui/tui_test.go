@@ -969,6 +969,18 @@ func TestFieldValue(t *testing.T) {
 	if !strings.Contains(out, "麦克风调试:") || !strings.Contains(out, "自适应增益:") {
 		t.Fatalf("mic tab render:\n%s", out)
 	}
+	// 动作类字段：检测底噪/生成诊断报告是执行动作而非打开弹层，
+	// 按钮文字用动作动词，避免与「进入」混淆。
+	m.cursor = fieldIndex(m, "noise_calibrate")
+	out = m.renderFields()
+	if !strings.Contains(out, "检测当前底噪: ▶ 开始") {
+		t.Fatalf("noise_calibrate should render 开始:\n%s", out)
+	}
+	m.cursor = fieldIndex(m, "diagnose")
+	out = m.renderFields()
+	if !strings.Contains(out, "生成诊断报告: ▶ 生成") {
+		t.Fatalf("diagnose should render 生成:\n%s", out)
+	}
 }
 
 func TestFieldHelpShownUnderCursor(t *testing.T) {

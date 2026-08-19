@@ -79,6 +79,9 @@ type field struct {
 	optVals []string // select 显示值对应的写入值（缺省 = opts）
 	optIdx  int
 	indent  int // 层级缩进（副设置项依赖主设置项时用）
+	// actionLabel fAction 的操作按钮文字：默认「进入」（打开弹层/面板）；
+	// 纯动作（开始采集、生成报告）应设为对应动词，避免与弹层行为混淆。
+	actionLabel string
 }
 
 // selectValue 返回 select 字段当前选中的写入值。
@@ -302,8 +305,8 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "自动底噪", key: "noise_floor_auto", help: "开启后停止判定的阈值随环境底噪自动漂移，无需手动校准", fType: fToggle, boolVal: vc.NoiseFloorAuto},
 		{label: "判定容差", key: "noise_deadband", help: "停止判定时高于底噪阈值多少才算人声（默认 0.1）；调太大会把正常说话判成噪音，导致提前截断丢字", fType: fString, input: ti(fmt.Sprintf("%g", vc.NoiseDeadband))},
 		{label: "保留录音文件", key: "save_recordings", help: "将成功识别时实际发往 ASR 的音频以 WAV 保留在系统运行时目录，最多随历史保留 50 条", fType: fToggle, boolVal: vc.SaveRecordings},
-		{label: "检测当前底噪", key: "noise_calibrate", help: "采集约 3 秒环境底噪，自动计算并保存噪声阈值", fType: fAction},
-		{label: "生成诊断报告", key: "diagnose", help: "用最近一条有录音的历史生成参数诊断报告（含给大模型的分析 prompt）；只生成不改配置", fType: fAction},
+		{label: "检测当前底噪", key: "noise_calibrate", help: "采集约 3 秒环境底噪，自动计算并保存噪声阈值", fType: fAction, actionLabel: "开始"},
+		{label: "生成诊断报告", key: "diagnose", help: "用最近一条有录音的历史生成参数诊断报告（含给大模型的分析 prompt）；只生成不改配置", fType: fAction, actionLabel: "生成"},
 	}
 
 	output := []field{
@@ -734,6 +737,12 @@ func (m *Model) triggerAction(key string) {
 		} else {
 			m.logf("%s", summary)
 			m.logf("📄 完整报告: %s（复制「请大模型分析」段落发给大模型）", path)
+			// 报告生成后直接在文件管理器中定位文件，方便复制/导出内容
+			if err := revealRecording(path); err != nil {
+				m.logf("⚠️ 打开报告位置失败: %v", err)
+			} else {
+				m.logf("📂 已在文件管理器中打开报告位置")
+			}
 		}
 	case "doc_links":
 		m.openLinkPicker()
@@ -1325,7 +1334,11 @@ func (m *Model) renderField(i int, f field) string {
 		if f.key == "engine" {
 			extra = "  " + vStyle.Render(m.currentEngine())
 		}
-		return aStyle.Render("▶ ") + vStyle.Render("进入") + extra
+		label := f.actionLabel
+		if label == "" {
+			label = "进入"
+		}
+		return aStyle.Render("▶ ") + vStyle.Render(label) + extra
 	}
 	return ""
 }
