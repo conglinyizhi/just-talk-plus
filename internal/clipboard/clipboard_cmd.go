@@ -9,7 +9,10 @@ func newPlatformClipboard() (*Clipboard, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newFromCmd(cmd), nil
+	clipboard := newFromCmd(cmd)
+	clipboard.snapshotFunc = linuxSnapshot
+	clipboard.restoreFunc = linuxRestoreIfUnchanged
+	return clipboard, nil
 }
 
 // detectCommand returns the best available clipboard command for this platform.

@@ -1145,16 +1145,16 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 		//      - 成功后：restore_clipboard 开启 → 还原上屏前的剪贴板
 		//      - 失败后：no_clipboard_on_fail 开启 → 还原，识别文本不留在剪贴板
 		//   2. 复制到剪贴板：独立行为，把识别结果写入剪贴板（可单独开/关）
-		var origClipboard string
+		var snapshot clipboard.Snapshot
 		if vc.RestoreClipboard || vc.NoClipboardOnFail {
 			stageStarted := time.Now()
-			p.logger.Debug("latency anchor: clipboard read start", "session_id", sessionID)
+			p.logger.Debug("latency anchor: clipboard snapshot start", "session_id", sessionID)
 			if cb, err := clipboard.New(); err == nil {
-				if s, err := cb.Get(); err == nil {
-					origClipboard = s
-					p.logger.Debug("latency anchor: clipboard read done", "session_id", sessionID, "text_len", len(s), "duration_ms", time.Since(stageStarted).Milliseconds())
+				if captured, err := cb.Snapshot(); err == nil {
+					snapshot = captured
+					p.logger.Debug("latency anchor: clipboard snapshot done", "session_id", sessionID, "restorable", snapshot.Restorable, "formats", snapshot.FormatNames(), "bytes", snapshot.ByteLen(), "reason", snapshot.Reason, "duration_ms", time.Since(stageStarted).Milliseconds())
 				} else {
-					p.logger.Debug("latency anchor: clipboard read failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
+					p.logger.Debug("latency anchor: clipboard snapshot failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
 				}
 			} else {
 				p.logger.Debug("latency anchor: clipboard init failed", "session_id", sessionID, "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
@@ -1163,10 +1163,23 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 		if vc.AutoSubmit {
 			stageStarted := time.Now()
 			p.logger.Debug("latency anchor: autotype start", "session_id", sessionID, "text_len", len(text))
-			if err := autotype.Paste(text, p.logger.With("session_id", sessionID)); err != nil {
+			var finalize func(bool) error
+			finalizeRan := false
+			if vc.RestoreClipboard || vc.NoClipboardOnFail {
+				finalize = func(pasted bool) error {
+					finalizeRan = true
+					if (pasted && vc.RestoreClipboard) || (!pasted && vc.NoClipboardOnFail) {
+						restoreClipboard(snapshot, text, p.logger.With("session_id", sessionID))
+					}
+					return nil
+				}
+			}
+			if err := autotype.PasteAndFinalize(text, p.logger.With("session_id", sessionID), finalize); err != nil {
 				pout("❌ 上屏失败: %v", err)
 				if vc.NoClipboardOnFail {
-					restoreClipboard(origClipboard, p.logger.With("session_id", sessionID))
+					if !finalizeRan {
+						restoreClipboard(snapshot, text, p.logger.With("session_id", sessionID))
+					}
 					pout("ℹ️  未写入剪贴板")
 				} else if !vc.WriteClipboard {
 					// 失败且未要求复制：文本留在剪贴板作为兜底
@@ -1175,9 +1188,6 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 			} else {
 				p.logger.Debug("latency anchor: autotype done", "session_id", sessionID, "text_len", len(text), "duration_ms", time.Since(stageStarted).Milliseconds())
 				pout("✅ 已上屏")
-				if vc.RestoreClipboard {
-					restoreClipboard(origClipboard, p.logger.With("session_id", sessionID))
-				}
 			}
 		}
 
@@ -1481,21 +1491,24 @@ func writeClipboard(text string) error {
 	return cb.Set(text)
 }
 
-// restoreClipboard 上屏后恢复剪贴板原内容（尽力而为，失败只记日志）。
-func restoreClipboard(orig string, logger *slog.Logger) {
-	if orig == "" {
-		logger.Debug("latency anchor: clipboard restore skipped", "reason", "empty_original")
-		return // 原剪贴板为空，无需恢复
-	}
+// restoreClipboard restores a supported snapshot only when the temporary
+// autotype text is still current. Unsupported snapshots and external changes
+// are deliberately skipped to avoid destroying user clipboard data.
+func restoreClipboard(snapshot clipboard.Snapshot, temporaryText string, logger *slog.Logger) {
 	stageStarted := time.Now()
-	logger.Debug("latency anchor: clipboard restore start", "text_len", len(orig))
+	logger.Debug("latency anchor: clipboard restore start", "restorable", snapshot.Restorable, "formats", snapshot.FormatNames(), "bytes", snapshot.ByteLen(), "reason", snapshot.Reason)
 	cb, err := clipboard.New()
 	if err != nil {
 		logger.Debug("restore clipboard: init failed", "error", err)
 		return
 	}
-	if err := cb.Set(orig); err != nil {
+	result, err := cb.RestoreIfUnchanged(snapshot, temporaryText)
+	if err != nil {
 		logger.Debug("latency anchor: clipboard restore failed", "error", err, "duration_ms", time.Since(stageStarted).Milliseconds())
+		return
+	}
+	if !result.Restored {
+		logger.Debug("latency anchor: clipboard restore skipped", "reason", result.Reason, "duration_ms", time.Since(stageStarted).Milliseconds())
 		return
 	}
 	logger.Debug("latency anchor: clipboard restore done", "duration_ms", time.Since(stageStarted).Milliseconds())

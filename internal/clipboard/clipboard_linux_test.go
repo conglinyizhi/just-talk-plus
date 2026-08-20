@@ -16,6 +16,9 @@ import (
 )
 
 func TestRunCmdWithInputWithRealWaylandCopy(t *testing.T) {
+	if os.Getenv("JUST_TALK_PLUS_TEST_REAL_CLIPBOARD") != "1" {
+		t.Skip("set JUST_TALK_PLUS_TEST_REAL_CLIPBOARD=1 to allow a real clipboard write")
+	}
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		t.Skip("Wayland session required")
 	}

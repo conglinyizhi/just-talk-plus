@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 剪贴板恢复改为安全快照：自动上屏仅恢复受支持的纯文本、HTML、PNG 数据；检测到外部剪贴板变化、文件列表、私有格式、超大内容或 Linux 多 MIME 内容时跳过恢复，不再把图片等二进制数据作为文本写回。Wayland 的真实剪贴板测试改为显式 opt-in，默认不污染用户剪贴板。
+
 - 自动上屏统一粘贴后保护窗口：X11/Wayland/Windows/macOS 在模拟粘贴输入成功发送后都保留 800ms settle 等待，给目标应用留出读取临时剪贴板的时间，再由输出层恢复/回收剪贴板，降低丢字或粘到旧剪贴板内容的概率（保护窗口为尽力而为，不承诺跨应用确认，实际恢复时机仍取决于目标应用读取速度）。
 - 新增小米 MiMo 语音识别引擎（`mimo-asr`）：整段录音转写，走 OpenAI Chat Completions + input_audio 形态（复用新的 `chataudio` 通用客户端，后续接入同形态云厂商只需配置即可）；TUI 引擎选择、引擎配置弹层与「相关链接」同步更新，README 双语补充。
 

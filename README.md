@@ -216,6 +216,7 @@ omit_trailing_punct = false  # 输出前省略句尾句号「。」（主设置�
 # write_clipboard = true      # 子项：复制到剪贴板（识别结果写入剪贴板）
 # restore_clipboard = true    # 子项：上屏后还原剪贴板（成功后还原原内容）
 # no_clipboard_on_fail = true # 子项：上屏失败不写入（失败时也还原原内容）
+# 剪贴板恢复仅对支持的纯文本、HTML、PNG 快照生效；Linux 遇到多 MIME、文件列表或未知格式会跳过恢复，避免把图片二进制误写成文本。自动上屏期间用户复制了新内容时也会跳过恢复。
 
 # 诊断收集默认关闭；在 TUI 选择“本次运行”即时启用；3 = 后续 3 次启动，-1 = 持续开启
 # [diagnostics]

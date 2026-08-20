@@ -220,6 +220,7 @@ omit_trailing_punct = false  # strip trailing "。" before output (master toggle
 # write_clipboard = true      # sub: copy to clipboard (write the result)
 # restore_clipboard = true    # sub: restore clipboard after autotype on success
 # no_clipboard_on_fail = true # sub: on autotype failure, also restore the original
+# Clipboard restoration only applies to supported plain-text, HTML, and PNG snapshots. On Linux, multi-MIME, file-list, and unknown clipboard content is left untouched to avoid writing image bytes as text; restoration is also skipped if the clipboard changed during autotype.
 
 # Diagnostics are off by default; use "this run" in the TUI to enable immediately; 3 = next 3 starts, -1 = always
 # [diagnostics]

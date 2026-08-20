@@ -57,16 +57,15 @@ func isWaylandSession() bool {
 	return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
 }
 
-func pastePlatform(text string, logger *slog.Logger) error {
+func pastePlatform(text string, logger *slog.Logger, finalize func(bool) error) error {
 	if isWaylandSession() {
-		return pasteWayland(text, logger)
+		return pasteWayland(text, logger, finalize)
 	}
-	return pasteX11(text, logger)
+	return pasteX11(text, logger, finalize)
 }
 
-// On X11: sets PRIMARY + CLIPBOARD via xclip, simulates Shift+Insert, restores.
-func pasteX11(text string, logger *slog.Logger) error {
-	orig, _ := runClipboard("xclip", "-o", "-selection", "clipboard")
+// On X11: sets PRIMARY + CLIPBOARD and simulates Shift+Insert.
+func pasteX11(text string, logger *slog.Logger, finalize func(bool) error) error {
 
 	if err := pipeToCmd(text, "xclip", "-selection", "clipboard"); err != nil {
 		return fmt.Errorf("set clipboard: %w", err)
@@ -83,24 +82,30 @@ func pasteX11(text string, logger *slog.Logger) error {
 
 	time.Sleep(50 * time.Millisecond)
 	if err := simulatePaste(); err != nil {
+		if finalize != nil {
+			_ = finalize(false)
+		}
 		primaryCmd.Process.Kill()
 		primaryCmd.Wait()
 		return fmt.Errorf("simulate paste: %w", err)
 	}
 
 	time.Sleep(pasteSettleDelay)
+	if finalize != nil {
+		if err := finalize(true); err != nil {
+			primaryCmd.Process.Kill()
+			primaryCmd.Wait()
+			return err
+		}
+	}
 	primaryCmd.Process.Kill()
 	primaryCmd.Wait()
-
-	if orig != "" && orig != text {
-		pipeToCmd(orig, "xclip", "-selection", "clipboard")
-	}
 
 	logger.Debug("autotype done", "text_len", len(text))
 	return nil
 }
 
-func pasteWayland(text string, logger *slog.Logger) error {
+func pasteWayland(text string, logger *slog.Logger, finalize func(bool) error) error {
 	// 自动上屏使用前台 wl-copy，由当前调用方在目标应用完成读取后主动回收。
 	// 普通 clipboard.Set 仍使用持久剪贴板，避免改变用户主动复制的语义。
 	sensitiveArgs := buildWaylandCopyArgs(wlCopySupportsSensitive())
@@ -139,6 +144,9 @@ func pasteWayland(text string, logger *slog.Logger) error {
 	time.Sleep(50 * time.Millisecond)
 	if err := simulatePaste(); err != nil {
 		logger.Debug("wayland paste simulation failed", "error", err)
+		if finalize != nil {
+			_ = finalize(false)
+		}
 		return fmt.Errorf("simulate paste: %w", err)
 	}
 	logger.Debug("wayland paste simulation sent")
@@ -146,6 +154,11 @@ func pasteWayland(text string, logger *slog.Logger) error {
 	// 给目标应用留出读取剪贴板的时间，随后 defer 会明确回收 wl-copy。
 	time.Sleep(pasteSettleDelay)
 	logger.Debug("wayland paste settle done", "duration_ms", pasteSettleDelay.Milliseconds())
+	if finalize != nil {
+		if err := finalize(true); err != nil {
+			return err
+		}
+	}
 
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil

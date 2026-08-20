@@ -12,5 +12,13 @@ const pasteSettleDelay = 800 * time.Millisecond
 
 // Paste inserts text into the currently focused input field.
 func Paste(text string, logger *slog.Logger) error {
-	return pastePlatform(text, logger)
+	return PasteAndFinalize(text, logger, nil)
+}
+
+// PasteAndFinalize invokes finalize before platform-specific temporary clipboard
+// ownership is released. pasted reports whether the synthetic paste input was
+// sent; on success finalize runs after the settle window. finalize must not log
+// clipboard contents.
+func PasteAndFinalize(text string, logger *slog.Logger, finalize func(pasted bool) error) error {
+	return pastePlatform(text, logger, finalize)
 }

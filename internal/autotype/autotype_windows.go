@@ -23,7 +23,7 @@ const (
 	keyeventfKeyUp = 2
 )
 
-func pastePlatform(text string, logger *slog.Logger) error {
+func pastePlatform(text string, logger *slog.Logger, finalize func(bool) error) error {
 	cb, err := clipboard.New()
 	if err != nil {
 		return fmt.Errorf("clipboard: %w", err)
@@ -33,11 +33,19 @@ func pastePlatform(text string, logger *slog.Logger) error {
 	}
 	time.Sleep(50 * time.Millisecond)
 	if err := simulatePaste(); err != nil {
+		if finalize != nil {
+			_ = finalize(false)
+		}
 		return fmt.Errorf("simulate paste: %w", err)
 	}
 	// 粘贴后保留与 Linux/macOS 相同的保护窗口，等目标应用读取临时剪贴板，
 	// 避免输出层过早恢复旧内容导致丢字或粘到上一次的内容。
 	time.Sleep(pasteSettleDelay)
+	if finalize != nil {
+		if err := finalize(true); err != nil {
+			return err
+		}
+	}
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil
 }
