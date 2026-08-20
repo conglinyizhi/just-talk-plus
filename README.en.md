@@ -339,7 +339,7 @@ api_key = "sk-…"        # DASHSCOPE_API_KEY
 # language = "zh-CN"
 ```
 
-Xiaomi MiMo speech recognition (whole-recording transcription; uses the OpenAI Chat Completions + input_audio shape). Docs and pricing: [MiMo Speech Recognition](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition):
+Xiaomi MiMo speech recognition (whole-recording transcription; uses the OpenAI Chat Completions + input_audio shape). Docs: [MiMo Speech Recognition](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition); pricing: [MiMo pay-as-you-go](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go):
 
 ```toml
 [voice]

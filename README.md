@@ -335,7 +335,7 @@ api_key = "sk-…"        # DASHSCOPE_API_KEY
 # language = "zh-CN"
 ```
 
-小米 MiMo 语音识别（整段录音识别，走 OpenAI Chat Completions + input_audio 形态）。文档与价格见 [MiMo 语音识别文档](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition)：
+小米 MiMo 语音识别（整段录音识别，走 OpenAI Chat Completions + input_audio 形态）。文档见 [MiMo 语音识别文档](https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition)，价格见 [MiMo 按量付费](https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go)：
 
 ```toml
 [voice]

@@ -138,6 +138,7 @@ var engineLinks = map[string][]docLink{
 	},
 	"mimo-asr": {
 		{name: "MiMo 语音识别文档", url: "https://mimo.mi.com/docs/zh-CN/api/audio/Speech-Recognition"},
+		{name: "MiMo 按量付费价格", url: "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"},
 	},
 }
 
