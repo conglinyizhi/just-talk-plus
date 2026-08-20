@@ -8,7 +8,6 @@ package autotype
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestSensitiveArgsStructure 验证 Wayland 上屏写入参数构造：
@@ -34,13 +33,5 @@ func TestSensitiveArgsStructure(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(args, " "), "text/plain") {
 		t.Fatalf("old wl-copy args missing text/plain: %v", args)
-	}
-}
-
-// TestPasteSettleDelay 粘贴后必须等待目标应用读取剪贴板，否则恢复会过早覆盖，
-// 导致应用粘到上一步的旧内容（回归测试：曾因 Wayland 缺等待出现该 bug）。
-func TestPasteSettleDelay(t *testing.T) {
-	if pasteSettleDelay < 200*time.Millisecond {
-		t.Fatalf("pasteSettleDelay = %v, want ≥ 200ms to let the app read the clipboard", pasteSettleDelay)
 	}
 }

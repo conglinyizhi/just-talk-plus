@@ -51,9 +51,6 @@ const (
 	// commandTimeout bounds clipboard and helper subprocesses so one broken
 	// Wayland/X11 command cannot hold dispatchMu indefinitely.
 	commandTimeout = 3 * time.Second
-	// pasteSettleDelay 模拟粘贴后等待目标应用读取剪贴板的时间。
-	// 过早返回会让调用方立刻恢复剪贴板，应用实际粘到的是被还原的旧内容。
-	pasteSettleDelay = 300 * time.Millisecond
 )
 
 func isWaylandSession() bool {

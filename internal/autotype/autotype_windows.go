@@ -35,6 +35,9 @@ func pastePlatform(text string, logger *slog.Logger) error {
 	if err := simulatePaste(); err != nil {
 		return fmt.Errorf("simulate paste: %w", err)
 	}
+	// 粘贴后保留与 Linux/macOS 相同的保护窗口，等目标应用读取临时剪贴板，
+	// 避免输出层过早恢复旧内容导致丢字或粘到上一次的内容。
+	time.Sleep(pasteSettleDelay)
 	logger.Debug("autotype done", "text_len", len(text), "method", pasteMethod())
 	return nil
 }
