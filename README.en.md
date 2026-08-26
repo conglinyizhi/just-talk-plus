@@ -132,17 +132,33 @@ git push origin v0.7.0
 
 ## Usage
 
-Start the TUI:
+Start the TUI (full control panel) by default:
 
 ```bash
 just-talk-plus
 ```
 
-Run without the TUI:
+Background daemon (with the system tray):
 
 ```bash
-just-talk-plus --no-tui
+just-talk-plus --gui
 ```
+
+TUI mode (same as default, explicit):
+
+```bash
+just-talk-plus --tui
+```
+
+Config-only mode (edits the config only; no recording/services, skips the doctor check, can run alongside a daemon):
+
+```bash
+just-talk-plus --tui-config
+```
+
+> `--gui` = background daemon + tray; `--tui` = full TUI (default; registers the recording hotkey, do not run alongside the daemon); `--tui-config` = config-only editor (saving hot-reloads a running daemon).
+
+Background mode shows a system tray by default (see "System Tray" below), where you can switch the engine / device, toggle push-to-talk, view or open the log, and quit.
 
 Force a backend:
 
@@ -157,6 +173,18 @@ Windows selects its native backend automatically. Check the microphone and confi
 .\build\just-talk-plus.exe --doctor
 ```
 
+### systemd autostart (Linux)
+
+Run the background service via systemd --user for autostart and journal logging:
+
+```bash
+just-talk-plus --install-systemd    # install & enable the unit (runs --gui, logs to journald)
+systemctl --user start just-talk-plus   # start now
+journalctl --user -u just-talk-plus -f  # view logs
+```
+
+The generated unit runs `just-talk-plus --gui` with `StandardOutput/Error=journal`; the daemon detects the systemd environment (`INVOCATION_ID`) and writes logs to stderr only (taken over by journald) instead of a file. For autostart without a login session: `loginctl enable-linger $USER`.
+
 ### Using an Android Phone as a Microphone
 
 This project only provides the built-in TCP server on the PC side; the phone needs the official AndroidMic APK to connect.
@@ -170,7 +198,7 @@ For a fast development loop, use Air hot reload (install `air` first):
 ```bash
 go install github.com/air-verse/air@latest
 make dev
-make dev ARGS="--no-tui --verbose"
+make dev ARGS="--gui --verbose"
 ```
 
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
@@ -254,6 +282,21 @@ push_to_talk = "Option+Command"
 ```
 
 On Windows, `Win` and `Super` both refer to the Windows logo key. If recording is unavailable, allow desktop applications to access the microphone under Windows Settings > Privacy & security > Microphone.
+
+### System Tray (Background Control Panel)
+
+`--gui` runs a window-less daemon that shows a system tray / menu bar icon by default — a persistent control surface that does not occupy a terminal. From the tray you can switch the ASR engine, switch the microphone device, toggle push-to-talk, control the Android virtual microphone server, view/open the log, and quit. The recording status is shown by the tray icon color (idle=grey, recording=red, stopping=amber, error=dark red); the tooltip shows the current engine and mode. History and the microphone spectrum still need the full terminal panel: `just-talk-plus --tui`.
+
+```toml
+[tray]
+enabled = true                   # turn off to disable the tray in background mode
+# cycle_engine_hotkey = "Alt+F9"    # optional: global hotkey to cycle the ASR engine
+# toggle_push_to_talk_hotkey = "Alt+F8" # optional: global hotkey to toggle push-to-talk / toggle
+```
+
+- The tray is only active in background mode (`just-talk-plus --gui` / default daemon); the full TUI (default/`--tui`) registers the recording hotkey and must not run alongside the daemon; `--tui-config` is config-only and can run alongside.
+- Global hotkeys follow the same key constraints as the voice hotkey (see above); leave empty to disable. If one collides with the recording hotkey, registration fails and is logged without affecting the daemon.
+- The `Android virtual microphone` submenu can start/stop the built-in server, toggle auto-start (`androidmic_auto_start`), or set the current input to the phone (`device = "androidmic"`).
 
 ### Speech Engines
 

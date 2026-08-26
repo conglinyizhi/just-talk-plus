@@ -31,7 +31,7 @@ CGO_ENABLED=1 go build -o build/just-talk-plus ./cmd/just-talk-plus
 go build -o build/just-talk-plus.exe ./cmd/just-talk-plus   # Windows
 ```
 
-Runtime: `just-talk-plus` (TUI default), `--no-tui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_PLUS_BACKEND`); `mock` is provider-testing only.
+Runtime: `just-talk-plus` (TUI default), `--gui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_PLUS_BACKEND`); `mock` is provider-testing only.
 
 Never add or keep non-cgo macOS fallback builds: a build that compiles but lacks native hotkeys/recording/clipboard/auto-submit/overlay is worse than a failed build.
 

@@ -10,6 +10,18 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 新增系统托盘后台控制面：`--gui` 后台模式默认挂系统托盘（`energye/systray`），可从托盘切换识别引擎 / 麦克风设备、开关 push-to-talk（hold/toggle）、控制 Android 虚拟麦克风服务端、查看或打开日志、退出；录音状态用托盘图标颜色提示（待机/录音中/停止中/错误）。`[tray]` 下可配 `enabled` 与可选全局热键 `cycle_engine_hotkey`、`toggle_push_to_talk_hotkey`。Windows 走纯 Go `Shell_NotifyIconW`（保持 `CGO_ENABLED=0`），Linux/Wayland 走 D-Bus StatusNotifierItem；菜单项仅在状态变化时刷新，避免 KDE 打开菜单时被每秒重绘闪烁。历史与频谱等重度交互仍保留 `just-talk-plus --tui` 完整终端面板兜底。
+
+- 日志梳理与桌面层补强：daemon（`--gui`）模式不再把实时识别文本逐字打到 stdout（避免刷屏）；调试插件的热键事件从裸 `fmt.Printf` 改为走 slog（带时间戳与结构化字段）；托盘「完整设置」点击改为弹桌面提示框（kdialog / notify-send）；Android 虚拟麦克风状态会探测端口实际监听，可区分本进程运行 / 端口被其它进程占用 / 未运行。
+
+- **`--tui-config` 新增配置模式（config-only，breaking）**：只编辑配置，不录音、不注册热键、不启动服务（含 Android 虚拟麦克风监听），跳过 doctor 健康检查；保存写配置文件，正在运行的 daemon 通过 WatchConfig 热重载，可与后台 daemon 并行。运行时面板（历史/频谱/录音调试等）在配置模式下显示占位提示；`--tui` 与默认一致，仍为完整 TUI（默认启动）。
+
+- **命令行**：后台 daemon 模式的 flag 由 `--no-tui` 更名为 `--gui`；新增 `--tui-config`（纯配置模式，不录音/不开服务，跳过 doctor 检查，保存后 daemon 自动热重载）；`--tui` 与默认一致，仍为完整 TUI（默认启动）。
+
+- **Linux systemd --user 集成**：`--install-systemd` 生成用户级 unit（运行 `just-talk-plus --gui`，开机自启 + journal 日志接管）；daemon 在 systemd 服务（`INVOCATION_ID`）下日志只走 stderr 交给 journald，不再写 /tmp 文件。
+
+- 托盘补强：设备菜单新增「虚拟麦克风（AndroidMic）」可选项；「按住说话」菜单项去掉英文前缀；新增「历史记录」菜单，每条记录挂子菜单（播放录音 / 复制识别文本 / 复制报错 ID / 在文件管理器中显示）；桌面提示框跨平台（Linux kdialog / notify-send、Windows PowerShell MessageBox、macOS osascript）。
+
 - 剪贴板恢复改为安全快照：自动上屏仅恢复受支持的纯文本、HTML、PNG 数据；检测到外部剪贴板变化、文件列表、私有格式、超大内容或 Linux 多 MIME 内容时跳过恢复，不再把图片等二进制数据作为文本写回。Wayland 的真实剪贴板测试改为显式 opt-in，默认不污染用户剪贴板。
 
 - 自动上屏统一粘贴后保护窗口：X11/Wayland/Windows/macOS 在模拟粘贴输入成功发送后都保留 800ms settle 等待，给目标应用留出读取临时剪贴板的时间，再由输出层恢复/回收剪贴板，降低丢字或粘到旧剪贴板内容的概率（保护窗口为尽力而为，不承诺跨应用确认，实际恢复时机仍取决于目标应用读取速度）。

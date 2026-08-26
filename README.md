@@ -128,17 +128,33 @@ git push origin v0.7.0
 
 ## 使用
 
-默认启动 TUI：
+默认启动 TUI（完整控制面板）：
 
 ```bash
 just-talk-plus
 ```
 
-后台模式：
+后台 daemon（挂系统托盘）：
 
 ```bash
-just-talk-plus --no-tui
+just-talk-plus --gui
 ```
+
+TUI 模式（等价默认，显式指定）：
+
+```bash
+just-talk-plus --tui
+```
+
+配置模式（仅编辑配置，不录音/不开服务，跳过医生检查，可与后台 daemon 并行）：
+
+```bash
+just-talk-plus --tui-config
+```
+
+> `--gui` = 后台 daemon + 托盘；`--tui` = 完整 TUI（默认，会注册录音热键，勿与 daemon 并行）；`--tui-config` = 纯配置编辑器（保存后 daemon 自动热重载）。
+
+后台模式默认挂系统托盘（见下方「系统托盘」），切换引擎 / 设备、开关 push-to-talk、查看或打开日志、退出都可从托盘图标完成。
 
 指定后端：
 
@@ -153,6 +169,19 @@ Windows 不需要指定后端。首次使用前可检查麦克风和配置：
 .\build\just-talk-plus.exe --doctor
 ```
 
+### systemd 开机自启（Linux）
+
+后台服务可由 systemd --user 托管，实现开机自启与日志接管（journald）：
+
+```bash
+just-talk-plus --install-systemd    # 生成并启用 unit（运行 --gui，日志走 journald）
+systemctl --user start just-talk-plus   # 立即启动
+journalctl --user -u just-talk-plus -f  # 查看日志
+```
+
+- 生成的服务运行 `just-talk-plus --gui`，`StandardOutput/Error=journal`；daemon 识别到 systemd 环境（`INVOCATION_ID`）后日志只走 stderr 交给 journald，不再写 `/tmp` 文件。
+- 系统未登录也开机自启：`loginctl enable-linger $USER`。
+
 ### 使用 Android 手机作为麦克风
 
 PC 端（本项目）只提供内嵌的 TCP 服务端；手机端需要安装 AndroidMic 官方 APK 才能连接。
@@ -166,7 +195,7 @@ PC 端（本项目）只提供内嵌的 TCP 服务端；手机端需要安装 An
 ```bash
 go install github.com/air-verse/air@latest
 make dev
-make dev ARGS="--no-tui --verbose"
+make dev ARGS="--gui --verbose"
 ```
 
 代码或配置变更后会自动重新构建并重启调试 CLI，临时二进制位于 `tmp/`。
@@ -250,6 +279,21 @@ push_to_talk = "Option+Command"
 ```
 
 Windows 使用 `Win` 或 `Super` 表示 Windows 徽标键。如果麦克风不可用，请在“Windows 设置 → 隐私和安全性 → 麦克风”中允许桌面应用访问麦克风。
+
+### 系统托盘（后台控制面板）
+
+`--gui` 零窗口后台 daemon 默认挂系统托盘/菜单栏图标，用于不占终端窗口的常驻控制：切换识别引擎、切换麦克风设备、开关 push-to-talk、控制 Android 虚拟麦克风服务端、查看或打开日志，以及退出。录音状态用托盘图标颜色提示（待机=灰、录音中=红、停止中=黄、错误=深红），悬停 tooltip 显示当前引擎与模式。历史记录与麦克风频谱等重度交互托盘装不下，保留 `just-talk-plus --tui` 完整终端面板兜底。
+
+```toml
+[tray]
+enabled = true                   # 关掉则后台不挂托盘
+# cycle_engine_hotkey = "Alt+F9"     # 可选：全局热键循环切换识别引擎
+# toggle_push_to_talk_hotkey = "Alt+F8"  # 可选：全局热键切换 push-to-talk / toggle
+```
+
+- 托盘仅在后台模式（`just-talk-plus --gui` / 默认后台）生效；完整 TUI（默认/`--tui`）会注册录音热键，勿与后台 daemon 并行；`--tui-config` 是配置模式，可与 daemon 并行。
+- 全局热键受与语音热键相同的按键约束（见上方「推荐热键配置」），留空即禁用；如与录音热键冲突，注册会失败并记录日志，不影响 daemon。
+- `Android 虚拟麦克风` 子菜单可启动/停止内嵌服务端、开关自动启用（`androidmic_auto_start`）、或一键把当前输入设为手机（`device = "androidmic"`）。
 
 ### 语音引擎
 
