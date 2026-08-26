@@ -20,6 +20,7 @@ import (
 	"github.com/conglinyizhi/just-talk-plus/internal/tui"
 	"github.com/conglinyizhi/just-talk-plus/plugins"
 	"github.com/conglinyizhi/just-talk-plus/plugins/overlay"
+	"github.com/conglinyizhi/just-talk-plus/plugins/tray"
 	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
@@ -29,10 +30,12 @@ func main() {
 	debug := flag.Bool("debug", false, "enable debug plugin")
 	verbose := flag.Bool("verbose", false, "verbose logging")
 	diagnostics := flag.Bool("diagnostics", false, "collect bounded in-memory diagnostics for this run")
-	useTUI := flag.Bool("tui", true, "run with terminal UI")
-	noTUI := flag.Bool("no-tui", false, "run without terminal UI")
+	useTUI := flag.Bool("tui", true, "run with terminal UI (default)")
+	gui := flag.Bool("gui", false, "run as background daemon with system tray")
+	tuiConfig := flag.Bool("tui-config", false, "run as config-only terminal editor (no recording/services)")
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
 	installOnly := flag.Bool("install", false, "install just-talk-plus for the current user")
+	systemdInstall := flag.Bool("install-systemd", false, "install a systemd --user unit for autostart + journal logging (Linux)")
 	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
 	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
 	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
@@ -44,6 +47,13 @@ func main() {
 		}
 		return
 	}
+	if *systemdInstall {
+		if err := installSystemdUser(); err != nil {
+			fmt.Fprintf(os.Stderr, "systemd install failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *overlayHelper {
 		if err := overlay.RunHelper(*overlayPosition, *overlayScale, os.Stdin); err != nil {
 			fmt.Fprintf(os.Stderr, "overlay helper error: %v\n", err)
@@ -51,7 +61,7 @@ func main() {
 		}
 		return
 	}
-	if *noTUI {
+	if *gui {
 		*useTUI = false
 	}
 
@@ -93,6 +103,11 @@ func main() {
 		} else {
 			logWriter = memoryLogs
 		}
+	} else if os.Getenv("INVOCATION_ID") != "" {
+		// Under a systemd --user service, systemd captures stdout/stderr into
+		// the journal; keep only stderr so logs are taken over by journald and
+		// not duplicated into a file.
+		logWriter = io.MultiWriter(os.Stderr, memoryLogs)
 	} else {
 		writers := []io.Writer{os.Stderr, memoryLogs}
 		if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -111,6 +126,15 @@ func main() {
 	}
 	if *backend != "" {
 		os.Setenv("JUST_TALK_PLUS_BACKEND", *backend)
+	}
+
+	// config-only terminal editor: no recording, no hotkeys, no services — it
+	// only edits the config file (a running daemon picks that up via
+	// WatchConfig). So it must NOT require a healthy doctor or a provider, and
+	// must not load the voice/overlay/tray plugins.
+	if *tuiConfig {
+		runConfigOnlyTUI(cfg, loadedConfigPath, *debug, memoryLogs, *verbose, &logLevel)
+		return
 	}
 
 	report := doctor.Run(cfg, *backend)
@@ -137,6 +161,12 @@ func main() {
 	}
 	eng.LoadPlugin(voice.NewVoicePlugin())
 	eng.LoadPlugin(overlay.NewOverlayPlugin())
+	// The system tray control surface is only meaningful for the window-less
+	// daemon. In TUI mode the terminal UI already owns the controls, and
+	// running the two concurrently would fight over the global hotkeys.
+	if !*useTUI && cfg.Tray.Enabled {
+		eng.LoadPlugin(tray.NewPlugin(loadedConfigPath))
+	}
 	if p := config.FindConfig(); p != "" {
 		eng.WatchConfig(p)
 	}
@@ -145,14 +175,6 @@ func main() {
 		runTUI(eng, cfg, *debug, memoryLogs, *verbose, &logLevel)
 	} else {
 		runDaemon(eng)
-	}
-}
-
-func runDaemon(eng *engine.Engine) {
-	slog.Info("just-talk-plus started — press hotkeys, Ctrl+C to quit")
-	if err := eng.Start(true); err != nil && err != context.Canceled {
-		slog.Error("engine exited with error", "error", err)
-		os.Exit(1)
 	}
 }
 
@@ -184,6 +206,51 @@ func runTUI(eng *engine.Engine, cfg *config.Config, debug bool, memoryLogs *diag
 		os.Exit(1)
 	}
 	eng.Stop()
+}
+
+func runDaemon(eng *engine.Engine) {
+	// The daemon is a background window-less process: live per-word recognition
+	// text has nothing useful to do on the console (it would spam it on every
+	// word) and the status lives on the tray icon / in the slog file. Route the
+	// voice live-output away so it cannot flood stdout.
+	voice.SetOutput(io.Discard)
+	slog.Info("just-talk-plus started — press hotkeys, Ctrl+C to quit")
+	if err := eng.Start(true); err != nil && err != context.Canceled {
+		slog.Error("engine exited with error", "error", err)
+		os.Exit(1)
+	}
+}
+
+func runConfigOnlyTUI(cfg *config.Config, cfgPath string, debug bool, memoryLogs *diag.MemoryBuffer, verbose bool, logLevel *slog.LevelVar) {
+	// The config editor never starts the engine (no hotkeys, no recording, no
+	// services). Saving writes the config file; a running daemon picks it up via
+	// WatchConfig, otherwise the next daemon start reads it.
+	voice.SetupTUILog()
+	voice.SetOutput(io.Discard)
+	model := tui.New(cfg)
+	model.SetConfigOnly(true)
+	model.SetDebug(debug)
+	model.SetDiagnostics(memoryLogs)
+	model.OnDiagnosticsChange = func(enabled bool) {
+		memoryLogs.SetEnabled(enabled)
+		if enabled {
+			logLevel.Set(slog.LevelDebug)
+			slog.Info("diagnostics enabled for current run", "memory_limit_bytes", 512*1024)
+		} else if !verbose {
+			logLevel.Set(slog.LevelInfo)
+		}
+	}
+	model.OnSave = func(c *config.Config) error {
+		if cfgPath == "" {
+			cfgPath = config.FindConfig()
+		}
+		return config.SaveTo(cfgPath, c)
+	}
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func createProvider(backend string) (hotkey.Provider, error) {
