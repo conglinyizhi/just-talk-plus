@@ -100,16 +100,16 @@ func readWAV(path string) (pcm []byte, sampleRate int, err error) {
 }
 
 type speechFeatures struct {
-	durationMs   int
+	durationMs    int
 	noiseFloorRMS float64 // 底噪估计（静音块 RMS 中位）
-	speechRMS    float64  // 说话块 RMS 中位
-	speechPeak   float64  // 说话块峰值 P90
-	peakMax      float64  // 全程峰值最大值（接近 1 说明削波风险）
-	gapsMs       []int    // 停顿（≥400ms 静音段）时长
-	gapMedianMs  int
-	gapP90Ms     int
-	speechRatio  float64 // 说话时长占比 0..1
-	chunkCount   int
+	speechRMS     float64 // 说话块 RMS 中位
+	speechPeak    float64 // 说话块峰值 P90
+	peakMax       float64 // 全程峰值最大值（接近 1 说明削波风险）
+	gapsMs        []int   // 停顿（≥400ms 静音段）时长
+	gapMedianMs   int
+	gapP90Ms      int
+	speechRatio   float64 // 说话时长占比 0..1
+	chunkCount    int
 }
 
 // analyzeSpeechFeatures 把 PCM 按 diagnoseChunkMs 分块，用 RMS 序列做

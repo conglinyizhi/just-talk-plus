@@ -113,15 +113,15 @@ func TestAnalyzeSpeechFeatures(t *testing.T) {
 func TestBuildDiagnosticReport(t *testing.T) {
 	vc := config.Default().Voice
 	f := speechFeatures{
-		durationMs:   5000,
+		durationMs:    5000,
 		noiseFloorRMS: 0.012,
-		speechRMS:    0.2,
-		gapsMs:       []int{400, 600, 1000},
-		gapMedianMs:  600,
-		gapP90Ms:     1000,
-		speechPeak:   0.5,
-		speechRatio:  0.6,
-		chunkCount:   25,
+		speechRMS:     0.2,
+		gapsMs:        []int{400, 600, 1000},
+		gapMedianMs:   600,
+		gapP90Ms:      1000,
+		speechPeak:    0.5,
+		speechRatio:   0.6,
+		chunkCount:    25,
 	}
 	report := buildDiagnosticReport("/tmp/x.wav", f, vc)
 	for _, want := range []string{

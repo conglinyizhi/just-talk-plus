@@ -73,7 +73,7 @@ func TestVoiceActivityLocked(t *testing.T) {
 			t.Fatal("peak below t*3 should not count")
 		}
 		if !p.voiceActivityLocked(0.02, 0.4) {
-		t.Fatal("peak above t*3 should count")
+			t.Fatal("peak above t*3 should count")
 		}
 	})
 	t.Run("no deadband keeps original", func(t *testing.T) {
