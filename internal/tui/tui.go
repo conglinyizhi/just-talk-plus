@@ -30,14 +30,15 @@ import (
 )
 
 var (
-	tStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	lStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	vStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	aStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	wStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-	eStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	dStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	hStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	tStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	configTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")) // 黄
+	lStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	vStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	aStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
+	wStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	eStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	dStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	hStyle           = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	// 麦克风调试电平条：条体按位置分绿/黄/红三区，填充为当前电平高亮。
 	barFill = [3]lipgloss.Style{
@@ -239,6 +240,7 @@ type Model struct {
 	historyMenu             *historyMenuState
 	androidPanel            bool // Android 虚拟麦克风服务端管理面板
 	noiseCalibrationVersion uint64
+	configOnly              bool // 配置模式：不录音/不开服务，只编辑配置
 }
 
 func New(cfg *config.Config) *Model {
@@ -495,6 +497,36 @@ func (m *Model) currentEngine() string {
 
 func (m *Model) SetDebug(debug bool) { m.debug = debug }
 
+// SetConfigOnly marks the model as a config-only editor: it does not record,
+// register hotkeys, or run services. Runtime panels show a note instead.
+func (m *Model) SetConfigOnly(b bool) {
+	m.configOnly = b
+	if !b {
+		return
+	}
+	// 配置模式下运行时开关/动作不生效——对相关字段的说明追加一句，并对
+	// 运行时动作项加 🚫 前缀，明确提示不可用。
+	runDisabled := map[string]bool{
+		"androidmic_panel": true,
+		"mic_test":         true,
+		"noise_calibrate":  true,
+		"diagnose":         true,
+	}
+	for tab, fields := range m.tabField {
+		for i := range fields {
+			f := &m.tabField[tab][i]
+			if runDisabled[f.key] {
+				f.label = "🚫 " + f.label
+				f.help = strings.TrimRight(f.help, " ") + "；配置模式下始终不开启"
+				continue
+			}
+			if f.key == "enabled" {
+				f.help = strings.TrimRight(f.help, " ") + "；配置模式下始终不开启"
+			}
+		}
+	}
+}
+
 func (m *Model) SetDiagnostics(logs *diag.MemoryBuffer) { m.diagnostics = logs }
 
 func (m *Model) Init() tea.Cmd { return tea.Batch(fetchDevices(), tea.EnterAltScreen, tickRefresh()) }
@@ -716,6 +748,13 @@ func (m *Model) switchTab(t tabID) {
 
 // triggerAction 处理 fAction 入口：打开对应弹层/面板。
 func (m *Model) triggerAction(key string) {
+	if m.configOnly {
+		switch key {
+		case "androidmic_panel", "mic_test", "noise_calibrate", "diagnose":
+			m.logf("ⓘ 配置模式不提供该运行时功能（请运行 daemon 或使用托盘）：%s", key)
+			return
+		}
+	}
 	switch key {
 	case "engine":
 		m.openEnginePicker()
@@ -1025,7 +1064,13 @@ func (m *Model) helpLine() string {
 // renderBase 渲染主界面（不含模态弹层与底部帮助行）。
 func (m *Model) renderBase() string {
 	var b strings.Builder
-	b.WriteString(tStyle.Render("🎙️ 🗣️ Just Talk Plus") + "\n")
+	titleText := "🎙️ 🗣️ Just Talk Plus"
+	titleStyle := tStyle
+	if m.configOnly {
+		titleText = "🎙️ 🗣️ Just Talk Plus - Config Mode (配置模式)"
+		titleStyle = configTitleStyle
+	}
+	b.WriteString(titleStyle.Render(titleText) + "\n")
 	b.WriteString(m.tabBar() + "\n")
 	b.WriteString(lStyle.Render("── 状态 ──") + "\n")
 	b.WriteString("  " + m.renderVoiceStatus() + "\n")
@@ -1195,6 +1240,9 @@ func historyWindow(hist []voice.HistoryEntry, cursor, maxRows int) (start, end i
 // renderHistory 渲染历史 tab：以光标为中心的滚动窗口，超出窗口的部分
 // 用 ▲/▼ 指示器提示，保证光标条目始终可见且列表跟随光标滚动。
 func (m *Model) renderHistory(rows int) string {
+	if m.configOnly {
+		return m.renderConfigOnlyNote("历史记录在配置模式下不提供，请运行 daemon 或使用托盘查看。")
+	}
 	hist := voice.History()
 	if len(hist) == 0 {
 		return m.renderHistoryEmpty()
@@ -1293,6 +1341,10 @@ func (m *Model) renderHistoryMenu() string {
 }
 
 // renderHistoryEmpty 历史为空时的提示：说明运行期滚动保存方式。
+func (m *Model) renderConfigOnlyNote(note string) string {
+	return "\n\n  " + dStyle.Render(note) + "\n\n  配置模式仅用于编辑配置，运行时功能由 daemon / 托盘提供。\n"
+}
+
 func (m *Model) renderHistoryEmpty() string {
 	msg := strings.Join([]string{
 		"  暂无识别结果",
@@ -1367,6 +1419,9 @@ func (m *Model) tabBar() string {
 }
 
 func (m *Model) renderVoiceStats() string {
+	if m.configOnly {
+		return dStyle.Render("想录音或连手机：关掉本窗口，按平时方式打开软件")
+	}
 	stats := voice.TUIStats()
 	cpm := 0.0
 	if stats.AudioDuration > 0 {
@@ -1389,6 +1444,9 @@ func (m *Model) renderVoiceStats() string {
 }
 
 func (m *Model) renderVoiceStatus() string {
+	if m.configOnly {
+		return dStyle.Render("配置模式：只改设置，不监听按键、不连接手机麦克风")
+	}
 	status := voice.TUIStatus()
 	label := "待机"
 	style := dStyle
@@ -2011,6 +2069,9 @@ func (m *Model) switchPanelDevice(dir int) {
 }
 
 func (m *Model) renderMicPanel() string {
+	if m.configOnly {
+		return m.renderConfigOnlyNote("麦克风调试在配置模式下不提供，请运行 daemon 或使用托盘。")
+	}
 	lvl := voice.MicTestLevel()
 	width := 84
 	if m.w > 0 && width > m.w-4 {
@@ -2249,6 +2310,9 @@ func localIPv4Addrs() []string {
 
 // renderAndroidPanel 渲染 AndroidMic 服务端管理面板（模态）。
 func (m *Model) renderAndroidPanel() string {
+	if m.configOnly {
+		return m.renderConfigOnlyNote("Android 虚拟麦克风服务端在配置模式下不提供，请运行 daemon 或使用托盘。")
+	}
 	st := voice.AndroidMicStatus()
 	width := 84
 	if m.w > 0 && width > m.w-4 {

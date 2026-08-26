@@ -65,6 +65,48 @@ func readyModel(cfg *config.Config) *Model {
 
 // ---- 字段分组 ----
 
+func TestConfigOnlyPanels(t *testing.T) {
+	m := New(config.Default())
+	m.SetConfigOnly(true)
+	// 配置模式下，运行时面板/状态栏均应显示占位提示，不触碰录制运行时。
+	if got := m.renderVoiceStatus(); !strings.Contains(got, "配置模式") {
+		t.Errorf("renderVoiceStatus = %q, want 配置模式 note", got)
+	}
+	if got := m.renderVoiceStats(); !strings.Contains(got, "想录音或连手机") {
+		t.Errorf("renderVoiceStats = %q, want 想录音或连手机 note", got)
+	}
+	for name, fn := range map[string]func() string{
+		"renderMicPanel":     m.renderMicPanel,
+		"renderAndroidPanel": m.renderAndroidPanel,
+	} {
+		if got := fn(); !strings.Contains(got, "配置模式") {
+			t.Errorf("%s = %q, want 配置模式 note", name, got)
+		}
+	}
+	// 历史 tab 也应在配置模式下返回占位。
+	if got := m.renderHistory(20); !strings.Contains(got, "配置模式") {
+		t.Errorf("renderHistory = %q, want 配置模式 note", got)
+	}
+	// 配置模式下，语音输入开关的说明应注明其不生效。
+	for _, f := range m.tabField[tabGeneral] {
+		if f.key == "enabled" && !strings.Contains(f.help, "配置模式下始终不开启") {
+			t.Errorf("enabled help = %q, want 配置模式下始终不开启", f.help)
+		}
+	}
+	// 配置模式下，运行时动作字段应加 🚫 前缀并注明不生效。
+	for _, f := range m.tabField[tabMic] {
+		switch f.key {
+		case "androidmic_panel", "mic_test", "noise_calibrate", "diagnose":
+			if !strings.Contains(f.label, "🚫") {
+				t.Errorf("%s label = %q, want 🚫 prefix", f.key, f.label)
+			}
+			if !strings.Contains(f.help, "配置模式下始终不开启") {
+				t.Errorf("%s help = %q, want 配置模式下始终不开启", f.key, f.help)
+			}
+		}
+	}
+}
+
 func TestBuildTabFields(t *testing.T) {
 	m := New(config.Default())
 
