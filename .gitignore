@@ -20,3 +20,6 @@ config.toml
 # Editor and OS noise
 .DS_Store
 Thumbs.db
+
+# Go build cache (local, not part of the repo)
+/.gocache/

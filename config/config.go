@@ -22,6 +22,7 @@ type Config struct {
 	Debug       DebugConfig       `toml:"debug"`
 	Diagnostics DiagnosticsConfig `toml:"diagnostics"`
 	Overlay     OverlayConfig     `toml:"overlay"`
+	Tray        TrayConfig        `toml:"tray"`
 }
 
 type DebugConfig struct {
@@ -58,6 +59,29 @@ type OverlayConfig struct {
 	Position    string  `toml:"position"`
 	IdleVisible bool    `toml:"idle_visible"`
 	Scale       float64 `toml:"scale"`
+}
+
+// TrayConfig controls the system tray/menu bar control surface.
+// When enabled (and running without the terminal UI), just-talk-plus shows
+// a tray icon so the daemon can be controlled without occupying a console
+// window: switch ASR engine, pick the microphone device, toggle push-to-talk,
+// open logs/diagnostics, and quit.
+//
+// It is only used in background (--gui) mode; the full terminal UI
+// (just-talk-plus --tui) keeps its own in-window controls.
+type TrayConfig struct {
+	Enabled bool `toml:"enabled"`
+
+	// CycleEngineHotkey is an optional global hotkey that cycles the ASR
+	// engine (doubao-stream -> auralwise -> ... -> back to the first). Empty
+	// disables it. Only takes effect in background (--gui) mode; it must
+	// not collide with the recording hotkey.
+	CycleEngineHotkey string `toml:"cycle_engine_hotkey"`
+
+	// TogglePushToTalkHotkey is an optional global hotkey that switches the
+	// recording behaviour between push-to-talk (hold) and toggle. Empty
+	// disables it.
+	TogglePushToTalkHotkey string `toml:"toggle_push_to_talk_hotkey"`
 }
 
 type VoiceConfig struct {
@@ -174,6 +198,9 @@ func Default() *Config {
 		},
 		Overlay: OverlayConfig{
 			Enabled: true, Position: "bottom-center", IdleVisible: false, Scale: 1.0,
+		},
+		Tray: TrayConfig{
+			Enabled: true,
 		},
 	}
 }
