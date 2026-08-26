@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/conglinyizhi/just-talk-plus/config"
@@ -77,8 +76,8 @@ func (p *DebugPlugin) registerFromConfig(cfg *config.Config) error {
 
 		c := combo // capture
 		cb := func(evt hotkey.Event) {
-			fmt.Printf("🔔 HOTKEY: %-40s | Type: %-8s | Time: %s\n",
-				evt.Combo, evt.Type, evt.Time.Format("15:04:05.000"))
+			p.logger.Debug("debug: hotkey event",
+				"combo", evt.Combo, "type", evt.Type, "time", evt.Time.Format("15:04:05.000"))
 		}
 
 		if err := p.env.RegisterHotkey(c, cb); err != nil {
