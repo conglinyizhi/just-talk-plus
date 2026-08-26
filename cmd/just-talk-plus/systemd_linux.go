@@ -26,8 +26,11 @@ func installSystemdUser() error {
 		return fmt.Errorf("systemctl 不可用（请确认系统使用 systemd）：%w", err)
 	}
 	out, err := exec.Command("systemctl", "--user", "is-system-running").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemd --user 不可用（%s）：%w", strings.TrimSpace(string(out)), err)
+	state := strings.TrimSpace(string(out))
+	// is-system-running 对 degraded / starting / maintenance 返回非零，但
+	// user manager 仍在运行；只有明确 "off"（manager 未启动）才视为不可用。
+	if err != nil && (state == "off" || state == "") {
+		return fmt.Errorf("systemd --user 不可用（%s）：%w", state, err)
 	}
 
 	exe, err := os.Executable()
