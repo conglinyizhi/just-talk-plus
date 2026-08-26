@@ -79,6 +79,7 @@ type Plugin struct {
 
 	openFull       *systray.MenuItem
 	openConfigItem *systray.MenuItem
+	restartItem    *systray.MenuItem
 	quitItem       *systray.MenuItem
 }
 
@@ -216,6 +217,9 @@ func (p *Plugin) onReady() {
 
 	p.openConfigItem = systray.AddMenuItem("在终端打开配置模式", "唤醒一个终端运行 just-talk-plus --tui-config")
 	p.openConfigItem.Click(func() { p.openConfigTerminal() })
+
+	p.restartItem = systray.AddMenuItem("重启", "重新启动当前版本，不重启 systemd 用户服务")
+	p.restartItem.Click(func() { p.restart() })
 
 	p.quitItem = systray.AddMenuItem("退出", "退出 just-talk-plus")
 	p.quitItem.Click(func() { go p.env.Engine().Stop() })
@@ -649,6 +653,28 @@ func dotIcon(c color.RGBA) []byte {
 	var buf bytes.Buffer
 	_ = png.Encode(&buf, img)
 	return buf.Bytes()
+}
+
+func (p *Plugin) restart() {
+	exe, err := os.Executable()
+	if err != nil {
+		p.logger.Error("tray: 定位重启程序失败", "error", err)
+		go notifyMessage("重启失败", "无法定位当前程序")
+		return
+	}
+	args := append([]string(nil), os.Args[1:]...)
+	p.logger.Info("tray: 重启程序")
+	go func() {
+		p.env.Engine().Stop()
+		p.env.Engine().Wait()
+		if err := restartCurrentProcess(exe, args); err != nil {
+			p.logger.Error("tray: 重启程序失败", "error", err)
+			return
+		}
+		// Unix replaces this process inside restartCurrentProcess. On Windows
+		// the replacement is a child, so the old process must exit explicitly.
+		os.Exit(0)
+	}()
 }
 
 func (p *Plugin) openConfigTerminal() {

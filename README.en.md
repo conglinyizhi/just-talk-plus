@@ -158,7 +158,7 @@ just-talk-plus --tui-config
 
 > `--gui` = background daemon + tray; `--tui` = full TUI (default; registers the recording hotkey, do not run alongside the daemon); `--tui-config` = config-only editor (saving hot-reloads a running daemon).
 
-Background mode shows a system tray by default (see "System Tray" below), where you can switch the engine / device, toggle push-to-talk, view or open the log, and quit.
+Background mode shows a system tray by default (see "System Tray" below), where you can switch the engine / device, toggle push-to-talk, view or open the log, restart the current process, and quit.
 
 Force a backend:
 
@@ -285,7 +285,7 @@ On Windows, `Win` and `Super` both refer to the Windows logo key. If recording i
 
 ### System Tray (Background Control Panel)
 
-`--gui` runs a window-less daemon that shows a system tray / menu bar icon by default — a persistent control surface that does not occupy a terminal. From the tray you can switch the ASR engine, switch the microphone device, toggle push-to-talk, control the Android virtual microphone server, view/open the log, and quit. The recording status is shown by the tray icon color (idle=grey, recording=red, stopping=amber, error=dark red); the tooltip shows the current engine and mode. History and the microphone spectrum still need the full terminal panel: `just-talk-plus --tui`.
+`--gui` runs a window-less daemon that shows a system tray / menu bar icon by default — a persistent control surface that does not occupy a terminal. From the tray you can switch the ASR engine, switch the microphone device, toggle push-to-talk, control the Android virtual microphone server, view/open the log, restart the current process, and quit. The tray's `Restart` action reloads the current process without calling `systemctl --user restart`, so a newly built version can be activated from the tray during development. The recording status is shown by the tray icon color (idle=grey, recording=red, stopping=amber, error=dark red); the tooltip shows the current engine and mode. History and the microphone spectrum still need the full terminal panel: `just-talk-plus --tui`.
 
 ```toml
 [tray]
