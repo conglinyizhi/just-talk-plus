@@ -113,11 +113,16 @@ func (p *Plugin) sync(status voice.TUIVoiceStatus) {
 func displayForStatus(status voice.TUIVoiceStatus, idleVisible bool) (string, statusColor, bool) {
 	switch status.State {
 	case "connecting":
+		if status.VoiceDetected {
+			return captureASRLabel(status), statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
+		}
 		return captureASRLabel(status), statusColor{R: 245 << 8, G: 190 << 8, B: 70 << 8}, true
 	case "recording":
 		return captureASRLabel(status), statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	case "stopping_delayed":
 		return stopDelayLabel(status), statusColor{R: 255 << 8, G: 140 << 8, B: 60 << 8}, true
+	case "waiting_asr":
+		return "WAIT ASR", statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}, true
 	case "stopping":
 		return "ASR WAIT", statusColor{R: 255 << 8, G: 160 << 8, B: 70 << 8}, true
 	case "error":
@@ -132,6 +137,9 @@ func captureASRLabel(status voice.TUIVoiceStatus) string {
 		return "MIC ON  ASR ON"
 	}
 	if status.RecorderReady {
+		if status.VoiceDetected {
+			return "MIC ON  ASR ->"
+		}
 		return "MIC ON  ASR .."
 	}
 	return "MIC ..  ASR .."

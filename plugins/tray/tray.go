@@ -196,6 +196,9 @@ func (p *Plugin) onReady() {
 	p.androidMenu.AddSubMenuItem("设为当前输入设备", "device=androidmic").Click(func() {
 		p.setDevice(voice.AndroidMicDeviceName())
 	})
+	p.androidMenu.AddSubMenuItem("复制诊断信息", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计").Click(func() {
+		p.copyAndroidMicDiagnostics()
+	})
 
 	p.buildHistoryMenu()
 
@@ -373,6 +376,21 @@ func (p *Plugin) stopAndroidMic() {
 		p.logger.Error("tray: 停止 AndroidMic 服务端失败", "error", err)
 	}
 	p.updateAndroidMic()
+}
+
+func (p *Plugin) copyAndroidMicDiagnostics() {
+	report := voice.AndroidMicDiagnosticReport()
+	cb, err := clipboard.New()
+	if err == nil {
+		err = cb.Set(report)
+	}
+	if err != nil {
+		p.logger.Error("tray: 复制 AndroidMic 诊断信息失败", "error", err)
+		go notifyMessage("AndroidMic 诊断", "复制失败，请查看系统日志")
+		return
+	}
+	p.logger.Info("tray: 已复制 AndroidMic 诊断信息")
+	go notifyMessage("AndroidMic 诊断", "最近 10 次连接摘要已复制，不包含音频、识别文本或密钥")
 }
 
 func (p *Plugin) setAutoStart(on bool) {

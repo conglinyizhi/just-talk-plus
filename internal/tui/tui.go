@@ -1457,6 +1457,8 @@ func (m *Model) renderVoiceStatus() string {
 		label, style = "连接中", wStyle
 	case "recording":
 		label, style = "录音中", aStyle
+	case "waiting_asr":
+		label, style = "等待 ASR", aStyle
 	case "stopping_delayed":
 		label, style = "延迟停止", wStyle
 	case "stopping":

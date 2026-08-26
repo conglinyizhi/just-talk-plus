@@ -28,6 +28,34 @@ func TestNormalizeStopDelayMs(t *testing.T) {
 	}
 }
 
+func TestBeginASRWaitIsIdempotent(t *testing.T) {
+	p := &VoicePlugin{}
+	p.mu.Lock()
+	_, done, started := p.beginASRWaitLocked()
+	_, sameDone, startedAgain := p.beginASRWaitLocked()
+	p.mu.Unlock()
+	if !started || startedAgain || done == nil || sameDone != done {
+		t.Fatalf("ASR wait transition = started:%t startedAgain:%t done:%p same:%p", started, startedAgain, done, sameDone)
+	}
+}
+
+func TestWaitingForASRTakesPriorityOverConnecting(t *testing.T) {
+	p := NewVoicePlugin()
+	if err := p.Init(&fakeEnv{cfg: config.Default()}); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	p.recording = true
+	p.voiceDetected = true
+	p.waitingForASR = true
+	p.asrCancel = func() {}
+	p.publishStatusLocked()
+	p.mu.Unlock()
+	if status := TUIStatus(); status.State != "waiting_asr" || !status.WaitingForASR {
+		t.Fatalf("status = %+v, want waiting_asr", status)
+	}
+}
+
 func TestStopAfterSilenceExtendsOnVoice(t *testing.T) {
 	p := NewVoicePlugin()
 	if err := p.Init(&fakeEnv{cfg: config.Default()}); err != nil {

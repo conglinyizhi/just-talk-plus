@@ -8,8 +8,11 @@
 package voice
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/internal/androidmic"
 )
@@ -31,8 +34,51 @@ func AndroidMicStart(port int) error {
 // AndroidMicStop 停止内嵌服务端（幂等）。
 func AndroidMicStop() error { return androidMicServer.Stop() }
 
-// AndroidMicStatus 返回内嵌服务端状态快照。
+// AndroidMicStatus returns an embedded server status snapshot.
 func AndroidMicStatus() androidmic.Status { return androidMicServer.Status() }
+
+// AndroidMicDiagnosticReport returns a bounded, text-only diagnostic snapshot.
+// It intentionally excludes audio, recognized text, and credentials.
+func AndroidMicDiagnosticReport() string {
+	st := AndroidMicStatus()
+	var b strings.Builder
+	b.WriteString("Just Talk Plus AndroidMic diagnostics\n")
+	b.WriteString("generated_at: " + time.Now().Format(time.RFC3339) + "\n")
+	if st.Running {
+		fmt.Fprintf(&b, "server: running (%s)\n", st.Addr)
+	} else {
+		b.WriteString("server: stopped\n")
+	}
+	fmt.Fprintf(&b, "recording_consumer: %t\n", st.Active)
+	if len(st.Clients) == 0 {
+		b.WriteString("connected_clients: none\n")
+	} else {
+		b.WriteString("connected_clients: " + strings.Join(st.Clients, ", ") + "\n")
+	}
+	if len(st.RecentSessions) == 0 {
+		b.WriteString("\nrecent_sessions: none\n")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\nrecent_sessions: %d (max 10)\n", len(st.RecentSessions))
+	for i, session := range st.RecentSessions {
+		fmt.Fprintf(&b, "\n%d. client: %s\n", i+1, session.Client)
+		fmt.Fprintf(&b, "   connected_at: %s\n", formatAndroidMicTime(session.ConnectedAt))
+		fmt.Fprintf(&b, "   disconnected_at: %s\n", formatAndroidMicTime(session.DisconnectedAt))
+		fmt.Fprintf(&b, "   handshake_ok: %t\n", session.HandshakeOK)
+		fmt.Fprintf(&b, "   packets_received: %d, pcm_bytes: %d, delivered_frames: %d\n", session.PacketsReceived, session.PCMBytes, session.DeliveredFrames)
+		fmt.Fprintf(&b, "   decode_errors: %d, convert_errors: %d\n", session.DecodeErrors, session.ConvertErrors)
+		fmt.Fprintf(&b, "   dropped_no_consumer: %d, dropped_queue_full: %d\n", session.DroppedNoConsumer, session.DroppedQueueFull)
+		fmt.Fprintf(&b, "   last_packet_at: %s\n", formatAndroidMicTime(session.LastPacketAt))
+	}
+	return b.String()
+}
+
+func formatAndroidMicTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Format(time.RFC3339)
+}
 
 // openAndroidMicSource 为一次录音会话挂接音频源；服务端未运行时返回错误，
 // 录音会据此提示用户先启动服务端。

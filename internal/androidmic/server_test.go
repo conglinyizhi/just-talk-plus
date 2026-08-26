@@ -123,6 +123,47 @@ func TestServerAudioFlow(t *testing.T) {
 	}
 }
 
+func TestStatusIncludesBoundedSessionDiagnostics(t *testing.T) {
+	s, port := startTestServer(t)
+	for i := 0; i < maxRecentSessions+2; i++ {
+		conn := dialClient(t, port)
+		src, err := s.OpenSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sendPacket(t, conn, AudioPacket{SampleRate: 16000, ChannelCount: 1, AudioFormat: encPCM16BIT, Buffer: []byte{1, 0, 2, 0}})
+		if _, err := readFull(src, 4, 2*time.Second); err != nil {
+			t.Fatalf("read audio: %v", err)
+		}
+		_ = src.Close()
+		_ = conn.Close()
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var recent []SessionDiagnostic
+	for time.Now().Before(deadline) {
+		recent = s.Status().RecentSessions
+		allDisconnected := len(recent) == maxRecentSessions
+		for _, session := range recent {
+			allDisconnected = allDisconnected && !session.DisconnectedAt.IsZero()
+		}
+		if allDisconnected {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(recent) != maxRecentSessions {
+		t.Fatalf("recent sessions = %d, want %d", len(recent), maxRecentSessions)
+	}
+	last := recent[len(recent)-1]
+	if !last.HandshakeOK || last.PacketsReceived != 1 || last.PCMBytes != 4 || last.DeliveredFrames != 1 {
+		t.Fatalf("last diagnostic = %+v", last)
+	}
+	if last.ConnectedAt.IsZero() || last.DisconnectedAt.IsZero() || last.LastPacketAt.IsZero() {
+		t.Fatalf("timestamps were not recorded: %+v", last)
+	}
+}
+
 func TestServerResamples48000(t *testing.T) {
 	s, port := startTestServer(t)
 	conn := dialClient(t, port)
@@ -237,7 +278,7 @@ func TestWriteAudioAfterClose(t *testing.T) {
 			t.Fatalf("writeAudio panicked: %v", r)
 		}
 	}()
-	s.writeAudio([]byte{1, 2, 3, 4})
+	s.writeAudio(nil, []byte{1, 2, 3, 4})
 	if !s.Status().Running {
 		t.Fatal("server should stay running")
 	}

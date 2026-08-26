@@ -26,24 +26,47 @@ var ErrNotRunning = errors.New("androidmic: 服务端未运行，请先在输入
 // handshakeTimeout 客户端握手超时；防御连接后不发送校验串的僵尸连接。
 const handshakeTimeout = 5 * time.Second
 
-// Status 是服务端状态快照（供 TUI 展示与管理）。
-type Status struct {
-	Running bool
-	Port    int
-	Addr    string   // 监听地址（含端口）
-	Clients []string // 已连接客户端地址
-	Active  bool     // 当前是否有录音消费者挂接
+// maxRecentSessions bounds in-memory AndroidMic diagnostics. They are copied
+// only when the user requests diagnostics and are never written per packet.
+const maxRecentSessions = 10
+
+// SessionDiagnostic summarizes one AndroidMic client connection without
+// retaining audio data, recognized text, or any credentials.
+type SessionDiagnostic struct {
+	Client            string
+	ConnectedAt       time.Time
+	DisconnectedAt    time.Time
+	HandshakeOK       bool
+	PacketsReceived   uint64
+	PCMBytes          uint64
+	DecodeErrors      uint64
+	ConvertErrors     uint64
+	DeliveredFrames   uint64
+	DroppedNoConsumer uint64
+	DroppedQueueFull  uint64
+	LastPacketAt      time.Time
 }
 
-// Server 是 AndroidMic TCP 服务端。所有方法并发安全。
+// Status is a server snapshot for the UI and on-demand diagnostics.
+type Status struct {
+	Running        bool
+	Port           int
+	Addr           string   // Listening address including port.
+	Clients        []string // Connected client addresses.
+	Active         bool     // Whether a recording consumer is attached.
+	RecentSessions []SessionDiagnostic
+}
+
+// Server is an AndroidMic TCP server. All methods are safe for concurrent use.
 type Server struct {
 	logger *slog.Logger
 	mu     sync.Mutex
 	ln     net.Listener
 	port   int
-	conns  map[net.Conn]struct{}
+	conns  map[net.Conn]*SessionDiagnostic
+	recent []SessionDiagnostic
 	active *pipe
-	closed chan struct{} // 关闭信号：通知 accept 循环退出
+	closed chan struct{} // Close signal for the accept loop.
 }
 
 // New 创建服务端实例。logger 为 nil 时使用默认 logger。
@@ -51,7 +74,7 @@ func New(logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{logger: logger, conns: make(map[net.Conn]struct{})}
+	return &Server{logger: logger, conns: make(map[net.Conn]*SessionDiagnostic)}
 }
 
 // Start 启动监听。已在监听时幂等返回 nil。
@@ -90,7 +113,7 @@ func (s *Server) Stop() error {
 	for c := range s.conns {
 		conns = append(conns, c)
 	}
-	s.conns = make(map[net.Conn]struct{})
+	s.conns = make(map[net.Conn]*SessionDiagnostic)
 	active := s.active
 	s.active = nil
 	s.mu.Unlock()
@@ -127,6 +150,16 @@ func (s *Server) Status() Status {
 		st.Clients = append(st.Clients, c.RemoteAddr().String())
 	}
 	sort.Strings(st.Clients)
+	st.RecentSessions = append([]SessionDiagnostic(nil), s.recent...)
+	for _, stats := range s.conns {
+		st.RecentSessions = append(st.RecentSessions, *stats)
+	}
+	sort.Slice(st.RecentSessions, func(i, j int) bool {
+		return st.RecentSessions[i].ConnectedAt.Before(st.RecentSessions[j].ConnectedAt)
+	})
+	if len(st.RecentSessions) > maxRecentSessions {
+		st.RecentSessions = st.RecentSessions[len(st.RecentSessions)-maxRecentSessions:]
+	}
 	return st
 }
 
@@ -155,16 +188,30 @@ func (s *Server) OpenSource() (io.ReadCloser, error) {
 
 // writeAudio 把一帧 PCM 交给当前消费者；无消费者或队列满则丢弃。
 // 持锁期间完成非阻塞写入，与 detach 的 close 互斥，杜绝写已关闭 channel。
-func (s *Server) writeAudio(pcm []byte) {
+func (s *Server) writeAudio(stats *SessionDiagnostic, pcm []byte) {
 	s.mu.Lock()
+	if stats != nil {
+		stats.PacketsReceived++
+		stats.PCMBytes += uint64(len(pcm))
+		stats.LastPacketAt = time.Now()
+	}
 	p := s.active
 	if p == nil || p.closed.Load() {
+		if stats != nil {
+			stats.DroppedNoConsumer++
+		}
 		s.mu.Unlock()
 		return
 	}
 	select {
 	case p.ch <- pcm:
+		if stats != nil {
+			stats.DeliveredFrames++
+		}
 	default:
+		if stats != nil {
+			stats.DroppedQueueFull++
+		}
 	}
 	s.mu.Unlock()
 }
@@ -178,6 +225,13 @@ func (s *Server) detach(p *pipe) {
 	}
 	s.mu.Unlock()
 	close(p.ch)
+}
+
+func (s *Server) appendRecentLocked(stats SessionDiagnostic) {
+	s.recent = append(s.recent, stats)
+	if len(s.recent) > maxRecentSessions {
+		s.recent = append([]SessionDiagnostic(nil), s.recent[len(s.recent)-maxRecentSessions:]...)
+	}
 }
 
 func (s *Server) isClosed() bool {
@@ -207,15 +261,16 @@ func (s *Server) acceptLoop(ln net.Listener) {
 			_ = s.Stop()
 			return
 		}
+		stats := &SessionDiagnostic{Client: conn.RemoteAddr().String(), ConnectedAt: time.Now()}
 		s.mu.Lock()
-		s.conns[conn] = struct{}{}
+		s.conns[conn] = stats
 		s.mu.Unlock()
-		go s.handleConn(conn)
+		go s.handleConn(conn, stats)
 	}
 }
 
 // handleConn 处理单个客户端：握手 → 循环读帧 → 转换 → 投递。
-func (s *Server) handleConn(conn net.Conn) {
+func (s *Server) handleConn(conn net.Conn, stats *SessionDiagnostic) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error("androidmic: 连接处理异常已隔离",
@@ -225,7 +280,11 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer func() {
 		_ = conn.Close()
 		s.mu.Lock()
-		delete(s.conns, conn)
+		if s.conns[conn] == stats {
+			delete(s.conns, conn)
+		}
+		stats.DisconnectedAt = time.Now()
+		s.appendRecentLocked(*stats)
 		s.mu.Unlock()
 	}()
 
@@ -245,6 +304,9 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	s.mu.Lock()
+	stats.HandshakeOK = true
+	s.mu.Unlock()
 	s.logger.Info("androidmic: 客户端已连接", "remote", remote)
 
 	conv := newConverter()
@@ -258,14 +320,20 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 		pkt, err := decodeAudioPacket(frame)
 		if err != nil {
+			s.mu.Lock()
+			stats.DecodeErrors++
+			s.mu.Unlock()
 			s.logger.Debug("androidmic: 音频包解码失败", "remote", remote, "error", err)
 			continue
 		}
 		pcm, err := convertPacket(pkt, conv)
 		if err != nil {
+			s.mu.Lock()
+			stats.ConvertErrors++
+			s.mu.Unlock()
 			s.logger.Debug("androidmic: 音频转换失败", "remote", remote, "error", err)
 			continue
 		}
-		s.writeAudio(pcm)
+		s.writeAudio(stats, pcm)
 	}
 }

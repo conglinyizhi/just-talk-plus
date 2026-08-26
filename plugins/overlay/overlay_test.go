@@ -27,6 +27,32 @@ func TestStopDelayLabelProgress(t *testing.T) {
 	}
 }
 
+func TestCaptureASRLabelDistinguishesVoiceDetection(t *testing.T) {
+	waiting := voice.TUIVoiceStatus{State: "connecting", RecorderReady: true}
+	label, color, visible := displayForStatus(waiting, false)
+	if !visible || label != "MIC ON  ASR .." || color != (statusColor{R: 245 << 8, G: 190 << 8, B: 70 << 8}) {
+		t.Fatalf("waiting status = label %q color %+v visible %t", label, color, visible)
+	}
+
+	dialing := voice.TUIVoiceStatus{State: "connecting", RecorderReady: true, VoiceDetected: true}
+	label, color, visible = displayForStatus(dialing, false)
+	if !visible || label != "MIC ON  ASR ->" || color != (statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}) {
+		t.Fatalf("dialing status = label %q color %+v visible %t", label, color, visible)
+	}
+
+	awaitingASR := voice.TUIVoiceStatus{State: "waiting_asr"}
+	label, color, visible = displayForStatus(awaitingASR, false)
+	if !visible || label != "WAIT ASR" || color != (statusColor{R: 255 << 8, G: 65 << 8, B: 65 << 8}) {
+		t.Fatalf("ASR connection wait = label %q color %+v visible %t", label, color, visible)
+	}
+
+	connected := voice.TUIVoiceStatus{State: "recording", RecorderReady: true, ASRReady: true, VoiceDetected: true}
+	label, _, _ = displayForStatus(connected, false)
+	if label != "MIC ON  ASR ON" {
+		t.Fatalf("connected label = %q", label)
+	}
+}
+
 func TestCapsuleContentLayoutCentersStatusGroup(t *testing.T) {
 	dotX, textX := capsuleContentLayout(160, 14, 10, 80)
 	if dotX != 28 || textX != 52 {
