@@ -32,6 +32,45 @@ func (e *fakeEnv) Logger() *slog.Logger {
 func (e *fakeEnv) Config() *config.Config { return e.cfg }
 func (e *fakeEnv) Engine() *engine.Engine { return nil }
 
+func TestSubscribeStatusReceivesCoalescedChanges(t *testing.T) {
+	tuiStatusMu.Lock()
+	originalStatus := tuiStatus
+	tuiStatus = TUIVoiceStatus{State: "idle", UpdatedAt: time.Now()}
+	tuiStatusMu.Unlock()
+	t.Cleanup(func() {
+		tuiStatusMu.Lock()
+		tuiStatus = originalStatus
+		tuiStatusMu.Unlock()
+	})
+
+	changes, unsubscribe := SubscribeStatus()
+	defer unsubscribe()
+	setTUIStatus(func(s *TUIVoiceStatus) { s.State = "recording" })
+	setTUIStatus(func(s *TUIVoiceStatus) { s.State = "stopping" })
+
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("status change was not delivered")
+	}
+	select {
+	case <-changes:
+		t.Fatal("status changes should be coalesced while unread")
+	default:
+	}
+
+	unsubscribe()
+	setTUIStatus(func(s *TUIVoiceStatus) { s.State = "idle" })
+	select {
+	case _, ok := <-changes:
+		if ok {
+			t.Fatal("unsubscribed channel should be closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unsubscribed channel was not closed")
+	}
+}
+
 func TestConfigReloadSync(t *testing.T) {
 	p := NewVoicePlugin()
 	start := config.Default()

@@ -220,31 +220,35 @@ func (p *Plugin) onReady() {
 	p.quitItem = systray.AddMenuItem("退出", "退出 just-talk-plus")
 	p.quitItem.Click(func() { go p.env.Engine().Stop() })
 
-	// Initial consistency pass, then a low-frequency tick that only writes the
-	// SNI icon/tooltip/Android status when they change.
+	// Initial consistency pass, then react to voice state changes immediately.
+	// The low-frequency tick only probes Android service state.
 	p.syncChecks()
 	p.updateAndroidMic()
-	go p.tickLoop()
+	statusChanges, unsubscribe := voice.SubscribeStatus()
+	p.syncStatus(voice.TUIStatus())
+	go p.tickLoop(statusChanges, unsubscribe)
 }
 
-func (p *Plugin) tickLoop() {
+func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribe func()) {
+	defer unsubscribe()
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
-	for range t.C {
-		p.tick()
+	for {
+		select {
+		case <-statusChanges:
+			p.syncStatus(voice.TUIStatus())
+		case <-t.C:
+			p.syncStatus(voice.TUIStatus())
+			p.updateAndroidMic()
+		case <-p.env.Engine().Context().Done():
+			return
+		}
 	}
 }
 
-// tick refreshes only the parts of the tray that are cheap to write (SNI icon,
-// tooltip) plus the Android server status line, and only when they changed.
-// It deliberately does not touch any MenuItem's title/check state every tick —
-// doing so would bump the D-Bus menu version and make KDE redraw (flicker) the
-// open menu.
-func (p *Plugin) tick() {
-	st := voice.TUIStatus()
+func (p *Plugin) syncStatus(st voice.TUIVoiceStatus) {
 	p.setStatusIcon(st.State)
 	p.setTooltip(st.State)
-	p.updateAndroidMic()
 }
 
 func (p *Plugin) setStatusIcon(state string) {

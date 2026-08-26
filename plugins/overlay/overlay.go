@@ -64,13 +64,21 @@ func (p *Plugin) Start(ctx context.Context) error {
 	p.backend = b
 	defer p.backend.Close()
 
+	statusChanges, unsubscribe := voice.SubscribeStatus()
+	defer unsubscribe()
+	// Draw the current state immediately, then react to state changes instead
+	// of waiting for a polling interval. The ticker keeps the stop-delay
+	// countdown and time-based error expiry visually current.
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	p.logger.Info("overlay started")
+	p.sync(voice.TUIStatus())
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-statusChanges:
+			p.sync(voice.TUIStatus())
 		case <-ticker.C:
 			p.sync(voice.TUIStatus())
 		}

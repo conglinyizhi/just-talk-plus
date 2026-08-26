@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- 修复 GUI 录音状态显示延迟：胶囊和系统托盘现在在录音状态变更时立即刷新，不再依赖最多 1 秒的托盘轮询；停止倒计时和 AndroidMic 状态仍按周期维护。
+
 - 新增系统托盘后台控制面：`--gui` 后台模式默认挂系统托盘（`energye/systray`），可从托盘切换识别引擎 / 麦克风设备、开关 push-to-talk（hold/toggle）、控制 Android 虚拟麦克风服务端、查看或打开日志、退出；录音状态用托盘图标颜色提示（待机/录音中/停止中/错误）。`[tray]` 下可配 `enabled` 与可选全局热键 `cycle_engine_hotkey`、`toggle_push_to_talk_hotkey`。Windows 走纯 Go `Shell_NotifyIconW`（保持 `CGO_ENABLED=0`），Linux/Wayland 走 D-Bus StatusNotifierItem；菜单项仅在状态变化时刷新，避免 KDE 打开菜单时被每秒重绘闪烁。历史与频谱等重度交互仍保留 `just-talk-plus --tui` 完整终端面板兜底。
 
 - 日志梳理与桌面层补强：daemon（`--gui`）模式不再把实时识别文本逐字打到 stdout（避免刷屏）；调试插件的热键事件从裸 `fmt.Printf` 改为走 slog（带时间戳与结构化字段）；托盘「完整设置」点击改为弹桌面提示框（kdialog / notify-send）；Android 虚拟麦克风状态会探测端口实际监听，可区分本进程运行 / 端口被其它进程占用 / 未运行。

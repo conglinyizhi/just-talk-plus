@@ -88,6 +88,7 @@ var dispatchMu sync.Mutex // 输出流程串行：避免两次识别的上屏/�
 var outputWriter io.Writer = os.Stdout
 var tuiStatus = TUIVoiceStatus{State: "idle", UpdatedAt: time.Now()}
 var tuiStatusMu sync.Mutex
+var tuiStatusListeners = make(map[chan struct{}]struct{})
 var tuiStats TUIVoiceStats
 var tuiStatsMu sync.Mutex
 
@@ -275,11 +276,34 @@ func TUIStatus() TUIVoiceStatus {
 	return tuiStatus
 }
 
+// SubscribeStatus returns a coalescing notification channel for GUI status
+// changes. Consumers must call unsubscribe when their lifecycle ends.
+func SubscribeStatus() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	tuiStatusMu.Lock()
+	tuiStatusListeners[ch] = struct{}{}
+	tuiStatusMu.Unlock()
+	return ch, func() {
+		tuiStatusMu.Lock()
+		if _, ok := tuiStatusListeners[ch]; ok {
+			delete(tuiStatusListeners, ch)
+			close(ch)
+		}
+		tuiStatusMu.Unlock()
+	}
+}
+
 func setTUIStatus(update func(*TUIVoiceStatus)) {
 	tuiStatusMu.Lock()
 	defer tuiStatusMu.Unlock()
 	update(&tuiStatus)
 	tuiStatus.UpdatedAt = time.Now()
+	for ch := range tuiStatusListeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func markTUIHotkey(evt hotkey.Event) {
