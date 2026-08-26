@@ -458,10 +458,27 @@ func notifyMessage(title, msg string) {
 // ---- log ----
 
 func (p *Plugin) openLog() {
+	if os.Getenv("INVOCATION_ID") != "" {
+		// 由 systemd 托管时日志在 journald，打开文件是旧的/空的——改用 journalctl
+		p.openJournal()
+		return
+	}
 	path := logPath()
 	p.logger.Info("tray: 打开日志", "path", path)
 	if err := openPath(path); err != nil {
 		p.logger.Error("tray: 打开日志失败", "error", err)
+	}
+}
+
+func (p *Plugin) openJournal() {
+	cmd := terminalCommand("journalctl", "--user", "-u", "just-talk-plus", "-e")
+	if cmd == nil {
+		go notifyMessage("查看日志", "请手动运行：journalctl --user -u just-talk-plus -e")
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		p.logger.Error("tray: 打开 journalctl 终端失败", "error", err)
+		go notifyMessage("查看日志", "启动终端失败。请手动运行 journalctl --user -u just-talk-plus -e")
 	}
 }
 
@@ -650,11 +667,17 @@ func (p *Plugin) openConfigTerminal() {
 // configTerminalCmd 尝试用常见的终端模拟器唤起一个运行
 // `just-talk-plus --tui-config` 的终端窗口。找不到终端时返回 nil。
 func (p *Plugin) configTerminalCmd(exe string) *exec.Cmd {
+	return terminalCommand(exe, "--tui-config")
+}
+
+// terminalCommand 尝试用常见的终端模拟器唤起一个运行 args... 的终端窗口。
+// 找不到终端时返回 nil。
+func terminalCommand(args ...string) *exec.Cmd {
 	switch runtime.GOOS {
 	case "windows":
-		return exec.Command("cmd", "/c", "start", "", exe, "--tui-config")
+		return exec.Command("cmd", append([]string{"/c", "start", ""}, args...)...)
 	case "darwin":
-		return exec.Command("open", "-a", "Terminal", exe, "--args", "--tui-config")
+		return exec.Command("open", append([]string{"-a", "Terminal"}, args...)...)
 	default:
 		for _, term := range []struct{ bin, flag string }{
 			{"konsole", "-e"},
@@ -665,7 +688,7 @@ func (p *Plugin) configTerminalCmd(exe string) *exec.Cmd {
 			{"xterm", "-e"},
 		} {
 			if path, err := exec.LookPath(term.bin); err == nil {
-				return exec.Command(path, append([]string{term.flag}, exe, "--tui-config")...)
+				return exec.Command(path, append([]string{term.flag}, args...)...)
 			}
 		}
 		return nil
