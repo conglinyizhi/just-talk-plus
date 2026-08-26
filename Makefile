@@ -1,4 +1,4 @@
-.PHONY: build install test clean run dev
+.PHONY: build install install-systemd test clean run dev
 
 APP_NAME := just-talk-plus
 CMD_DIR := ./cmd/just-talk-plus
@@ -12,6 +12,10 @@ build:
 install: build
 	$(BUILD_DIR)/$(APP_NAME) --install
 
+# Install a systemd --user unit (Linux): autostart + journal logging
+install-systemd: build
+	$(BUILD_DIR)/$(APP_NAME) --install-systemd
+
 # Run (current platform) from a freshly built binary. Pass temporary diagnostics
 # explicitly, for example: make run ARGS=--diagnostics
 ARGS ?=
@@ -19,7 +23,7 @@ run: build
 	$(BUILD_DIR)/$(APP_NAME) $(ARGS)
 
 # Fast development loop. Requires https://github.com/air-verse/air.
-# Pass application flags with: make dev ARGS="--no-tui --verbose"
+# Pass application flags with: make dev ARGS="--gui --verbose"
 dev:
 	@command -v air >/dev/null 2>&1 || (echo "air is required: go install github.com/air-verse/air@latest"; exit 1)
 	air -c .air.toml $(if $(ARGS),-build.args_bin "$(ARGS)",)

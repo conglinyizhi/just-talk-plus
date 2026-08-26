@@ -1,0 +1,15 @@
+[Unit]
+Description=Just Talk Plus voice input daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=__EXE__ --gui
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=just-talk-plus
+
+[Install]
+WantedBy=default.target
