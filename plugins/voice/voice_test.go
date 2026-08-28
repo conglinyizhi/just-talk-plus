@@ -71,6 +71,22 @@ func TestSubscribeStatusReceivesCoalescedChanges(t *testing.T) {
 	}
 }
 
+func TestDispatchTextOutputRecordsHistoryBeforeAsyncOutput(t *testing.T) {
+	useTestHistoryStore(t)
+	p := NewVoicePlugin()
+	p.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.Default()
+	cfg.Voice.AutoSubmit = false
+	cfg.Voice.WriteClipboard = false
+	p.cfg.Store(cfg)
+
+	p.dispatchTextOutput("先记历史", 1, "trace-1", "")
+	items := History()
+	if len(items) != 1 || items[0].Text != "先记历史" {
+		t.Fatalf("history immediately after dispatch = %+v, want one entry", items)
+	}
+}
+
 func TestConfigReloadSync(t *testing.T) {
 	p := NewVoicePlugin()
 	start := config.Default()

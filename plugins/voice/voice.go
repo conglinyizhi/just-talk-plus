@@ -37,6 +37,7 @@ const (
 	errorHoldDuration   = 10 * time.Second
 	audioSendTimeout    = 3 * time.Second
 	audioDrainTimeout   = 15 * time.Second
+	captureDrainTimeout = 3 * time.Second
 	asrConnectTimeout   = 10 * time.Second
 	audioKeepaliveEvery = 1 * time.Second
 )
@@ -360,6 +361,7 @@ type VoicePlugin struct {
 	asrClient              speech.StreamSession
 	asrCancel              context.CancelFunc
 	audioDone              <-chan struct{}
+	captureDone            <-chan struct{}
 	stopDelayMs            int
 	stopAfterSilence       bool
 	hotkeyCooldownMs       int
@@ -394,6 +396,7 @@ type recordingSession struct {
 	asrClient         speech.StreamSession
 	asrCancel         context.CancelFunc
 	audioDone         <-chan struct{}
+	captureDone       <-chan struct{}
 	userStopped       bool
 	startedAt         time.Time
 	noiseThreshold    float64
@@ -757,7 +760,9 @@ func (p *VoicePlugin) startRecording() {
 	if vc.SaveRecordings {
 		recordedAudio = &bytes.Buffer{}
 	}
+	captureDone := make(chan struct{})
 	p.recorder, p.recording, p.userStopped, p.recordedAudio, p.recordedAudioRate = rec, true, false, recordedAudio, speech.PCMRate
+	p.captureDone = captureDone
 	p.startedAt = startedAt
 	p.stopping = false
 	p.stopAt = time.Time{}
@@ -773,7 +778,7 @@ func (p *VoicePlugin) startRecording() {
 	p.mu.Unlock() // Release lock before slow WebSocket dial
 
 	audioQueue := newAudioQueue()
-	go p.captureAudio(ctx, rec, audioQueue)
+	go p.captureAudio(ctx, rec, audioQueue, captureDone)
 	go p.connectASR(ctx, cancel, sessionID, sessionGen, rec, params, audioQueue, recordedAudio, startedAt)
 	if shouldStopImmediately {
 		p.startStopDelay()
@@ -1037,6 +1042,10 @@ func (p *VoicePlugin) stopRecorderForASRWait(rec *Recorder, done chan struct{}) 
 		remaining, _ = rec.Stop()
 	}
 	p.mu.Lock()
+	captureDone := p.captureDone
+	p.mu.Unlock()
+	p.waitForCaptureDrain(captureDone)
+	p.mu.Lock()
 	if p.recorder == rec && p.waitingForASR && p.recorderStopDone == done {
 		p.pendingFinalAudio = remaining
 	}
@@ -1098,6 +1107,7 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		asrClient:         p.asrClient,
 		asrCancel:         p.asrCancel,
 		audioDone:         p.audioDone,
+		captureDone:       p.captureDone,
 		userStopped:       p.userStopped,
 		startedAt:         p.startedAt,
 		noiseThreshold:    p.noiseThreshold,
@@ -1108,7 +1118,7 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		recordedAudioRate: p.recordedAudioRate,
 	}
 	p.sessionGen++
-	p.recorder, p.asrClient, p.asrCancel, p.audioDone, p.recordedAudio = nil, nil, nil, nil, nil
+	p.recorder, p.asrClient, p.asrCancel, p.audioDone, p.captureDone, p.recordedAudio = nil, nil, nil, nil, nil, nil
 	p.recordedAudioRate = speech.PCMRate
 	p.voiceToSendMs = 0
 	p.voiceDetected = false
@@ -1153,6 +1163,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		remaining, _ = session.recorder.Stop()
 		p.logger.Debug("latency anchor: recorder stop done", "session_id", session.sessionID, "remaining_bytes", len(remaining), "duration_ms", time.Since(stageStarted).Milliseconds())
 	}
+	p.waitForCaptureDrain(session.captureDone)
 
 	if session.asrClient != nil && !session.asrFailed {
 		audioDrained := true
@@ -1262,6 +1273,9 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 	if vc.AutoSpace {
 		text = autoSpaceCJK(text)
 	}
+	if !recordHistoryWithRecording(text, upstreamLogID, recordingPath) && recordingPath != "" {
+		_ = os.Remove(recordingPath)
+	}
 	go func() {
 		queuedAt := time.Now()
 		p.logger.Debug("latency anchor: output queued", "session_id", sessionID, "text_len", len(text))
@@ -1335,9 +1349,6 @@ func (p *VoicePlugin) dispatchTextOutput(text string, sessionID uint64, upstream
 			p.logger.Debug("text output: no action configured", "text_len", len(text))
 		}
 		p.logger.Debug("latency anchor: output complete", "session_id", sessionID, "total_after_queue_ms", time.Since(queuedAt).Milliseconds())
-		if !recordHistoryWithRecording(text, upstreamLogID, recordingPath) && recordingPath != "" {
-			_ = os.Remove(recordingPath)
-		}
 	}()
 }
 
@@ -1522,8 +1533,11 @@ func asrConnectErrorDetail(err error) string {
 	return shortError(err)
 }
 
-func (p *VoicePlugin) captureAudio(ctx context.Context, rec *Recorder, audioQueue *audioQueue) {
-	defer audioQueue.Close(nil)
+func (p *VoicePlugin) captureAudio(ctx context.Context, rec *Recorder, audioQueue *audioQueue, captureDone chan<- struct{}) {
+	defer func() {
+		audioQueue.Close(nil)
+		close(captureDone)
+	}()
 	buf := make([]byte, 6400)
 	for {
 		n, rawPeak, rawRMS, gainedPeak, gainedRMS, limited, err := rec.readWithLevels(buf)
@@ -1545,6 +1559,17 @@ func (p *VoicePlugin) captureAudio(ctx context.Context, rec *Recorder, audioQueu
 			audioQueue.Close(err)
 			return
 		}
+	}
+}
+
+func (p *VoicePlugin) waitForCaptureDrain(done <-chan struct{}) {
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(captureDrainTimeout):
+		p.logger.Warn("capture drain timed out", "timeout", captureDrainTimeout)
 	}
 }
 
