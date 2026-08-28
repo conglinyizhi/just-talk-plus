@@ -10,11 +10,13 @@ import (
 	"net"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/engine"
 	"github.com/conglinyizhi/just-talk-plus/hotkey"
 	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
+	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
 )
 
 // fakeEnv satisfies engine.PluginEnv with a fixed config so the tray's pure
@@ -160,6 +162,17 @@ func TestPortOnline(t *testing.T) {
 	// 1 is a privileged port; nothing listens there, so it must report false.
 	if portOnline(1) {
 		t.Errorf("portOnline(1) = true, want false")
+	}
+}
+
+func TestHistorySnapshotChangesWhenEntriesChange(t *testing.T) {
+	first := []voice.HistoryEntry{{Text: "first", Time: time.Unix(1, 0)}}
+	second := []voice.HistoryEntry{{Text: "second", Time: time.Unix(2, 0)}}
+	if historySnapshot(first) == historySnapshot(second) {
+		t.Fatal("different history entries must produce different snapshots")
+	}
+	if historySnapshot(first) != historySnapshot(first) {
+		t.Fatal("same history entries must produce a stable snapshot")
 	}
 }
 

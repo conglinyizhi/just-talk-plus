@@ -797,7 +797,7 @@ func (p *Plugin) syncHistoryMenu() {
 		return
 	}
 	history := p.recentHistory()
-	snapshot := fmt.Sprintf("%v", history)
+	snapshot := historySnapshot(history)
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
 	if snapshot == p.lastHistorySnapshot {
@@ -822,6 +822,10 @@ func (p *Plugin) recentHistory() []voice.HistoryEntry {
 		h = h[:8]
 	}
 	return h
+}
+
+func historySnapshot(history []voice.HistoryEntry) string {
+	return fmt.Sprintf("%v", history)
 }
 
 func (p *Plugin) replayRecording(path string) {

@@ -51,6 +51,29 @@ func TestStreamAudioDrainsQueuedAudioAfterDelayedConnection(t *testing.T) {
 
 // TestStreamAudioRecordsBelowThresholdAsIs 验证低于噪声阈值的块也原样发送并录制：
 // 阈值仅用于开头开始录音与结束停止判定，中间不丢弃内容。
+func TestStreamAudioSendsKeepaliveDuringCaptureGap(t *testing.T) {
+	queue := newAudioQueue()
+	client := &recordingStreamSession{}
+	p := NewVoicePlugin()
+
+	go func() {
+		time.Sleep(audioKeepaliveEvery + 100*time.Millisecond)
+		queue.Close(nil)
+	}()
+	if err := p.streamAudio(context.Background(), client, nil, queue, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := client.audio()
+	if len(got) != speech.PCMByteRate/10 {
+		t.Fatalf("keepalive bytes = %d, want %d", len(got), speech.PCMByteRate/10)
+	}
+	for i, b := range got {
+		if b != 0 {
+			t.Fatalf("keepalive byte %d = %d, want silence", i, b)
+		}
+	}
+}
+
 func TestStreamAudioRecordsBelowThresholdAsIs(t *testing.T) {
 	queue := newAudioQueue()
 	queue.Push(audioChunk{pcm: []byte{3, 4}, gainedPeak: 0.001, gainedRMS: 0.001})
