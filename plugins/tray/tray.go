@@ -192,6 +192,8 @@ func (p *Plugin) onReady() {
 	p.androidMenu = systray.AddMenuItem("Android 虚拟麦克风", "把手机当麦克风（内嵌服务端）")
 	p.androidStatusItem = p.androidMenu.AddSubMenuItem("状态: 未运行", "")
 	p.androidStatusItem.Disable()
+	androidFormatHint := p.androidMenu.AddSubMenuItem("Android端：16kHz / 单声道 / i16", "推荐使用 16000 Hz、单声道、i16，避免 F32 缓冲区尾部残留")
+	androidFormatHint.Disable()
 	p.androidAutoItem = p.androidMenu.AddSubMenuItemCheckbox("自动启用服务端", "启动时自动开启（androidmic_auto_start）", p.autoStart())
 	p.androidAutoItem.Click(func() { p.setAutoStart(!p.autoStart()) })
 	p.androidMenu.AddSubMenuItem("启动服务端", "").Click(func() { p.startAndroidMic() })
@@ -224,7 +226,7 @@ func (p *Plugin) onReady() {
 		go notifyMessage("修改配置", "你可以通过多种方式修改配置：\n\n· 配置模式：在终端运行 just-talk-plus --tui-config\n· 直接编辑配置文件：~/.config/just-talk-plus/config.toml\n· 托盘菜单：切换引擎 / 麦克风 / push-to-talk 等")
 	})
 
-	p.openConfigItem = systray.AddMenuItem("在终端打开配置模式", "唤醒一个终端运行 just-talk-plus --tui-config")
+	p.openConfigItem = systray.AddMenuItem("打开配置窗口", "在终端打开 just-talk-plus 配置模式")
 	p.openConfigItem.Click(func() { p.openConfigTerminal() })
 
 	p.restartItem = systray.AddMenuItem("重启", "重新启动当前版本，不重启 systemd 用户服务")
