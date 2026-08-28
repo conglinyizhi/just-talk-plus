@@ -179,7 +179,7 @@ systemctl --user start just-talk-plus   # 立即启动
 journalctl --user -u just-talk-plus -f  # 查看日志
 ```
 
-- 生成的服务运行 `just-talk-plus --gui`，`StandardOutput/Error=journal`；daemon 识别到 systemd 环境（`INVOCATION_ID`）后日志只走 stderr 交给 journald，不再写 `/tmp` 文件。
+- 生成的服务运行 `just-talk-plus --gui`，并在安装时将当前检测到的后端写入 `--backend wayland` 或 `--backend x11`，避免启动时图形环境变量尚未就绪导致 `unknown backend`；`StandardOutput/Error=journal`，daemon 识别到 systemd 环境（`INVOCATION_ID`）后日志只走 stderr 交给 journald，不再写 `/tmp` 文件。
 - 系统未登录也开机自启：`loginctl enable-linger $USER`。
 
 ### 使用 Android 手机作为麦克风

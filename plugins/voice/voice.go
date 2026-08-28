@@ -32,12 +32,13 @@ import (
 )
 
 const (
-	defaultStopDelayMs = 800
-	maxStopDelayMs     = 60 * 1000
-	errorHoldDuration  = 10 * time.Second
-	audioSendTimeout   = 3 * time.Second
-	audioDrainTimeout  = 15 * time.Second
-	asrConnectTimeout  = 10 * time.Second
+	defaultStopDelayMs  = 800
+	maxStopDelayMs      = 60 * 1000
+	errorHoldDuration   = 10 * time.Second
+	audioSendTimeout    = 3 * time.Second
+	audioDrainTimeout   = 15 * time.Second
+	asrConnectTimeout   = 10 * time.Second
+	audioKeepaliveEvery = 1 * time.Second
 )
 
 func normalizeStopDelayMs(delayMs int) int {
@@ -370,6 +371,7 @@ type VoicePlugin struct {
 	voiceToSendMs          int64   // 本次会话：按下录音 → 音频开始发送的延迟
 	voiceDetected          bool
 	waitingForASR          bool
+	asrFailed              bool
 	recorderStopDone       chan struct{}
 	pendingFinalAudio      []byte
 	recordedAudio          *bytes.Buffer
@@ -397,6 +399,7 @@ type recordingSession struct {
 	noiseThreshold    float64
 	voiceToSendMs     int64
 	pendingFinalAudio []byte
+	asrFailed         bool
 	recordedAudio     *bytes.Buffer
 	recordedAudioRate int
 }
@@ -924,7 +927,8 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		for result := range client.Results() {
 			if result.Error != nil {
 				pout("❌ ASR 错误: %v", result.Error)
-				continue
+				p.failASRSession(sessionID, result.Error.Error())
+				return
 			}
 			if result.IsFinal {
 				pout("\n🎤 最终: %s", result.Text)
@@ -1040,7 +1044,27 @@ func (p *VoicePlugin) stopRecorderForASRWait(rec *Recorder, done chan struct{}) 
 	p.mu.Unlock()
 }
 
-// failRecordingSession 只终止指定会话，防止旧会话的网络错误影响刚启动的新录音。
+// failASRSession terminates a session after the ASR server reports a fatal error.
+func (p *VoicePlugin) failASRSession(sessionID uint64, detail string) {
+	p.logger.Error("ASR session failed", "session_id", sessionID, "detail", detail)
+	p.mu.Lock()
+	if p.sessionID != sessionID || !p.recording {
+		p.mu.Unlock()
+		return
+	}
+	p.asrFailed = true
+	session := p.detachRecordingLocked()
+	p.trackFinishLocked(session)
+	p.publishErrorLocked(detail, sessionID)
+	p.mu.Unlock()
+	if session != nil {
+		if session.asrCancel != nil {
+			session.asrCancel()
+		}
+		go p.finishRecordingSession(session)
+	}
+}
+
 func (p *VoicePlugin) failRecordingSession(sessionID uint64, detail string) {
 	p.logger.Error("recording session failed", "session_id", sessionID, "detail", detail)
 	p.mu.Lock()
@@ -1079,6 +1103,7 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 		noiseThreshold:    p.noiseThreshold,
 		voiceToSendMs:     p.voiceToSendMs,
 		pendingFinalAudio: p.pendingFinalAudio,
+		asrFailed:         p.asrFailed,
 		recordedAudio:     p.recordedAudio,
 		recordedAudioRate: p.recordedAudioRate,
 	}
@@ -1088,6 +1113,7 @@ func (p *VoicePlugin) detachRecordingLocked() *recordingSession {
 	p.voiceToSendMs = 0
 	p.voiceDetected = false
 	p.waitingForASR = false
+	p.asrFailed = false
 	p.recorderStopDone = nil
 	p.pendingFinalAudio = nil
 	p.startedAt = time.Time{}
@@ -1117,7 +1143,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 	finishStarted := time.Now()
 	p.logger.Debug("latency anchor: finish started", "session_id", session.sessionID, "user_stopped", session.userStopped)
 	pout("🎤 停止录音")
-	if session.asrClient == nil && session.asrCancel != nil {
+	if session.asrCancel != nil && (session.asrClient == nil || session.asrFailed) {
 		session.asrCancel()
 	}
 	remaining := session.pendingFinalAudio
@@ -1128,7 +1154,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 		p.logger.Debug("latency anchor: recorder stop done", "session_id", session.sessionID, "remaining_bytes", len(remaining), "duration_ms", time.Since(stageStarted).Milliseconds())
 	}
 
-	if session.asrClient != nil {
+	if session.asrClient != nil && !session.asrFailed {
 		audioDrained := true
 		if session.audioDone != nil {
 			stageStarted := time.Now()
@@ -1183,24 +1209,26 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				}
 			}
 		}
-		if text := session.asrClient.LastText(); text != "" && session.userStopped && p.claimSessionOutput(session.sessionID) {
-			p.logger.Debug("latency anchor: output claimed", "session_id", session.sessionID, "text_len", len(text), "finish_elapsed_ms", time.Since(finishStarted).Milliseconds())
-			audioDuration := time.Duration(0)
-			if !session.startedAt.IsZero() {
-				audioDuration = time.Since(session.startedAt)
-			}
-			recordTUIStats(text, audioDuration)
-			upstreamLogID := speech.UpstreamLogID(session.asrClient)
-			recordingPath := ""
-			if session.recordedAudio != nil {
-				recordingPath = saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
-			}
-			p.dispatchTextOutput(text, session.sessionID, upstreamLogID, recordingPath)
-		} else if session.userStopped && session.recordedAudio != nil && p.claimSessionOutput(session.sessionID) {
-			// 无识别结果但已连接 ASR 且有录音：记录一条 [无结果] 历史供回放。
-			recordingPath := saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
-			if recordingPath != "" {
-				recordNoResultHistory(speech.UpstreamLogID(session.asrClient), recordingPath)
+		if !session.asrFailed {
+			if text := session.asrClient.LastText(); text != "" && session.userStopped && p.claimSessionOutput(session.sessionID) {
+				p.logger.Debug("latency anchor: output claimed", "session_id", session.sessionID, "text_len", len(text), "finish_elapsed_ms", time.Since(finishStarted).Milliseconds())
+				audioDuration := time.Duration(0)
+				if !session.startedAt.IsZero() {
+					audioDuration = time.Since(session.startedAt)
+				}
+				recordTUIStats(text, audioDuration)
+				upstreamLogID := speech.UpstreamLogID(session.asrClient)
+				recordingPath := ""
+				if session.recordedAudio != nil {
+					recordingPath = saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
+				}
+				p.dispatchTextOutput(text, session.sessionID, upstreamLogID, recordingPath)
+			} else if session.userStopped && session.recordedAudio != nil && p.claimSessionOutput(session.sessionID) {
+				// 无识别结果但已连接 ASR 且有录音：记录一条 [无结果] 历史供回放。
+				recordingPath := saveRecordingAudio(session.recordedAudio.Bytes(), session.recordedAudioRate, session.sessionID)
+				if recordingPath != "" {
+					recordNoResultHistory(speech.UpstreamLogID(session.asrClient), recordingPath)
+				}
 			}
 		}
 		p.logger.Debug("finish session: closing ASR client")
@@ -1570,8 +1598,30 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSessi
 		recordAudioAfterSend(client, recordedAudio, initial)
 		markFirstSend()
 	}
+	// Some streaming ASR sessions expire if no packet arrives for several
+	// seconds. Keep the session alive during a temporary microphone gap without
+	// writing per-packet diagnostics or changing the recorded audio audit.
+	_, isBatch := client.(*speech.BatchSession)
+	keepalive := make([]byte, speech.PCMByteRate/10)
 	for {
-		chunk, err := audioQueue.Next(ctx)
+		chunkCtx := ctx
+		var cancel context.CancelFunc
+		if !isBatch {
+			chunkCtx, cancel = context.WithTimeout(ctx, audioKeepaliveEvery)
+		}
+		chunk, err := audioQueue.Next(chunkCtx)
+		if cancel != nil {
+			cancel()
+		}
+		if err == context.DeadlineExceeded && !isBatch {
+			sendCtx, sendCancel := context.WithTimeout(ctx, audioSendTimeout)
+			sendErr := client.SendAudio(sendCtx, keepalive, false)
+			sendCancel()
+			if sendErr != nil {
+				return fmt.Errorf("send ASR keepalive: %w", sendErr)
+			}
+			continue
+		}
 		if err == io.EOF {
 			return nil
 		}

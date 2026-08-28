@@ -29,9 +29,10 @@ type HistoryEntry struct {
 }
 
 var (
-	historyMu       sync.Mutex
-	history         []HistoryEntry // 最新在前
-	historyPathFunc = defaultHistoryPath
+	historyMu        sync.Mutex
+	history          []HistoryEntry // 最新在前
+	historyPathFunc  = defaultHistoryPath
+	historyListeners = make(map[chan struct{}]struct{})
 )
 
 func defaultHistoryPath() string {
@@ -59,6 +60,32 @@ func loadHistory() {
 	historyMu.Lock()
 	history = entries
 	historyMu.Unlock()
+}
+
+// SubscribeHistory returns a coalescing notification channel for history
+// changes. Consumers read the current snapshot through History().
+func SubscribeHistory() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	historyMu.Lock()
+	historyListeners[ch] = struct{}{}
+	historyMu.Unlock()
+	return ch, func() {
+		historyMu.Lock()
+		if _, ok := historyListeners[ch]; ok {
+			delete(historyListeners, ch)
+			close(ch)
+		}
+		historyMu.Unlock()
+	}
+}
+
+func signalHistoryChangedLocked() {
+	for ch := range historyListeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // recordHistory 记录一条成功上屏/复制的识别文本。
@@ -93,6 +120,7 @@ func recordNoResultHistory(upstreamLogID, recordingPath string) bool {
 	history = trimHistory(append([]HistoryEntry{{Text: noResultText, Time: time.Now(), UpstreamLogID: upstreamLogID, RecordingPath: recordingPath}}, history...))
 	removeDiscardedRecordings(previous, history)
 	saveHistoryLocked()
+	signalHistoryChangedLocked()
 	return true
 }
 
@@ -110,6 +138,7 @@ func recordHistoryEntry(text, logID, recordingPath string) bool {
 	history = trimHistory(append([]HistoryEntry{{Text: text, Time: time.Now(), UpstreamLogID: logID, RecordingPath: recordingPath}}, history...))
 	removeDiscardedRecordings(previous, history)
 	saveHistoryLocked()
+	signalHistoryChangedLocked()
 	return true
 }
 

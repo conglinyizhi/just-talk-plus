@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -43,6 +44,8 @@ type StreamSession struct {
 	done      chan struct{}
 	final     chan struct{}
 	finalOnce sync.Once
+	errorOnce sync.Once
+	failed    atomic.Bool
 	textMu    sync.RWMutex
 	lastText  string
 	audioSent func([]byte)
@@ -103,6 +106,9 @@ func (s *StreamSession) Connect(ctx context.Context) error {
 }
 
 func (s *StreamSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) error {
+	if s.failed.Load() {
+		return fmt.Errorf("ASR session has failed")
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -154,7 +160,9 @@ func (s *StreamSession) ReceiveLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		s.parseResponse(data)
+		if !s.parseResponse(data) {
+			return
+		}
 	}
 }
 
@@ -228,25 +236,31 @@ func (s *StreamSession) effectiveLang() string {
 	return s.cfg.Language
 }
 
-// parseResponse 解析一帧服务端二进制消息。
-func (s *StreamSession) parseResponse(data []byte) {
+// parseResponse 解析一帧服务端二进制消息；返回 false 表示会话已失败，
+// 接收循环应立即结束，避免远端结束后继续刷同一错误。
+func (s *StreamSession) parseResponse(data []byte) bool {
 	sf, err := DecodeServerFrame(data)
 	if err != nil {
 		s.logger.Debug("bad ASR frame", "error", err)
-		return
+		return true
 	}
 	switch sf.MsgType {
 	case msgErrorServer:
+		s.failed.Store(true)
 		err := fmt.Errorf("ASR 服务错误 %d: %s", sf.ErrorCode, sf.ErrorMessage)
-		s.logger.Error("ASR server error", "code", sf.ErrorCode, "message", sf.ErrorMessage)
-		select {
-		case s.resultCh <- speech.StreamResult{Error: err}:
-		default:
-		}
-		s.finalOnce.Do(func() { close(s.final) })
+		s.errorOnce.Do(func() {
+			s.logger.Error("ASR server error", "code", sf.ErrorCode, "message", sf.ErrorMessage)
+			select {
+			case s.resultCh <- speech.StreamResult{Error: err}:
+			default:
+			}
+			s.finalOnce.Do(func() { close(s.final) })
+		})
+		return false
 	case msgFullServer:
 		s.handleFullServerFrame(sf)
 	}
+	return true
 }
 
 func (s *StreamSession) handleFullServerFrame(sf *ServerFrame) {

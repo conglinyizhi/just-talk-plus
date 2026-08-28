@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=__EXE__ --gui
+ExecStart=__EXE__ --gui__BACKEND_ARGS__
 Restart=on-failure
 RestartSec=2
 StandardOutput=journal

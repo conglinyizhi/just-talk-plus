@@ -6,6 +6,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,27 @@ func TestSystemdUnit(t *testing.T) {
 
 // TestSystemdUnitEscapesPath ensures a path containing spaces is escaped so
 // systemd does not split it into separate arguments.
+func TestSystemdBackendArgs(t *testing.T) {
+	oldBackend, oldWayland, oldSession, oldDisplay := os.Getenv("JUST_TALK_PLUS_BACKEND"), os.Getenv("WAYLAND_DISPLAY"), os.Getenv("XDG_SESSION_TYPE"), os.Getenv("DISPLAY")
+	t.Cleanup(func() {
+		os.Setenv("JUST_TALK_PLUS_BACKEND", oldBackend)
+		os.Setenv("WAYLAND_DISPLAY", oldWayland)
+		os.Setenv("XDG_SESSION_TYPE", oldSession)
+		os.Setenv("DISPLAY", oldDisplay)
+	})
+	os.Setenv("JUST_TALK_PLUS_BACKEND", "")
+	os.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	os.Setenv("XDG_SESSION_TYPE", "wayland")
+	os.Setenv("DISPLAY", "")
+	if got := systemdBackendArgs(); got != " --backend wayland" {
+		t.Fatalf("Wayland args = %q", got)
+	}
+	os.Setenv("JUST_TALK_PLUS_BACKEND", "x11")
+	if got := systemdBackendArgs(); got != " --backend x11" {
+		t.Fatalf("explicit X11 args = %q", got)
+	}
+}
+
 func TestSystemdUnitEscapesPath(t *testing.T) {
 	unit := systemdUnit("/opt/my app/just-talk-plus")
 	if !strings.Contains(unit, "/opt/my\\x20app/just-talk-plus --gui") {

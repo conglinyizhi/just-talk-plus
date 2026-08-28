@@ -62,9 +62,10 @@ type Plugin struct {
 	// Cached state so we only write to the SNI properties / menu items when
 	// something actually changed (writing a MenuItem triggers a D-Bus menu
 	// redraw — doing it every tick is what made the menu flicker).
-	lastIconBytes    []byte
-	lastTooltip      string
-	lastAndroidState string
+	lastIconBytes       []byte
+	lastTooltip         string
+	lastAndroidState    string
+	lastHistorySnapshot string
 
 	engineMenu  *systray.MenuItem
 	engineItems map[string]*systray.MenuItem
@@ -76,6 +77,7 @@ type Plugin struct {
 	androidStatusItem *systray.MenuItem
 	androidAutoItem   *systray.MenuItem
 	historyMenu       *systray.MenuItem
+	historySlots      []*systray.MenuItem
 
 	openFull       *systray.MenuItem
 	openConfigItem *systray.MenuItem
@@ -231,22 +233,27 @@ func (p *Plugin) onReady() {
 	// The low-frequency tick only probes Android service state.
 	p.syncChecks()
 	p.updateAndroidMic()
-	statusChanges, unsubscribe := voice.SubscribeStatus()
+	statusChanges, unsubscribeStatus := voice.SubscribeStatus()
+	historyChanges, unsubscribeHistory := voice.SubscribeHistory()
 	p.syncStatus(voice.TUIStatus())
-	go p.tickLoop(statusChanges, unsubscribe)
+	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory)
 }
 
-func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribe func()) {
-	defer unsubscribe()
+func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribeStatus func(), historyChanges <-chan struct{}, unsubscribeHistory func()) {
+	defer unsubscribeStatus()
+	defer unsubscribeHistory()
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-statusChanges:
 			p.syncStatus(voice.TUIStatus())
+		case <-historyChanges:
+			p.syncHistoryMenu()
 		case <-t.C:
 			p.syncStatus(voice.TUIStatus())
 			p.updateAndroidMic()
+			p.syncHistoryMenu()
 		case <-p.env.Engine().Context().Done():
 			return
 		}
@@ -743,18 +750,68 @@ func terminalCommand(args ...string) *exec.Cmd {
 	}
 }
 
+const historyMenuSlots = 8
+
 func (p *Plugin) buildHistoryMenu() {
 	p.historyMenu = systray.AddMenuItem("历史记录", "最近识别记录")
-	for _, e := range p.recentHistory() {
-		e := e
-		item := p.historyMenu.AddSubMenuItem(truncate(e.Text, 24), e.Time.Format("15:04:05"))
-		item.AddSubMenuItem("播放录音", "").Click(func() { p.replayRecording(e.RecordingPath) })
-		item.AddSubMenuItem("复制识别文本", "").Click(func() { p.copyText(e.Text) })
-		if e.UpstreamLogID != "" {
-			item.AddSubMenuItem("复制报错 ID", e.UpstreamLogID).Click(func() { p.copyText(e.UpstreamLogID) })
-		}
-		if e.RecordingPath != "" {
-			item.AddSubMenuItem("在文件管理器中显示", "").Click(func() { p.revealRecording(e.RecordingPath) })
+	p.historySlots = make([]*systray.MenuItem, 0, historyMenuSlots)
+	for i := 0; i < historyMenuSlots; i++ {
+		index := i
+		item := p.historyMenu.AddSubMenuItem("暂无记录", "")
+		item.AddSubMenuItem("播放录音", "").Click(func() {
+			if entry, ok := p.historyEntry(index); ok {
+				p.replayRecording(entry.RecordingPath)
+			}
+		})
+		item.AddSubMenuItem("复制识别文本", "").Click(func() {
+			if entry, ok := p.historyEntry(index); ok {
+				p.copyText(entry.Text)
+			}
+		})
+		item.AddSubMenuItem("复制报错 ID", "").Click(func() {
+			if entry, ok := p.historyEntry(index); ok {
+				p.copyText(entry.UpstreamLogID)
+			}
+		})
+		item.AddSubMenuItem("在文件管理器中显示", "").Click(func() {
+			if entry, ok := p.historyEntry(index); ok {
+				p.revealRecording(entry.RecordingPath)
+			}
+		})
+		item.Hide()
+		p.historySlots = append(p.historySlots, item)
+	}
+	p.syncHistoryMenu()
+}
+
+func (p *Plugin) historyEntry(index int) (voice.HistoryEntry, bool) {
+	history := p.recentHistory()
+	if index < 0 || index >= len(history) {
+		return voice.HistoryEntry{}, false
+	}
+	return history[index], true
+}
+
+func (p *Plugin) syncHistoryMenu() {
+	if p.historyMenu == nil {
+		return
+	}
+	history := p.recentHistory()
+	snapshot := fmt.Sprintf("%v", history)
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if snapshot == p.lastHistorySnapshot {
+		return
+	}
+	p.lastHistorySnapshot = snapshot
+	for i, item := range p.historySlots {
+		if i < len(history) {
+			entry := history[i]
+			item.SetTitle(truncate(entry.Text, 24))
+			item.SetTooltip(entry.Time.Format("15:04:05"))
+			item.Show()
+		} else {
+			item.Hide()
 		}
 	}
 }

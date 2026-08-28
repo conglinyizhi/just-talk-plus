@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
@@ -29,6 +30,21 @@ func useTestHistoryStore(t *testing.T) string {
 		historyPathFunc = originalPathFunc
 	})
 	return path
+}
+
+func TestSubscribeHistoryReceivesChanges(t *testing.T) {
+	useTestHistoryStore(t)
+	changes, unsubscribe := SubscribeHistory()
+	defer unsubscribe()
+	recordHistory("诊断测试")
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("history change was not delivered")
+	}
+	if items := History(); len(items) != 1 || items[0].Text != "诊断测试" {
+		t.Fatalf("history = %+v", items)
+	}
 }
 
 func TestHistoryRing(t *testing.T) {

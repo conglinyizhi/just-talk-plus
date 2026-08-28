@@ -65,7 +65,24 @@ func installSystemdUser() error {
 }
 
 func systemdUnit(exe string) string {
-	return strings.ReplaceAll(systemdUnitTemplate, "__EXE__", systemdEscapePath(exe))
+	unit := strings.ReplaceAll(systemdUnitTemplate, "__EXE__", systemdEscapePath(exe))
+	return strings.ReplaceAll(unit, "__BACKEND_ARGS__", systemdBackendArgs())
+}
+
+func systemdBackendArgs() string {
+	backend := os.Getenv("JUST_TALK_PLUS_BACKEND")
+	if backend == "" {
+		switch {
+		case os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland":
+			backend = "wayland"
+		case os.Getenv("DISPLAY") != "":
+			backend = "x11"
+		}
+	}
+	if backend != "wayland" && backend != "x11" {
+		return ""
+	}
+	return " --backend " + backend
 }
 
 // systemdEscapePath escapes spaces (and tabs) in an ExecStart path; systemd

@@ -84,7 +84,12 @@ func TestParseResponseErrorFrameClosesFinal(t *testing.T) {
 	frame = append(frame, 0, 0, 0, 1) // error code
 	frame = append(frame, 0, 0, 0, 3) // message length
 	frame = append(frame, 'b', 'a', 'd')
-	client.parseResponse(frame)
+	if client.parseResponse(frame) {
+		t.Fatal("fatal error frame should terminate the session")
+	}
+	if client.parseResponse(frame) {
+		t.Fatal("repeated fatal error frame should terminate the session")
+	}
 
 	select {
 	case <-client.Final():
@@ -98,6 +103,18 @@ func TestParseResponseErrorFrameClosesFinal(t *testing.T) {
 		}
 	default:
 		t.Fatal("error frame result was not published")
+	}
+}
+
+func TestSendAudioRejectsAfterFatalError(t *testing.T) {
+	client := newTestSession()
+	frame := buildHeader(msgErrorServer, flagNone, serJSON, compNone)
+	frame = append(frame, 0, 0, 0, 1, 0, 0, 0, 3, 'b', 'a', 'd')
+	if client.parseResponse(frame) {
+		t.Fatal("fatal error frame should terminate the session")
+	}
+	if err := client.SendAudio(context.Background(), nil, false); err == nil {
+		t.Fatal("SendAudio should reject a failed ASR session")
 	}
 }
 

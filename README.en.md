@@ -183,7 +183,7 @@ systemctl --user start just-talk-plus   # start now
 journalctl --user -u just-talk-plus -f  # view logs
 ```
 
-The generated unit runs `just-talk-plus --gui` with `StandardOutput/Error=journal`; the daemon detects the systemd environment (`INVOCATION_ID`) and writes logs to stderr only (taken over by journald) instead of a file. For autostart without a login session: `loginctl enable-linger $USER`.
+The generated unit runs `just-talk-plus --gui` with the backend detected at installation time (`--backend wayland` or `--backend x11`) so an early session environment cannot fall back to `unknown backend`. It keeps `StandardOutput/Error=journal`; the daemon detects the systemd environment (`INVOCATION_ID`) and writes logs to stderr only (taken over by journald) instead of a file. For autostart without a login session: `loginctl enable-linger $USER`.
 
 ### Using an Android Phone as a Microphone
 
