@@ -8,6 +8,7 @@ package voice
 import (
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -84,6 +85,54 @@ func TestDispatchTextOutputRecordsHistoryBeforeAsyncOutput(t *testing.T) {
 	items := History()
 	if len(items) != 1 || items[0].Text != "先记历史" {
 		t.Fatalf("history immediately after dispatch = %+v, want one entry", items)
+	}
+}
+
+func useTestStatsStore(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "stats.json")
+	originalPathFunc := statsPathFunc
+	statsPathFunc = func() string { return path }
+	tuiStatsMu.Lock()
+	tuiStats = TUIVoiceStats{}
+	tuiStatsMu.Unlock()
+	t.Cleanup(func() {
+		tuiStatsMu.Lock()
+		tuiStats = TUIVoiceStats{}
+		tuiStatsMu.Unlock()
+		statsPathFunc = originalPathFunc
+	})
+}
+
+func TestSubscribeStatsReceivesCoalescedChanges(t *testing.T) {
+	useTestStatsStore(t)
+	tuiStatsMu.Lock()
+	original := tuiStats
+	tuiStats = TUIVoiceStats{}
+	tuiStatsMu.Unlock()
+	t.Cleanup(func() {
+		tuiStatsMu.Lock()
+		tuiStats = original
+		tuiStatsMu.Unlock()
+	})
+
+	changes, unsubscribe := SubscribeStats()
+	defer unsubscribe()
+	recordTUIStats("统计测试", time.Minute)
+	recordTUIStats("第二条", time.Minute)
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("stats change was not delivered")
+	}
+	select {
+	case <-changes:
+		t.Fatal("stats changes should be coalesced while unread")
+	default:
+	}
+	stats := TUIStats()
+	if stats.Sessions != 2 || stats.Chars != uint64(len([]rune("统计测试第二条"))) {
+		t.Fatalf("stats = %+v", stats)
 	}
 }
 

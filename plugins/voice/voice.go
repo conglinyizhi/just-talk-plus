@@ -94,6 +94,9 @@ var tuiStatusMu sync.Mutex
 var tuiStatusListeners = make(map[chan struct{}]struct{})
 var tuiStats TUIVoiceStats
 var tuiStatsMu sync.Mutex
+var tuiStatsListeners = make(map[chan struct{}]struct{})
+var tuiStatsSaveMu sync.Mutex
+var statsPathFunc = statsPath
 
 type TUIVoiceStatus struct {
 	State           string
@@ -188,6 +191,30 @@ func TUIStats() TUIVoiceStats {
 	return tuiStats
 }
 
+func SubscribeStats() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	tuiStatsMu.Lock()
+	tuiStatsListeners[ch] = struct{}{}
+	tuiStatsMu.Unlock()
+	return ch, func() {
+		tuiStatsMu.Lock()
+		if _, ok := tuiStatsListeners[ch]; ok {
+			delete(tuiStatsListeners, ch)
+			close(ch)
+		}
+		tuiStatsMu.Unlock()
+	}
+}
+
+func signalStatsChangedLocked() {
+	for ch := range tuiStatsListeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
 func recordTUIStats(text string, audioDuration time.Duration) {
 	chars := countTextRunes(text)
 	tuiStatsMu.Lock()
@@ -197,8 +224,9 @@ func recordTUIStats(text string, audioDuration time.Duration) {
 	tuiStats.LastTextChars = chars
 	tuiStats.LastAudioDuration = audioDuration
 	snapshot := tuiStats
+	signalStatsChangedLocked()
 	tuiStatsMu.Unlock()
-	go saveTUIStats(snapshot)
+	saveTUIStats(snapshot)
 }
 
 func countTextRunes(text string) int {
@@ -218,7 +246,7 @@ type persistedStats struct {
 }
 
 func loadTUIStats() {
-	data, err := os.ReadFile(statsPath())
+	data, err := os.ReadFile(statsPathFunc())
 	if err != nil {
 		return
 	}
@@ -236,7 +264,9 @@ func loadTUIStats() {
 }
 
 func saveTUIStats(stats TUIVoiceStats) {
-	path := statsPath()
+	tuiStatsSaveMu.Lock()
+	defer tuiStatsSaveMu.Unlock()
+	path := statsPathFunc()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return
 	}
