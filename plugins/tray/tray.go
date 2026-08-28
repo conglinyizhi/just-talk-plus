@@ -66,6 +66,7 @@ type Plugin struct {
 	lastTooltip         string
 	lastAndroidState    string
 	lastHistorySnapshot string
+	configStatusItem    *systray.MenuItem
 
 	engineMenu  *systray.MenuItem
 	engineItems map[string]*systray.MenuItem
@@ -204,6 +205,9 @@ func (p *Plugin) onReady() {
 
 	p.buildHistoryMenu()
 
+	p.configStatusItem = systray.AddMenuItem("配置状态: 未检测", "配置文件修改后的应用状态")
+	p.configStatusItem.Disable()
+
 	systray.AddSeparator()
 
 	// Open the run log.
@@ -236,6 +240,7 @@ func (p *Plugin) onReady() {
 	statusChanges, unsubscribeStatus := voice.SubscribeStatus()
 	historyChanges, unsubscribeHistory := voice.SubscribeHistory()
 	p.syncStatus(voice.TUIStatus())
+	p.syncHistoryMenu()
 	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory)
 }
 
@@ -318,7 +323,9 @@ func (p *Plugin) setEngine(name string) {
 		return
 	}
 	cfg.Voice.Engine = name
-	p.apply(cfg)
+	if err := p.apply(cfg); err != nil {
+		return
+	}
 	p.logger.Info("tray: 切换引擎", "engine", name)
 }
 
@@ -328,7 +335,9 @@ func (p *Plugin) setDevice(name string) {
 		return
 	}
 	cfg.Voice.Device = name
-	p.apply(cfg)
+	if err := p.apply(cfg); err != nil {
+		return
+	}
 	p.logger.Info("tray: 切换设备", "device", name)
 }
 
@@ -342,7 +351,9 @@ func (p *Plugin) setMode(mode string) {
 		return
 	}
 	cfg.Voice.Mode = mode
-	p.apply(cfg)
+	if err := p.apply(cfg); err != nil {
+		return
+	}
 	p.logger.Info("tray: 切换语音模式", "mode", mode)
 }
 
@@ -407,7 +418,9 @@ func (p *Plugin) setAutoStart(on bool) {
 		return
 	}
 	cfg.Voice.AndroidMicAutoStart = on
-	p.apply(cfg)
+	if err := p.apply(cfg); err != nil {
+		return
+	}
 	p.logger.Info("tray: AndroidMic 自动启用", "on", on)
 }
 
@@ -420,6 +433,25 @@ func androidmicPort(cfg *config.Config) int {
 		return cfg.Voice.AndroidMicPort
 	}
 	return 54345
+}
+
+// OnConfigReloadResult shows the result of a configuration hot reload in the tray.
+func (p *Plugin) OnConfigReloadResult(_ *config.Config, err error) {
+	if err != nil {
+		p.setConfigStatus("配置状态: 应用失败")
+		go notifyMessage("配置修改失败", "配置文件已读取，但运行时应用失败：\n"+err.Error())
+		return
+	}
+	p.setConfigStatus("配置状态: 已应用")
+	go notifyMessage("配置已生效", "配置修改已应用到当前运行中的 Just Talk Plus")
+}
+
+func (p *Plugin) setConfigStatus(text string) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if p.configStatusItem != nil {
+		p.configStatusItem.SetTitle(text)
+	}
 }
 
 func (p *Plugin) updateAndroidMic() {
@@ -550,16 +582,20 @@ func (p *Plugin) reloadConfig() *config.Config {
 	return cfg
 }
 
-func (p *Plugin) apply(cfg *config.Config) {
+func (p *Plugin) apply(cfg *config.Config) error {
 	if err := config.SaveTo(p.cfgPath, cfg); err != nil {
 		p.logger.Error("tray: 保存配置失败", "error", err)
-		return
+		p.setConfigStatus("配置状态: 保存失败")
+		go notifyMessage("配置保存失败", "配置文件没有写入成功：\n"+err.Error())
+		return err
 	}
 	if err := p.env.Engine().ReloadConfig(cfg); err != nil {
 		p.logger.Error("tray: 应用配置失败", "error", err)
+		return err
 	}
 	p.syncChecks()
 	p.updateAndroidMic()
+	return nil
 }
 
 // ---- optional global hotkeys ----

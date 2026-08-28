@@ -1,3 +1,6 @@
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+
 package engine
 
 import (
@@ -7,8 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/hotkey"
@@ -33,6 +38,11 @@ type Engine struct {
 	wg     sync.WaitGroup
 
 	mu sync.Mutex
+
+	reloadMu         sync.Mutex
+	reloadTimer      *time.Timer
+	reloadCh         chan string
+	reloadGeneration uint64
 }
 
 // New creates a new Engine with the given hotkey provider, config, and logger.
@@ -140,20 +150,43 @@ func (e *Engine) Start(waitSignal bool) error {
 func (e *Engine) ReloadConfig(cfg *config.Config) error {
 	e.mu.Lock()
 	e.cfg = cfg
+	plugins := append([]Plugin(nil), e.plugins...)
 	e.mu.Unlock()
-	for _, p := range e.plugins {
+	var reloadErr error
+	for _, p := range plugins {
 		if r, ok := p.(Reloader); ok {
-			if err := r.OnConfigReload(cfg); err != nil {
-				return fmt.Errorf("%s: %w", p.Name(), err)
+			if err := r.OnConfigReload(cfg); err != nil && reloadErr == nil {
+				reloadErr = fmt.Errorf("%s: %w", p.Name(), err)
 			}
 		}
 	}
-	return nil
+	e.notifyConfigReloadResult(cfg, reloadErr)
+	return reloadErr
+}
+
+func (e *Engine) notifyConfigReloadResult(cfg *config.Config, reloadErr error) {
+	e.mu.Lock()
+	plugins := append([]Plugin(nil), e.plugins...)
+	e.mu.Unlock()
+	for _, p := range plugins {
+		if observer, ok := p.(ConfigReloadObserver); ok {
+			observer.OnConfigReloadResult(cfg, reloadErr)
+		}
+	}
 }
 
 func (e *Engine) Stop() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	e.reloadMu.Lock()
+	e.reloadGeneration++
+	if e.reloadTimer != nil {
+		e.reloadTimer.Stop()
+		e.reloadTimer = nil
+	}
+	e.reloadCh = nil
+	e.reloadMu.Unlock()
 
 	e.logger.Info("engine stop requested")
 	e.cancel()
@@ -186,9 +219,64 @@ func (e *Engine) handleSignals() {
 	signal.Stop(sigCh)
 }
 
+const configReloadDebounce = 100 * time.Millisecond
+
+func (e *Engine) scheduleConfigReload(path string) {
+	e.reloadMu.Lock()
+	defer e.reloadMu.Unlock()
+	if e.reloadTimer != nil {
+		e.reloadTimer.Stop()
+	}
+	if e.reloadCh == nil {
+		e.reloadCh = make(chan string, 1)
+	}
+	e.reloadGeneration++
+	generation := e.reloadGeneration
+	e.reloadTimer = time.AfterFunc(configReloadDebounce, func() {
+		e.reloadMu.Lock()
+		if generation != e.reloadGeneration {
+			e.reloadMu.Unlock()
+			return
+		}
+		ch := e.reloadCh
+		e.reloadTimer = nil
+		e.reloadMu.Unlock()
+		select {
+		case ch <- path:
+		default:
+		}
+	})
+}
+
+func (e *Engine) configReloadChannel() <-chan string {
+	e.reloadMu.Lock()
+	defer e.reloadMu.Unlock()
+	return e.reloadCh
+}
+
+func (e *Engine) reloadConfigFile(path string) {
+	e.logger.Info("config file changed, reloading", "path", path)
+	newCfg, err := config.Load(path)
+	if err != nil {
+		e.logger.Error("failed to reload config", "error", err)
+		e.notifyConfigReloadResult(nil, err)
+		return
+	}
+	if e.ctx.Err() != nil {
+		return
+	}
+	e.mu.Lock()
+	unchanged := reflect.DeepEqual(e.cfg, newCfg)
+	e.mu.Unlock()
+	if unchanged {
+		return
+	}
+	if err := e.ReloadConfig(newCfg); err != nil {
+		e.logger.Error("config reload failed", "error", err)
+	}
+}
+
 // WatchConfig starts a file watcher that hot-reloads the config.
-// When the config file changes, all plugins implementing Reloader
-// receive OnConfigReload with the new config.
 func (e *Engine) WatchConfig(path string) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
@@ -208,6 +296,9 @@ func (e *Engine) WatchConfig(path string) {
 	}
 
 	e.logger.Info("watching config for changes", "dir", dir, "file", base)
+	e.reloadMu.Lock()
+	e.reloadCh = make(chan string, 1)
+	e.reloadMu.Unlock()
 
 	go func() {
 		defer watcher.Close()
@@ -222,30 +313,11 @@ func (e *Engine) WatchConfig(path string) {
 				if filepath.Base(event.Name) != base {
 					continue
 				}
-				if event.Has(fsnotify.Write) {
-					e.logger.Info("config file changed, reloading", "path", path)
-					newCfg, err := config.Load(path)
-					if err != nil {
-						e.logger.Error("failed to reload config", "error", err)
-						continue
-					}
-					// Update engine config
-					e.mu.Lock()
-					if e.ctx.Err() != nil {
-						e.mu.Unlock()
-						return
-					}
-					e.cfg = newCfg
-					e.mu.Unlock()
-					// Notify plugins
-					for _, p := range e.plugins {
-						if r, ok := p.(Reloader); ok {
-							if err := r.OnConfigReload(newCfg); err != nil {
-								e.logger.Error("plugin config reload failed", "plugin", p.Name(), "error", err)
-							}
-						}
-					}
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) {
+					e.scheduleConfigReload(path)
 				}
+			case reloadPath := <-e.configReloadChannel():
+				e.reloadConfigFile(reloadPath)
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return

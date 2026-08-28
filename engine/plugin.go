@@ -1,3 +1,6 @@
+// Copyright (C) 2026 conglinyizhi
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Package engine provides the application lifecycle manager and plugin system.
 //
 // The Engine coordinates the hotkey provider, manages plugin loading,
@@ -65,6 +68,14 @@ type PluginEnv interface {
 // receive notifications when the configuration file is hot-reloaded.
 type Reloader interface {
 	OnConfigReload(cfg *config.Config) error
+}
+
+// ConfigReloadObserver receives visible success/failure notifications for
+// configuration reloads. It is intentionally separate from Reloader so a
+// control-surface plugin can report reload results without participating in
+// the runtime configuration mutation.
+type ConfigReloadObserver interface {
+	OnConfigReloadResult(cfg *config.Config, err error)
 }
 
 // basePlugin provides a default implementation for optional methods.
