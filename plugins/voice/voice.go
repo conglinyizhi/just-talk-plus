@@ -874,6 +874,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		}
 		return
 	}
+	connectStarted := time.Now()
 	connectDone := make(chan error, 1)
 	go func() { connectDone <- client.Connect(ctx) }()
 	connectTimer := time.NewTimer(asrConnectTimeout)
@@ -893,6 +894,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		}()
 	}
 	if err != nil {
+		p.logger.Warn("ASR connection attempt failed", "engine", engineInfo.Name(), "duration_ms", time.Since(connectStarted).Milliseconds(), "timeout", connectTimedOut, "error", err)
 		wasCanceled := ctx.Err() != nil
 		cancel()
 		p.mu.Lock()
@@ -916,6 +918,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		}
 		return
 	}
+	p.logger.Info("ASR connection attempt succeeded", "engine", engineInfo.Name(), "duration_ms", time.Since(connectStarted).Milliseconds())
 	pout("✅ ASR 已连接 (引擎: %s)", engineInfo.Name())
 	audioRate := speech.PCMRate
 	if provider, ok := client.(speech.AudioSentFormatProvider); ok && provider.AudioSentSampleRate() > 0 {

@@ -825,6 +825,7 @@ func terminalCommand(args ...string) *exec.Cmd {
 }
 
 const historyMenuSlots = 8
+const historyMenuTitle = "历史记录"
 
 func (p *Plugin) buildHistoryMenu() {
 	p.historyMenu = systray.AddMenuItem("历史记录", "最近识别记录")
@@ -832,6 +833,11 @@ func (p *Plugin) buildHistoryMenu() {
 	for i := 0; i < historyMenuSlots; i++ {
 		index := i
 		item := p.historyMenu.AddSubMenuItem("暂无记录", "")
+		item.AddSubMenuItem("使用当前引擎重试", "重新识别这条录音").Click(func() {
+			if entry, ok := p.historyEntry(index); ok {
+				p.retryHistory(entry)
+			}
+		})
 		item.AddSubMenuItem("播放录音", "").Click(func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.replayRecording(entry.RecordingPath)
@@ -882,6 +888,7 @@ func (p *Plugin) syncHistoryMenuWithForce(force bool) {
 		return
 	}
 	p.lastHistorySnapshot = snapshot
+	p.historyMenu.SetTitle(historyMenuTitle)
 	p.historyMenu.SetTooltip(fmt.Sprintf("最近识别记录（%d 条）", len(history)))
 	for i, item := range p.historySlots {
 		if i < len(history) {
@@ -983,6 +990,26 @@ func (p *Plugin) scheduleStatsRefresh() {
 
 func historySnapshot(history []voice.HistoryEntry) string {
 	return fmt.Sprintf("%v", history)
+}
+
+func (p *Plugin) retryHistory(entry voice.HistoryEntry) {
+	if entry.RecordingPath == "" {
+		go notifyMessage("语音重试", "这条历史没有可用的录音文件。\n\n请确认录音时开启了「保留录音文件」。")
+		return
+	}
+	go notifyMessage("语音重试", "正在读取录音并使用当前引擎识别…")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		result, err := voice.RetryHistory(ctx, entry, p.env.Config().Voice)
+		if err != nil {
+			p.logger.Error("tray: 历史录音重试失败", "error", err)
+			go notifyMessage("语音重试失败", err.Error()+"\n\n原历史记录未修改。")
+			return
+		}
+		p.logger.Info("tray: 历史录音重试成功", "engine", result.Engine, "text_len", len(result.Text))
+		go notifyMessage("语音重试成功", fmt.Sprintf("识别结果：\n%s\n\n已新增到历史记录。不会自动上屏或写入剪贴板；如需使用，请从历史记录中复制。", result.Text))
+	}()
 }
 
 func (p *Plugin) replayRecording(path string) {

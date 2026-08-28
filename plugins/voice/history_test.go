@@ -7,11 +7,13 @@ package voice
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
@@ -75,6 +77,19 @@ func TestHistoryRing(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("history snapshot was not saved: %v", err)
+	}
+}
+
+func TestRetryHistoryMissingRecordingDoesNotChangeHistory(t *testing.T) {
+	useTestHistoryStore(t)
+	entry := HistoryEntry{Text: "原记录"}
+	before := History()
+	_, err := RetryHistory(context.Background(), entry, config.Default().Voice)
+	if err == nil {
+		t.Fatal("retry without recording should fail")
+	}
+	if got := History(); len(got) != len(before) {
+		t.Fatalf("history changed after failed retry: before=%d after=%d", len(before), len(got))
 	}
 }
 

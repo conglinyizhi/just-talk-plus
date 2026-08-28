@@ -6,21 +6,110 @@
 package voice
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/conglinyizhi/just-talk-plus/config"
+	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
 	"github.com/conglinyizhi/just-talk-plus/internal/speech"
 )
 
 // historyCap 运行期滚动保存的最近识别结果条数。
 const historyCap = 50
 
-// HistoryEntry 一条识别历史。
+// RetryResult 是历史录音重新识别的结果。
+type RetryResult struct {
+	Text   string
+	Engine string
+}
+
+// RetryHistory 使用当前配置的语音引擎重新识别一条历史录音。
+// 成功后只新增历史，不执行上屏、剪贴板或统计输出；原历史条目保持不变。
+func RetryHistory(ctx context.Context, entry HistoryEntry, vc config.VoiceConfig) (RetryResult, error) {
+	if !retryMu.TryLock() {
+		return RetryResult{}, fmt.Errorf("已有重试任务正在进行")
+	}
+	defer retryMu.Unlock()
+	if strings.TrimSpace(entry.RecordingPath) == "" {
+		return RetryResult{}, fmt.Errorf("这条历史没有可用的录音文件")
+	}
+	wav, err := os.ReadFile(entry.RecordingPath)
+	if err != nil {
+		return RetryResult{}, fmt.Errorf("读取录音失败: %w", err)
+	}
+	if len(wav) == 0 {
+		return RetryResult{}, fmt.Errorf("录音文件为空")
+	}
+	eng, err := asrcfg.Build(vc)
+	if err != nil {
+		return RetryResult{}, err
+	}
+	if ok, detail := eng.Available(ctx); !ok {
+		return RetryResult{}, fmt.Errorf("当前引擎不可用: %s", detail)
+	}
+	// 录音文件默认是标准 WAV；流式 DashScope 接口要求裸 PCM。
+	audio := wav
+	contentType := "audio/wav"
+	if eng.Name() == "dashscope" {
+		pcm, _, err := readWAV(entry.RecordingPath)
+		if err != nil {
+			return RetryResult{}, fmt.Errorf("解析录音失败: %w", err)
+		}
+		audio = pcm
+		contentType = "audio/pcm"
+	}
+	result, err := eng.Transcribe(ctx, speech.TranscribeRequest{
+		Audio:       audio,
+		ContentType: contentType,
+		Lang:        vc.Language,
+	})
+	if err != nil {
+		return RetryResult{}, fmt.Errorf("%s 识别失败: %w", eng.Name(), err)
+	}
+	text := strings.TrimSpace(result.Text)
+	if text == "" {
+		return RetryResult{}, fmt.Errorf("%s 未识别到文本", eng.Name())
+	}
+	text = cleanRetryText(text, vc)
+	if !recordRetryHistory(text, entry.RecordingPath) {
+		return RetryResult{}, fmt.Errorf("识别成功，但历史记录写入失败")
+	}
+	return RetryResult{Text: text, Engine: eng.Name()}, nil
+}
+
+func cleanRetryText(text string, vc config.VoiceConfig) string {
+	text = cleanTrailingPunct(text, vc)
+	if vc.RemoveCJKSpace {
+		text = cleanCJKSpace(text)
+	}
+	if vc.AutoSpace {
+		text = autoSpaceCJK(text)
+	}
+	return text
+}
+
+func recordRetryHistory(text, recordingPath string) bool {
+	if text == "" || recordingPath == "" {
+		return false
+	}
+	historyMu.Lock()
+	defer historyMu.Unlock()
+	previous := history
+	history = trimHistory(append([]HistoryEntry{{Text: text, Time: time.Now(), RecordingPath: recordingPath}}, history...))
+	removeDiscardedRecordings(previous, history)
+	saveHistoryLocked()
+	signalHistoryChangedLocked()
+	return true
+}
+
 type HistoryEntry struct {
 	Text          string
 	Time          time.Time
@@ -33,6 +122,7 @@ var (
 	history          []HistoryEntry // 最新在前
 	historyPathFunc  = defaultHistoryPath
 	historyListeners = make(map[chan struct{}]struct{})
+	retryMu          sync.Mutex
 )
 
 func defaultHistoryPath() string {

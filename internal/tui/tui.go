@@ -12,6 +12,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -201,6 +202,7 @@ type historyAction string
 
 const (
 	historyCopy   historyAction = "copy"
+	historyRetry  historyAction = "retry"
 	historyPlay   historyAction = "play"
 	historyReveal historyAction = "reveal"
 )
@@ -550,6 +552,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case linkOpenFailedMsg:
 		m.logf("❌ 打开链接失败: %s", msg.err)
+	case historyRetryMsg:
+		if msg.err != nil {
+			m.logf("❌ 语音重试失败: %s；原历史记录未修改", msg.err)
+		} else {
+			m.logf("✅ 语音重试成功（引擎: %s）: %s", msg.result.Engine, truncateText(msg.result.Text, 100))
+			m.logf("   已新增到历史；不会自动上屏或写入剪贴板，请从历史记录中复制")
+		}
 	case recordingActionMsg:
 		if msg.err != nil {
 			m.logf("❌ 录音操作失败: %s", msg.err)
@@ -1291,7 +1300,7 @@ func (m *Model) copyHistoryText(text string) {
 }
 
 func (m *Model) openHistoryMenu(i int, entry voice.HistoryEntry) {
-	m.historyMenu = &historyMenuState{entry: entry, entryIndex: i, actions: []historyAction{historyCopy, historyPlay, historyReveal}}
+	m.historyMenu = &historyMenuState{entry: entry, entryIndex: i, actions: []historyAction{historyCopy, historyRetry, historyPlay, historyReveal}}
 }
 
 func (m *Model) handleHistoryMenuKey(key string) tea.Cmd {
@@ -1312,6 +1321,9 @@ func (m *Model) handleHistoryMenuKey(key string) tea.Cmd {
 		switch action {
 		case historyCopy:
 			m.copyHistoryText(entry.Text)
+		case historyRetry:
+			m.logf("⏳ 正在读取录音并使用当前引擎识别…")
+			return retryHistoryCmd(entry, *m.cfg)
 		case historyPlay:
 			return recordingActionCmd(entry.RecordingPath, false)
 		case historyReveal:
@@ -1323,7 +1335,7 @@ func (m *Model) handleHistoryMenuKey(key string) tea.Cmd {
 
 func (m *Model) renderHistoryMenu() string {
 	menu := m.historyMenu
-	labels := map[historyAction]string{historyCopy: "复制识别文本", historyPlay: "播放录音（无 ffplay 时打开文件夹）", historyReveal: "在文件管理器中显示录音"}
+	labels := map[historyAction]string{historyCopy: "复制识别文本", historyRetry: "使用当前引擎重试", historyPlay: "播放录音（无 ffplay 时打开文件夹）", historyReveal: "在文件管理器中显示录音"}
 	lines := []string{" " + lStyle.Render("历史记录操作")}
 	// 序号 + 时间戳：让操作对象与列表中的条目可对照，长列表下不迷路。
 	lines = append(lines, "  "+dStyle.Render(fmt.Sprintf("#%d  %s", menu.entryIndex+1, menu.entry.Time.Format("15:04:05"))))
@@ -1740,6 +1752,19 @@ type recordingActionMsg struct {
 	err    error
 }
 
+type historyRetryMsg struct {
+	result voice.RetryResult
+	err    error
+}
+
+func retryHistoryCmd(entry voice.HistoryEntry, cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		result, err := voice.RetryHistory(ctx, entry, cfg.Voice)
+		return historyRetryMsg{result: result, err: err}
+	}
+}
 func recordingActionCmd(path string, reveal bool) tea.Cmd {
 	return func() tea.Msg {
 		if reveal {
