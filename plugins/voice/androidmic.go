@@ -65,12 +65,35 @@ func AndroidMicDiagnosticReport() string {
 		fmt.Fprintf(&b, "   connected_at: %s\n", formatAndroidMicTime(session.ConnectedAt))
 		fmt.Fprintf(&b, "   disconnected_at: %s\n", formatAndroidMicTime(session.DisconnectedAt))
 		fmt.Fprintf(&b, "   handshake_ok: %t\n", session.HandshakeOK)
+		formatName := androidMicFormatName(session.AudioFormat)
+		fmt.Fprintf(&b, "   format: %d Hz / %d ch / %s\n", session.SampleRate, session.ChannelCount, formatName)
+		fmt.Fprintf(&b, "   packet_bytes: %d..%d\n", session.MinPacketBytes, session.MaxPacketBytes)
+		if session.AudioFormat == 4 || session.ChannelCount != 1 {
+			b.WriteString("   recommendation: use 16000 Hz / 1 ch / PCM16; AndroidMic F32 short reads may retain stale buffer tail\n")
+		}
 		fmt.Fprintf(&b, "   packets_received: %d, pcm_bytes: %d, delivered_frames: %d\n", session.PacketsReceived, session.PCMBytes, session.DeliveredFrames)
 		fmt.Fprintf(&b, "   decode_errors: %d, convert_errors: %d\n", session.DecodeErrors, session.ConvertErrors)
 		fmt.Fprintf(&b, "   dropped_no_consumer: %d, dropped_queue_full: %d\n", session.DroppedNoConsumer, session.DroppedQueueFull)
 		fmt.Fprintf(&b, "   last_packet_at: %s\n", formatAndroidMicTime(session.LastPacketAt))
 	}
 	return b.String()
+}
+
+func androidMicFormatName(format uint32) string {
+	switch format {
+	case 2:
+		return "PCM16"
+	case 3:
+		return "PCM8"
+	case 4:
+		return "F32"
+	case 21:
+		return "PCM24"
+	case 22:
+		return "PCM32"
+	default:
+		return fmt.Sprintf("unknown(%d)", format)
+	}
 }
 
 func formatAndroidMicTime(t time.Time) string {

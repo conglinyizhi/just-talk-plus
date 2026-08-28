@@ -81,6 +81,9 @@ func convertPacket(pkt AudioPacket, conv *converter) ([]byte, error) {
 	// 4) 转 s16le
 	out := make([]byte, 0, len(resampled)*2)
 	for _, s := range resampled {
+		if math.IsNaN(s) || math.IsInf(s, 0) {
+			s = 0
+		}
 		v := s * 32767.0
 		if v > 32767 {
 			v = 32767

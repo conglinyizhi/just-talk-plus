@@ -45,6 +45,11 @@ type SessionDiagnostic struct {
 	DroppedNoConsumer uint64
 	DroppedQueueFull  uint64
 	LastPacketAt      time.Time
+	SampleRate        uint32
+	ChannelCount      uint32
+	AudioFormat       uint32
+	MinPacketBytes    uint64
+	MaxPacketBytes    uint64
 }
 
 // Status is a server snapshot for the UI and on-demand diagnostics.
@@ -334,6 +339,18 @@ func (s *Server) handleConn(conn net.Conn, stats *SessionDiagnostic) {
 			s.logger.Debug("androidmic: 音频转换失败", "remote", remote, "error", err)
 			continue
 		}
+		s.mu.Lock()
+		stats.SampleRate = pkt.SampleRate
+		stats.ChannelCount = pkt.ChannelCount
+		stats.AudioFormat = pkt.AudioFormat
+		packetBytes := uint64(len(pkt.Buffer))
+		if stats.MinPacketBytes == 0 || packetBytes < stats.MinPacketBytes {
+			stats.MinPacketBytes = packetBytes
+		}
+		if packetBytes > stats.MaxPacketBytes {
+			stats.MaxPacketBytes = packetBytes
+		}
+		s.mu.Unlock()
 		s.writeAudio(stats, pcm)
 	}
 }

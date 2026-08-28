@@ -164,6 +164,35 @@ func TestStatusIncludesBoundedSessionDiagnostics(t *testing.T) {
 	}
 }
 
+func TestStatusRecordsIncomingAudioFormat(t *testing.T) {
+	s, port := startTestServer(t)
+	conn := dialClient(t, port)
+	src, err := s.OpenSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	buf := make([]byte, 4*2*4)
+	sendPacket(t, conn, AudioPacket{Buffer: buf, SampleRate: 48000, ChannelCount: 2, AudioFormat: encPCMFLOAT})
+	if _, err := readFull(src, 4, 2*time.Second); err != nil {
+		t.Fatalf("read audio: %v", err)
+	}
+	_ = conn.Close()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		st := s.Status()
+		if len(st.RecentSessions) == 1 && st.RecentSessions[0].SampleRate == 48000 {
+			got := st.RecentSessions[0]
+			if got.ChannelCount != 2 || got.AudioFormat != encPCMFLOAT || got.MinPacketBytes != uint64(len(buf)) || got.MaxPacketBytes != uint64(len(buf)) {
+				t.Fatalf("format diagnostic = %+v", got)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("format diagnostic did not update: %+v", s.Status().RecentSessions)
+}
+
 func TestServerResamples48000(t *testing.T) {
 	s, port := startTestServer(t)
 	conn := dialClient(t, port)

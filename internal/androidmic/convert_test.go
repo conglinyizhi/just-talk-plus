@@ -111,6 +111,58 @@ func TestConvertResamplerContinuityAcrossFrames(t *testing.T) {
 	}
 }
 
+func TestConvertStereoF32ResamplesToMonoWithoutDuplication(t *testing.T) {
+	const inputFrames = 4800
+	input := make([]byte, 0, inputFrames*2*4)
+	for i := 0; i < inputFrames; i++ {
+		left := float32(math.Sin(2 * math.Pi * 440 * float64(i) / 48000))
+		right := float32(math.Sin(2 * math.Pi * 880 * float64(i) / 48000))
+		for _, sample := range []float32{left, right} {
+			bits := math.Float32bits(sample)
+			input = append(input, byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24))
+		}
+	}
+	out, err := convertPacket(AudioPacket{
+		Buffer: input, SampleRate: 48000, ChannelCount: 2, AudioFormat: encPCMFLOAT,
+	}, newConverter())
+	if err != nil {
+		t.Fatalf("stereo f32 convert failed: %v", err)
+	}
+	wantFrames := inputFrames / 3
+	if len(out) < (wantFrames-2)*2 || len(out) > (wantFrames+2)*2 {
+		t.Fatalf("output frames = %d, want about %d", len(out)/2, wantFrames)
+	}
+	for i := 0; i+1 < len(out); i += 2 {
+		v := int16(out[i]) | int16(out[i+1])<<8
+		if v < -32768 || v > 32767 {
+			t.Fatalf("sample %d out of PCM16 range: %d", i/2, v)
+		}
+	}
+}
+
+func TestConvertF32NonFiniteSamplesBecomeSilence(t *testing.T) {
+	input := make([]byte, 0, 12)
+	for _, sample := range []float32{float32(math.NaN()), float32(math.Inf(1)), 0.5} {
+		bits := math.Float32bits(sample)
+		input = append(input, byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24))
+	}
+	out, err := convertPacket(AudioPacket{
+		Buffer: input, SampleRate: 16000, ChannelCount: 1, AudioFormat: encPCMFLOAT,
+	}, newConverter())
+	if err != nil {
+		t.Fatalf("non-finite f32 convert failed: %v", err)
+	}
+	if got := int16(out[0]) | int16(out[1])<<8; got != 0 {
+		t.Fatalf("NaN sample = %d, want silence", got)
+	}
+	if got := int16(out[2]) | int16(out[3])<<8; got != 0 {
+		t.Fatalf("Inf sample = %d, want silence", got)
+	}
+	if got := int16(out[4]) | int16(out[5])<<8; got < 16383 || got > 16385 {
+		t.Fatalf("finite sample = %d, want ~16384", got)
+	}
+}
+
 func TestConvertF32AndU8(t *testing.T) {
 	conv := newConverter()
 	// F32 满幅 1.0 → 32767
