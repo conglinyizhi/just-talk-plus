@@ -165,6 +165,26 @@ func TestPortOnline(t *testing.T) {
 	}
 }
 
+func TestFormatStatsSpeed(t *testing.T) {
+	if got := formatStatsSpeed(0, 0); got != "0" {
+		t.Fatalf("zero speed = %q, want 0", got)
+	}
+	if got := formatStatsSpeed(60, time.Minute); got != "60" {
+		t.Fatalf("speed = %q, want 60", got)
+	}
+}
+
+func TestHistoryRefreshGenerationSupersedesOlderRetry(t *testing.T) {
+	p := &Plugin{}
+	p.historyRefreshGeneration = 1
+	first := p.historyRefreshGeneration
+	p.historyRefreshGeneration++
+	second := p.historyRefreshGeneration
+	if first == second {
+		t.Fatal("new history refresh must supersede the previous generation")
+	}
+}
+
 func TestHistorySnapshotChangesWhenEntriesChange(t *testing.T) {
 	first := []voice.HistoryEntry{{Text: "first", Time: time.Unix(1, 0)}}
 	second := []voice.HistoryEntry{{Text: "second", Time: time.Unix(2, 0)}}

@@ -66,7 +66,15 @@ type Plugin struct {
 	lastTooltip         string
 	lastAndroidState    string
 	lastHistorySnapshot string
+	lastStatsSnapshot   string
 	configStatusItem    *systray.MenuItem
+	statsMenu           *systray.MenuItem
+	statsItems          [4]*systray.MenuItem
+
+	historyRefreshMu         sync.Mutex
+	historyRefreshGeneration uint64
+	statsRefreshMu           sync.Mutex
+	statsRefreshGeneration   uint64
 
 	engineMenu  *systray.MenuItem
 	engineItems map[string]*systray.MenuItem
@@ -207,6 +215,16 @@ func (p *Plugin) onReady() {
 
 	p.buildHistoryMenu()
 
+	p.statsMenu = systray.AddMenuItem("统计信息", "Just Talk Plus 语音输入统计")
+	p.statsItems[0] = p.statsMenu.AddSubMenuItem("总使用次数：0", "")
+	p.statsItems[1] = p.statsMenu.AddSubMenuItem("输入字数：0", "")
+	p.statsItems[2] = p.statsMenu.AddSubMenuItem("平均速度：0 字/分钟", "")
+	p.statsItems[3] = p.statsMenu.AddSubMenuItem("最近速度：0 字/分钟", "")
+	for _, item := range p.statsItems {
+		item.Disable()
+	}
+	p.syncStatsMenu()
+
 	p.configStatusItem = systray.AddMenuItem("配置状态: 未检测", "配置文件修改后的应用状态")
 	p.configStatusItem.Disable()
 
@@ -241,26 +259,44 @@ func (p *Plugin) onReady() {
 	p.updateAndroidMic()
 	statusChanges, unsubscribeStatus := voice.SubscribeStatus()
 	historyChanges, unsubscribeHistory := voice.SubscribeHistory()
+	statsChanges, unsubscribeStats := voice.SubscribeStats()
 	p.syncStatus(voice.TUIStatus())
 	p.syncHistoryMenu()
-	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory)
+	p.syncStatsMenu()
+	p.scheduleHistoryRefresh()
+	p.scheduleStatsRefresh()
+	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory, statsChanges, unsubscribeStats)
 }
 
-func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribeStatus func(), historyChanges <-chan struct{}, unsubscribeHistory func()) {
+func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribeStatus func(), historyChanges <-chan struct{}, unsubscribeHistory func(), statsChanges <-chan struct{}, unsubscribeStats func()) {
 	defer unsubscribeStatus()
 	defer unsubscribeHistory()
+	defer unsubscribeStats()
 	t := time.NewTicker(1 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-statusChanges:
-			p.syncStatus(voice.TUIStatus())
+			st := voice.TUIStatus()
+			p.syncStatus(st)
+			p.syncHistoryMenu()
+			p.syncStatsMenu()
+			if st.State == "idle" {
+				p.scheduleHistoryRefresh()
+				p.scheduleStatsRefresh()
+			}
 		case <-historyChanges:
 			p.syncHistoryMenu()
+			p.syncStatsMenu()
+			p.scheduleHistoryRefresh()
+		case <-statsChanges:
+			p.syncStatsMenu()
+			p.scheduleStatsRefresh()
 		case <-t.C:
 			p.syncStatus(voice.TUIStatus())
 			p.updateAndroidMic()
 			p.syncHistoryMenu()
+			p.syncStatsMenu()
 		case <-p.env.Engine().Context().Done():
 			return
 		}
@@ -831,6 +867,10 @@ func (p *Plugin) historyEntry(index int) (voice.HistoryEntry, bool) {
 }
 
 func (p *Plugin) syncHistoryMenu() {
+	p.syncHistoryMenuWithForce(false)
+}
+
+func (p *Plugin) syncHistoryMenuWithForce(force bool) {
 	if p.historyMenu == nil {
 		return
 	}
@@ -838,10 +878,11 @@ func (p *Plugin) syncHistoryMenu() {
 	snapshot := historySnapshot(history)
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
-	if snapshot == p.lastHistorySnapshot {
+	if !force && snapshot == p.lastHistorySnapshot {
 		return
 	}
 	p.lastHistorySnapshot = snapshot
+	p.historyMenu.SetTooltip(fmt.Sprintf("最近识别记录（%d 条）", len(history)))
 	for i, item := range p.historySlots {
 		if i < len(history) {
 			entry := history[i]
@@ -860,6 +901,84 @@ func (p *Plugin) recentHistory() []voice.HistoryEntry {
 		h = h[:8]
 	}
 	return h
+}
+
+// scheduleHistoryRefresh covers desktop menu implementations that cache a
+// submenu while it is open or defer the first layout update. A new history
+// event supersedes older retries, so this remains bounded and does not create
+// a periodic D-Bus refresh loop.
+func (p *Plugin) scheduleHistoryRefresh() {
+	p.historyRefreshMu.Lock()
+	p.historyRefreshGeneration++
+	generation := p.historyRefreshGeneration
+	p.historyRefreshMu.Unlock()
+	go func() {
+		for _, delay := range []time.Duration{50 * time.Millisecond, 250 * time.Millisecond, 750 * time.Millisecond} {
+			time.Sleep(delay)
+			p.historyRefreshMu.Lock()
+			current := generation == p.historyRefreshGeneration
+			p.historyRefreshMu.Unlock()
+			if !current || p.env.Engine().Context().Err() != nil {
+				return
+			}
+			p.syncHistoryMenuWithForce(true)
+		}
+	}()
+}
+
+func formatStatsSpeed(chars int, duration time.Duration) string {
+	if duration <= 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.0f", float64(chars)/duration.Minutes())
+}
+
+func (p *Plugin) syncStatsMenu() {
+	p.syncStatsMenuWithForce(false)
+}
+
+func (p *Plugin) syncStatsMenuWithForce(force bool) {
+	if p.statsMenu == nil {
+		return
+	}
+	stats := voice.TUIStats()
+	values := [4]string{
+		fmt.Sprintf("总使用次数：%d", stats.Sessions),
+		fmt.Sprintf("输入字数：%d", stats.Chars),
+		fmt.Sprintf("平均速度：%s 字/分钟", formatStatsSpeed(int(stats.Chars), stats.AudioDuration)),
+		fmt.Sprintf("最近速度：%s 字/分钟", formatStatsSpeed(stats.LastTextChars, stats.LastAudioDuration)),
+	}
+	snapshot := strings.Join(values[:], "\x00")
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if !force && snapshot == p.lastStatsSnapshot {
+		return
+	}
+	p.lastStatsSnapshot = snapshot
+	for i, item := range p.statsItems {
+		item.SetTitle(values[i])
+	}
+}
+
+// scheduleStatsRefresh retries the stats layout update during the short
+// window after an identification result is committed.
+func (p *Plugin) scheduleStatsRefresh() {
+	p.statsRefreshMu.Lock()
+	p.statsRefreshGeneration++
+	generation := p.statsRefreshGeneration
+	p.statsRefreshMu.Unlock()
+	go func() {
+		for _, delay := range []time.Duration{50 * time.Millisecond, 250 * time.Millisecond, 750 * time.Millisecond} {
+			time.Sleep(delay)
+			p.statsRefreshMu.Lock()
+			current := generation == p.statsRefreshGeneration
+			p.statsRefreshMu.Unlock()
+			if !current || p.env.Engine().Context().Err() != nil {
+				return
+			}
+			p.syncStatsMenuWithForce(true)
+		}
+	}()
 }
 
 func historySnapshot(history []voice.HistoryEntry) string {
