@@ -22,6 +22,13 @@
 // refreshed when something actually changes — writing to a MenuItem every
 // second would trigger a D-Bus menu version bump and make KDE redraw (and thus
 // flicker) the open menu.
+//
+// systray is fyne.io/systray, not energye/systray. On Linux it implements
+// com.canonical.dbusmenu.ItemsPropertiesUpdated so in-process label changes
+// (history / stats / device state) propagate to the host even when the target
+// is a second-level submenu item — the older energye fork only emitted a
+// top-level LayoutUpdated and Plasma kept the submenu content frozen at the
+// first expansion.
 package tray
 
 import (
@@ -41,13 +48,13 @@ import (
 	"sync"
 	"time"
 
+	"fyne.io/systray"
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/engine"
 	"github.com/conglinyizhi/just-talk-plus/hotkey"
 	"github.com/conglinyizhi/just-talk-plus/internal/asrcfg"
 	"github.com/conglinyizhi/just-talk-plus/internal/clipboard"
 	"github.com/conglinyizhi/just-talk-plus/plugins/voice"
-	"github.com/energye/systray"
 )
 
 // Plugin is the system tray control plugin.
@@ -70,11 +77,6 @@ type Plugin struct {
 	configStatusItem    *systray.MenuItem
 	statsMenu           *systray.MenuItem
 	statsItems          [4]*systray.MenuItem
-
-	historyRefreshMu         sync.Mutex
-	historyRefreshGeneration uint64
-	statsRefreshMu           sync.Mutex
-	statsRefreshGeneration   uint64
 
 	engineMenu  *systray.MenuItem
 	engineItems map[string]*systray.MenuItem
@@ -156,6 +158,19 @@ func (p *Plugin) quit() {
 	p.quitOnce.Do(func() { systray.Quit() })
 }
 
+// click wires an energye-style `Click(fn)` API onto fyne.io/systray, which
+// exposes a ClickedCh channel instead. Exactly one reader per menu item.
+func click(item *systray.MenuItem, fn func()) {
+	if item == nil {
+		return
+	}
+	go func() {
+		for range item.ClickedCh {
+			fn()
+		}
+	}()
+}
+
 func (p *Plugin) onReady() {
 	systray.SetIcon(statusIcon("idle"))
 	systray.SetTooltip("Just Talk Plus · 待机")
@@ -167,32 +182,32 @@ func (p *Plugin) onReady() {
 	for _, name := range asrcfg.Types() {
 		name := name
 		item := p.engineMenu.AddSubMenuItemCheckbox(name, "", name == cfg.Voice.Engine)
-		item.Click(func() { p.setEngine(name) })
+		click(item, func() { p.setEngine(name) })
 		p.engineItems[name] = item
 	}
 
 	// Microphone device picker.
 	p.deviceMenu = systray.AddMenuItem("麦克风", "选择输入设备")
 	autoItem := p.deviceMenu.AddSubMenuItemCheckbox("自动（默认）", "", cfg.Voice.Device == "")
-	autoItem.Click(func() { p.setDevice("") })
+	click(autoItem, func() { p.setDevice("") })
 	p.deviceItems[""] = autoItem
 	// Virtual microphone (AndroidMic) is always selectable, whether or not the
 	// server is running — it points the recorder at the embedded server.
 	amItem := p.deviceMenu.AddSubMenuItemCheckbox("虚拟麦克风（AndroidMic）", "device=androidmic", cfg.Voice.Device == voice.AndroidMicDeviceName())
-	amItem.Click(func() { p.setDevice(voice.AndroidMicDeviceName()) })
+	click(amItem, func() { p.setDevice(voice.AndroidMicDeviceName()) })
 	p.deviceItems[voice.AndroidMicDeviceName()] = amItem
 	if devs, err := voice.ListDevices(); err == nil {
 		for _, d := range devs {
 			d := d
 			item := p.deviceMenu.AddSubMenuItemCheckbox(d, "", d == cfg.Voice.Device)
-			item.Click(func() { p.setDevice(d) })
+			click(item, func() { p.setDevice(d) })
 			p.deviceItems[d] = item
 		}
 	}
 
 	// Recording behaviour: push-to-talk (hold) vs. toggle.
 	p.pttItem = systray.AddMenuItemCheckbox("按住说话", "按住热键说话，松开停止", p.currentMode() == "hold")
-	p.pttItem.Click(func() { p.setMode(p.toggleMode()) })
+	click(p.pttItem, func() { p.setMode(p.toggleMode()) })
 
 	systray.AddSeparator()
 
@@ -203,13 +218,13 @@ func (p *Plugin) onReady() {
 	androidFormatHint := p.androidMenu.AddSubMenuItem("Android端：16kHz / 单声道 / i16", "推荐使用 16000 Hz、单声道、i16，避免 F32 缓冲区尾部残留")
 	androidFormatHint.Disable()
 	p.androidAutoItem = p.androidMenu.AddSubMenuItemCheckbox("自动启用服务端", "启动时自动开启（androidmic_auto_start）", p.autoStart())
-	p.androidAutoItem.Click(func() { p.setAutoStart(!p.autoStart()) })
-	p.androidMenu.AddSubMenuItem("启动服务端", "").Click(func() { p.startAndroidMic() })
-	p.androidMenu.AddSubMenuItem("停止服务端", "").Click(func() { p.stopAndroidMic() })
-	p.androidMenu.AddSubMenuItem("设为当前输入设备", "device=androidmic").Click(func() {
+	click(p.androidAutoItem, func() { p.setAutoStart(!p.autoStart()) })
+	click(p.androidMenu.AddSubMenuItem("启动服务端", ""), func() { p.startAndroidMic() })
+	click(p.androidMenu.AddSubMenuItem("停止服务端", ""), func() { p.stopAndroidMic() })
+	click(p.androidMenu.AddSubMenuItem("设为当前输入设备", "device=androidmic"), func() {
 		p.setDevice(voice.AndroidMicDeviceName())
 	})
-	p.androidMenu.AddSubMenuItem("复制诊断信息", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计").Click(func() {
+	click(p.androidMenu.AddSubMenuItem("复制诊断信息", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计"), func() {
 		p.copyAndroidMicDiagnostics()
 	})
 
@@ -232,26 +247,26 @@ func (p *Plugin) onReady() {
 
 	// Open the run log.
 	logItem := systray.AddMenuItem("打开日志", "查看运行日志文件")
-	logItem.Click(func() { p.openLog() })
+	click(logItem, func() { p.openLog() })
 
 	// Config entry points. The daemon never runs the recording TUI, so the
 	// menu surfaces the ways to edit config, and can spawn a terminal running
 	// the config-only editor (--tui-config never grabs hotkeys, so it is safe
 	// to run alongside the daemon).
 	p.openFull = systray.AddMenuItem("完整设置", "修改配置的几种方式")
-	p.openFull.Click(func() {
+	click(p.openFull, func() {
 		p.logger.Info("完整设置菜单点击：向用户说明如何修改配置")
 		go notifyMessage("修改配置", "你可以通过多种方式修改配置：\n\n· 配置模式：在终端运行 just-talk-plus --tui-config\n· 直接编辑配置文件：~/.config/just-talk-plus/config.toml\n· 托盘菜单：切换引擎 / 麦克风 / push-to-talk 等")
 	})
 
 	p.openConfigItem = systray.AddMenuItem("打开配置窗口", "在终端打开 just-talk-plus 配置模式")
-	p.openConfigItem.Click(func() { p.openConfigTerminal() })
+	click(p.openConfigItem, func() { p.openConfigTerminal() })
 
 	p.restartItem = systray.AddMenuItem("重启", "重新启动当前版本，不重启 systemd 用户服务")
-	p.restartItem.Click(func() { p.restart() })
+	click(p.restartItem, func() { p.restart() })
 
 	p.quitItem = systray.AddMenuItem("退出", "退出 just-talk-plus")
-	p.quitItem.Click(func() { go p.env.Engine().Stop() })
+	click(p.quitItem, func() { go p.env.Engine().Stop() })
 
 	// Initial consistency pass, then react to voice state changes immediately.
 	// The low-frequency tick only probes Android service state.
@@ -263,8 +278,6 @@ func (p *Plugin) onReady() {
 	p.syncStatus(voice.TUIStatus())
 	p.syncHistoryMenu()
 	p.syncStatsMenu()
-	p.scheduleHistoryRefresh()
-	p.scheduleStatsRefresh()
 	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory, statsChanges, unsubscribeStats)
 }
 
@@ -277,26 +290,14 @@ func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribeStatus func(
 	for {
 		select {
 		case <-statusChanges:
-			st := voice.TUIStatus()
-			p.syncStatus(st)
-			p.syncHistoryMenu()
-			p.syncStatsMenu()
-			if st.State == "idle" {
-				p.scheduleHistoryRefresh()
-				p.scheduleStatsRefresh()
-			}
+			p.syncStatus(voice.TUIStatus())
 		case <-historyChanges:
 			p.syncHistoryMenu()
-			p.syncStatsMenu()
-			p.scheduleHistoryRefresh()
 		case <-statsChanges:
 			p.syncStatsMenu()
-			p.scheduleStatsRefresh()
 		case <-t.C:
 			p.syncStatus(voice.TUIStatus())
 			p.updateAndroidMic()
-			p.syncHistoryMenu()
-			p.syncStatsMenu()
 		case <-p.env.Engine().Context().Done():
 			return
 		}
@@ -825,7 +826,6 @@ func terminalCommand(args ...string) *exec.Cmd {
 }
 
 const historyMenuSlots = 8
-const historyMenuTitle = "历史记录"
 
 func (p *Plugin) buildHistoryMenu() {
 	p.historyMenu = systray.AddMenuItem("历史记录", "最近识别记录")
@@ -833,27 +833,27 @@ func (p *Plugin) buildHistoryMenu() {
 	for i := 0; i < historyMenuSlots; i++ {
 		index := i
 		item := p.historyMenu.AddSubMenuItem("暂无记录", "")
-		item.AddSubMenuItem("使用当前引擎重试", "重新识别这条录音").Click(func() {
+		click(item.AddSubMenuItem("使用当前引擎重试", "重新识别这条录音"), func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.retryHistory(entry)
 			}
 		})
-		item.AddSubMenuItem("播放录音", "").Click(func() {
+		click(item.AddSubMenuItem("播放录音", ""), func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.replayRecording(entry.RecordingPath)
 			}
 		})
-		item.AddSubMenuItem("复制识别文本", "").Click(func() {
+		click(item.AddSubMenuItem("复制识别文本", ""), func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.copyText(entry.Text)
 			}
 		})
-		item.AddSubMenuItem("复制报错 ID", "").Click(func() {
+		click(item.AddSubMenuItem("复制报错 ID", ""), func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.copyText(entry.UpstreamLogID)
 			}
 		})
-		item.AddSubMenuItem("在文件管理器中显示", "").Click(func() {
+		click(item.AddSubMenuItem("在文件管理器中显示", ""), func() {
 			if entry, ok := p.historyEntry(index); ok {
 				p.revealRecording(entry.RecordingPath)
 			}
@@ -873,10 +873,6 @@ func (p *Plugin) historyEntry(index int) (voice.HistoryEntry, bool) {
 }
 
 func (p *Plugin) syncHistoryMenu() {
-	p.syncHistoryMenuWithForce(false)
-}
-
-func (p *Plugin) syncHistoryMenuWithForce(force bool) {
 	if p.historyMenu == nil {
 		return
 	}
@@ -884,17 +880,14 @@ func (p *Plugin) syncHistoryMenuWithForce(force bool) {
 	snapshot := historySnapshot(history)
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
-	if !force && snapshot == p.lastHistorySnapshot {
+	if snapshot == p.lastHistorySnapshot {
 		return
 	}
 	p.lastHistorySnapshot = snapshot
-	p.historyMenu.SetTitle(historyMenuTitle)
-	p.historyMenu.SetTooltip(fmt.Sprintf("最近识别记录（%d 条）", len(history)))
 	for i, item := range p.historySlots {
 		if i < len(history) {
 			entry := history[i]
 			item.SetTitle(truncate(entry.Text, 24))
-			item.SetTooltip(entry.Time.Format("15:04:05"))
 			item.Show()
 		} else {
 			item.Hide()
@@ -910,29 +903,6 @@ func (p *Plugin) recentHistory() []voice.HistoryEntry {
 	return h
 }
 
-// scheduleHistoryRefresh covers desktop menu implementations that cache a
-// submenu while it is open or defer the first layout update. A new history
-// event supersedes older retries, so this remains bounded and does not create
-// a periodic D-Bus refresh loop.
-func (p *Plugin) scheduleHistoryRefresh() {
-	p.historyRefreshMu.Lock()
-	p.historyRefreshGeneration++
-	generation := p.historyRefreshGeneration
-	p.historyRefreshMu.Unlock()
-	go func() {
-		for _, delay := range []time.Duration{50 * time.Millisecond, 250 * time.Millisecond, 750 * time.Millisecond} {
-			time.Sleep(delay)
-			p.historyRefreshMu.Lock()
-			current := generation == p.historyRefreshGeneration
-			p.historyRefreshMu.Unlock()
-			if !current || p.env.Engine().Context().Err() != nil {
-				return
-			}
-			p.syncHistoryMenuWithForce(true)
-		}
-	}()
-}
-
 func formatStatsSpeed(chars int, duration time.Duration) string {
 	if duration <= 0 {
 		return "0"
@@ -941,10 +911,6 @@ func formatStatsSpeed(chars int, duration time.Duration) string {
 }
 
 func (p *Plugin) syncStatsMenu() {
-	p.syncStatsMenuWithForce(false)
-}
-
-func (p *Plugin) syncStatsMenuWithForce(force bool) {
 	if p.statsMenu == nil {
 		return
 	}
@@ -958,34 +924,13 @@ func (p *Plugin) syncStatsMenuWithForce(force bool) {
 	snapshot := strings.Join(values[:], "\x00")
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
-	if !force && snapshot == p.lastStatsSnapshot {
+	if snapshot == p.lastStatsSnapshot {
 		return
 	}
 	p.lastStatsSnapshot = snapshot
 	for i, item := range p.statsItems {
 		item.SetTitle(values[i])
 	}
-}
-
-// scheduleStatsRefresh retries the stats layout update during the short
-// window after an identification result is committed.
-func (p *Plugin) scheduleStatsRefresh() {
-	p.statsRefreshMu.Lock()
-	p.statsRefreshGeneration++
-	generation := p.statsRefreshGeneration
-	p.statsRefreshMu.Unlock()
-	go func() {
-		for _, delay := range []time.Duration{50 * time.Millisecond, 250 * time.Millisecond, 750 * time.Millisecond} {
-			time.Sleep(delay)
-			p.statsRefreshMu.Lock()
-			current := generation == p.statsRefreshGeneration
-			p.statsRefreshMu.Unlock()
-			if !current || p.env.Engine().Context().Err() != nil {
-				return
-			}
-			p.syncStatsMenuWithForce(true)
-		}
-	}()
 }
 
 func historySnapshot(history []voice.HistoryEntry) string {

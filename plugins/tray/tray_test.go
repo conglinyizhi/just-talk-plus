@@ -174,17 +174,9 @@ func TestFormatStatsSpeed(t *testing.T) {
 	}
 }
 
-func TestHistoryRefreshGenerationSupersedesOlderRetry(t *testing.T) {
-	p := &Plugin{}
-	p.historyRefreshGeneration = 1
-	first := p.historyRefreshGeneration
-	p.historyRefreshGeneration++
-	second := p.historyRefreshGeneration
-	if first == second {
-		t.Fatal("new history refresh must supersede the previous generation")
-	}
-}
-
+// TestHistorySnapshotChangesWhenEntriesChange makes sure a history change is
+// always detected by the snapshot guard, so the menu only re-renders when the
+// content actually changed.
 func TestHistorySnapshotChangesWhenEntriesChange(t *testing.T) {
 	first := []voice.HistoryEntry{{Text: "first", Time: time.Unix(1, 0)}}
 	second := []voice.HistoryEntry{{Text: "second", Time: time.Unix(2, 0)}}

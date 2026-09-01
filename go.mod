@@ -9,13 +9,13 @@ require (
 )
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/atotto/clipboard v0.1.4
 	github.com/bendahl/uinput v1.7.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/coder/websocket v1.8.14
-	github.com/energye/systray v1.0.3
 	github.com/google/uuid v1.6.0
 )
 
