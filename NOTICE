@@ -9,7 +9,7 @@ Copyright (C) 2026 conglinyizhi
 维护与修改历史
 ---------------
 
-- 本项目最初由 whoamihappyhacking 开发并以 GPL-3.0 发布（Just Talk）。
+- 本项目最初由 whoamihappyhacking 开发并以 GPL-3.0 发布（Just Talk 系列，Python 版为 whoamihappyhacking/just-talk，Go 版为 whoamihappyhacking/just-talk-go；本项目基于 Go 版继续开发）。
 - conglinyizhi 自 2026 年起接管维护，并更名为 Just Talk Plus；对既有文件
   所做的修改在文件头部带有 modified 声明，新建文件带有新的版权声明。
 - 原作者的版权与贡献声明保持有效，按 GPL-3.0 第 5 节要求不得移除。

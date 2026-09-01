@@ -438,7 +438,7 @@ Just Talk Plus 使用 GNU General Public License v3.0 开源。
 
 项目参考或移植了以下开源项目，版权与许可声明见 [NOTICE](NOTICE) 与 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)：
 
-- [Just Talk](https://github.com/whoamihappyhacking/just-talk)（GPL-3.0）——本项目的前身与上游，代码在其基础上继续开发。
+- [just-talk-go](https://github.com/whoamihappyhacking/just-talk-go)（GPL-3.0，作者 whoamihappyhacking）——本项目的前身与直接上游（Go 版），代码在其基础上继续开发。
 - [AndroidMic](https://github.com/teamclouday/AndroidMic)（GPL-3.0，作者 wiiznokes / teamclouday）——内嵌 TCP 服务端按其协议实现（Go 重写），把 Android 手机用作录音麦克风。
 
 其余依赖、协议头与移植来源见 THIRD_PARTY_NOTICES。

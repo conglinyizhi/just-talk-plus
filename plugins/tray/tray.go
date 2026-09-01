@@ -265,6 +265,8 @@ func (p *Plugin) onReady() {
 	p.restartItem = systray.AddMenuItem("重启", "重新启动当前版本，不重启 systemd 用户服务")
 	click(p.restartItem, func() { p.restart() })
 
+	p.buildAboutMenu()
+
 	p.quitItem = systray.AddMenuItem("退出", "退出 just-talk-plus")
 	click(p.quitItem, func() { go p.env.Engine().Stop() })
 
@@ -825,7 +827,52 @@ func terminalCommand(args ...string) *exec.Cmd {
 	}
 }
 
+const aboutJtgpURL = "https://github.com/conglinyizhi/just-talk-go-plus"
+const aboutJtgpLicense = `just-talk-go-plus
+许可协议：GPL-3.0（GNU General Public License v3.0）
+版权：© 2026 conglinyizhi
+
+说明：桌面语音输入工具。全局热键录音，流式 ASR 识别，文本上屏或写入剪贴板；支持 Linux、macOS、Windows。
+
+修改与包装声明：本软件基于开源项目 just-talk-go（whoamihappyhacking，GPL-3.0）修改并包装而来，按 GPL-3.0 第 5 节保留原作者版权与变更声明，详见 NOTICE；第三方许可详见 THIRD_PARTY_NOTICES。`
+
+const aboutJtgURL = "https://github.com/whoamihappyhacking/just-talk-go"
+const aboutJtgLicense = `just-talk-go
+许可协议：GPL-3.0（GNU General Public License v3.0）
+版权：whoamihappyhacking
+
+说明：Just Talk 的 Go 重写版，桌面语音输入工具（全局热键录音 → 流式 ASR 识别 → 上屏/复制到剪贴板）。本项目的直接上游。`
+
+const aboutAmURL = "https://github.com/teamclouday/AndroidMic"
+const aboutAmLicense = `AndroidMic
+许可协议：GPL-3.0
+作者/版权：wiiznokes / teamclouday
+
+说明：把 Android 手机当电脑麦克风。Just Talk Plus 内嵌的 TCP 服务端（internal/androidmic）按其协议实现（Go 重写），音频统一转换为 16 kHz / 16-bit / 单声道 PCM。`
+
 const historyMenuSlots = 8
+
+// buildAboutMenu adds an "关于和许可" submenu so a tray-only (--gui) user can
+// reach the open-source / license attributions of the project and its direct
+// dependencies. Each project carries a license dialog and a link to its source.
+func (p *Plugin) buildAboutMenu() {
+	about := systray.AddMenuItem("关于和许可", "开源与许可声明")
+	p.addAboutProject(about, "just-talk-go-plus（当前）", "just-talk-go-plus 开源与许可", aboutJtgpLicense, aboutJtgpURL)
+	p.addAboutProject(about, "just-talk-go", "just-talk-go 开源与许可", aboutJtgLicense, aboutJtgURL)
+	p.addAboutProject(about, "androidmic", "AndroidMic 开源与许可", aboutAmLicense, aboutAmURL)
+}
+
+func (p *Plugin) addAboutProject(parent *systray.MenuItem, name, title, license, url string) {
+	item := parent.AddSubMenuItem(name, "")
+	click(item.AddSubMenuItem("开源许可", ""), func() { go notifyMessage(title, license) })
+	click(item.AddSubMenuItem("查看源码", ""), func() { go p.openURL(url) })
+}
+
+func (p *Plugin) openURL(url string) {
+	if err := openPath(url); err != nil {
+		p.logger.Error("tray: 打开链接失败", "url", url, "error", err)
+	}
+}
 
 func (p *Plugin) buildHistoryMenu() {
 	p.historyMenu = systray.AddMenuItem("历史记录", "最近识别记录")

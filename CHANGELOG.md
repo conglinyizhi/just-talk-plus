@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- **托盘新增「关于和许可」子菜单**：含「just-talk-go-plus（当前）」「just-talk-go」「androidmic」三个项目，每项下设「开源许可」（弹窗显示许可、版权与修改声明）与「查看源码」（调用浏览器打开对应仓库），方便只运行 `--gui`（无终端）的用户也能查到开源与许可归属、源码与修改声明，无需翻源码或打开终端；just-talk-go 为直接上游（Go 版，作者 whoamihappyhacking），README/NOTICE 同步对齐。
+
 - **托盘菜单换用 `fyne.io/systray`（替换 `energye/systray`），修正历史/统计子菜单不实时刷新**：新库实现 `com.canonical.dbusmenu.ItemsPropertiesUpdated`，识别结果与统计数据变化能即时推送到二级子菜单项，不再依赖旧的 `LayoutUpdated(parent=0)` 顶层刷新（Plasma 只重拉顶层、子菜单内容停在首次展开时的快照）；移除为绕过该问题而加的 `scheduleHistoryRefresh` / `scheduleStatsRefresh` 分批重试与 `WithForce` 强制刷新路径，改为纯 `SubscribeHistory` / `SubscribeStats` 事件驱动，每次识别只触发一次菜单更新，消除之前的 D-Bus 信号风暴与菜单闪烁。
 
 - 托盘新增「统计信息」子菜单，与 TUI 共用统计数据，显示总使用次数、输入字数、平均速度和最近速度；识别完成后随统计状态及时刷新。

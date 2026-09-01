@@ -442,7 +442,7 @@ Just Talk Plus is licensed under the GNU General Public License v3.0.
 
 The project references or ports the following open-source projects; their copyright and license statements are in [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES):
 
-- [Just Talk](https://github.com/whoamihappyhacking/just-talk) (GPL-3.0) — the predecessor and upstream of this project; the codebase is developed on top of it.
+- [just-talk-go](https://github.com/whoamihappyhacking/just-talk-go) (GPL-3.0, by whoamihappyhacking) — the predecessor and direct upstream (Go) of this project; the codebase is developed on top of it.
 - [AndroidMic](https://github.com/teamclouday/AndroidMic) (GPL-3.0, by wiiznokes / teamclouday) — the built-in TCP server implements its protocol (rewritten in Go) to use an Android phone as a recording microphone.
 
 See THIRD_PARTY_NOTICES for remaining dependencies, protocol headers, and ported sources.
