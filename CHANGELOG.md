@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- **修复 systemd 开机重启风暴**：`--gui` daemon 在图形会话尚未就绪（启动时序 race，`WAYLAND_DISPLAY`/`XDG_SESSION_TYPE` 为空）时，不再立即退出并触发 systemd `Restart=on-failure` 每 2 秒反复拉起；改为先带超时等待会话就绪、再重跑环境检查后启动。systemd 用户服务 unit 同时增加 `StartLimitIntervalSec`/`StartLimitBurst` 限制重启爆发，避免真正失败时无限刷日志。
+
 - **托盘「Android 虚拟麦克风」子菜单补强**：新增「重启服务器」入口（停止并重新启动内嵌服务端，已连接的 Android 设备需重新握手）；「设为当前输入设备」点击后弹出对话框，说明该操作的具体影响（录音输入切到 Android 设备采集、自动转 16 kHz / 单声道 / i16、需确认服务端运行中、麦克风菜单勾选同步）；原来禁用的「Android端：16kHz / 单声道 / i16」提示改为可点击的「配置指南」，弹出当前版本连接方式（仅支持 TCP / WIFI，未适配 adb）与使用步骤。
 
 - **托盘新增「关于和许可」子菜单**：含「just-talk-go-plus（当前）」「just-talk-go」「androidmic」三个项目，每项下设「开源许可」（弹窗显示许可、版权与修改声明）与「查看源码」（调用浏览器打开对应仓库），方便只运行 `--gui`（无终端）的用户也能查到开源与许可归属、源码与修改声明，无需翻源码或打开终端；just-talk-go 为直接上游（Go 版，作者 whoamihappyhacking），README/NOTICE 同步对齐。

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/conglinyizhi/just-talk-plus/config"
@@ -138,12 +139,31 @@ func main() {
 	}
 
 	report := doctor.Run(cfg, *backend)
-	if *doctorOnly || !report.Healthy() {
+	if *doctorOnly {
 		report.Print(os.Stderr)
 		if report.Healthy() {
 			return
 		}
 		os.Exit(1)
+	}
+	if !report.Healthy() {
+		report.Print(os.Stderr)
+		// In background daemon (--gui) mode we can be started before the graphical
+		// session has set WAYLAND_DISPLAY/XDG_SESSION_TYPE, so the doctor fails on
+		// the "session not ready" check. Exiting immediately then makes systemd's
+		// Restart=on-failure spin at the boot — a restart storm. Instead, wait
+		// briefly for the session, then re-run the doctor so the daemon starts as
+		// soon as the environment is ready. --tui and --doctor keep the strict
+		// exit-on-failure behaviour.
+		if !*useTUI && waitForSession(report.Backend) {
+			report = doctor.Run(cfg, *backend)
+			report.Print(os.Stderr)
+			if !report.Healthy() {
+				os.Exit(1)
+			}
+		} else {
+			os.Exit(1)
+		}
 	}
 
 	provider, err := createProvider(*backend)
@@ -258,6 +278,36 @@ func createProvider(backend string) (hotkey.Provider, error) {
 		return hotkey.NewMockProvider(), nil
 	}
 	return hotkey.NewProvider()
+}
+
+// waitForSession reports whether the graphical session environment became
+// ready after waiting. It is used in daemon (--gui) mode to absorb the boot
+// race where systemd starts the service before WAYLAND_DISPLAY/XDG_SESSION_TYPE
+// are set. It returns false immediately when the session already looks ready
+// (meaning the hard failure is a genuine problem, not a race), or when the
+// bounded wait times out.
+func waitForSession(backend string) bool {
+	isWayland := backend == "wayland"
+	ready := func() bool {
+		if isWayland {
+			return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"
+		}
+		return os.Getenv("DISPLAY") != ""
+	}
+	if ready() {
+		return false
+	}
+	slog.Info("graphical session not ready yet; waiting before starting (boot race)", "backend", backend)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1 * time.Second)
+		if ready() {
+			slog.Info("graphical session became ready; continuing startup", "backend", backend)
+			return true
+		}
+	}
+	slog.Warn("graphical session did not become ready in time; giving up", "backend", backend)
+	return false
 }
 
 func printTroubleshooting(err error) {

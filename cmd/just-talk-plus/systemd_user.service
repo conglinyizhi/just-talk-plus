@@ -7,6 +7,12 @@ Type=simple
 ExecStart=__EXE__ --gui__BACKEND_ARGS__
 Restart=on-failure
 RestartSec=2
+# Bound the restart burst so a repeatedly-failing start (e.g. the transient
+# boot-time race where the graphical session env is not ready yet) cannot spin
+# forever and flood the journal. 60s window, at most 5 starts; the program
+# itself also waits briefly for the session before giving up.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=just-talk-plus
