@@ -480,7 +480,7 @@ func (p *Plugin) showAndroidMicGuide() {
 3. 在 AndroidMic 客户端里填写电脑的局域网 IP 和端口 %d。
 4. 连接成功后点「设为当前输入设备」，录音即从手机采集。
 
-音频格式建议：16000 Hz / 单声道 / i16（PCM16），避免 F32 短读造成缓冲区尾部残留。
+音频格式建议设为 16000 Hz / 单声道 / i16（PCM16）。其它格式难以保证识别质量，此前 F32 短读就出现过缓冲区尾部残留，会导致捕获的录音有概率完全无法识别。
 
 端口可在配置 [voice] androidmic_port 修改（重启生效）。`, port, port)
 	go notifyMessage("Android 虚拟麦克风配置指南", msg)
