@@ -126,8 +126,8 @@ GitHub Releases provide prebuilt archives for:
 The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Linux, macOS, and Windows binaries are built natively on matching GitHub-hosted runners. Maintainers can build and publish a release by pushing a `v*` tag, for example:
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.2
+git push origin v0.2
 ```
 
 ## Usage

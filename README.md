@@ -122,8 +122,8 @@ GitHub Release 提供以下预编译归档：
 发布流程使用 GoReleaser v2 和官方 `goreleaser/goreleaser-action`。Linux、macOS 和 Windows 二进制分别在对应的 GitHub 托管 runner 上原生构建；维护者推送 `v*` 标签时会自动构建并发布，例如：
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+git tag v0.2
+git push origin v0.2
 ```
 
 ## 使用

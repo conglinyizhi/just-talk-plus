@@ -1,14 +1,14 @@
 # Changelog
 
+All notable project changes are tracked here.
+
+## v0.2 - 2026-09-02
+
 - Linux 录音优先使用 `parecord`，并支持直接选择 `virtual_mic_source`
 - 增强 Linux 录音进程诊断，记录启动命令、PID、退出状态、stderr 与停止错误
 - PipeWire 默认源为 `virtual_mic_source` 时自动读取有实际音频的 `virtual_mic.monitor`
 - 修复 `parecord` 输出参数错误导致录音立即 EOF
 - 移除中间噪声门控：低于噪声阈值的音频始终原样发送并录制（阈值仅用于开头开始录音与结束停止判定），不再丢失轻声内容
-
-All notable project changes are tracked here.
-
-## Unreleased
 
 - **修复 systemd 开机重启风暴**：`--gui` daemon 在图形会话尚未就绪（启动时序 race，`WAYLAND_DISPLAY`/`XDG_SESSION_TYPE` 为空）时，不再立即退出并触发 systemd `Restart=on-failure` 每 2 秒反复拉起；改为先带超时等待会话就绪、再重跑环境检查后启动。systemd 用户服务 unit 同时增加 `StartLimitIntervalSec`/`StartLimitBurst` 限制重启爆发，避免真正失败时无限刷日志。
 
