@@ -43,9 +43,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/systray"
@@ -65,6 +67,11 @@ type Plugin struct {
 
 	quitOnce sync.Once
 	stateMu  sync.Mutex
+	// manualReload marks an in-progress manual "刷新配置" reload so
+	// OnConfigReloadResult suppresses its default toast (the refresh handler
+	// shows the list of changed options instead). Automatic hot-reload is
+	// unaffected.
+	manualReload atomic.Bool
 
 	// Cached state so we only write to the SNI properties / menu items when
 	// something actually changed (writing a MenuItem triggers a D-Bus menu
@@ -75,7 +82,6 @@ type Plugin struct {
 	lastHistorySnapshot string
 	lastStatsSnapshot   string
 	configStatusItem    *systray.MenuItem
-	statsMenu           *systray.MenuItem
 	statsItems          [4]*systray.MenuItem
 
 	engineMenu  *systray.MenuItem
@@ -90,6 +96,8 @@ type Plugin struct {
 	historyMenu       *systray.MenuItem
 	historySlots      []*systray.MenuItem
 
+	advancedMenu   *systray.MenuItem
+	helpMenu       *systray.MenuItem
 	openFull       *systray.MenuItem
 	openConfigItem *systray.MenuItem
 	restartItem    *systray.MenuItem
@@ -173,8 +181,20 @@ func click(item *systray.MenuItem, fn func()) {
 
 func (p *Plugin) onReady() {
 	systray.SetIcon(statusIcon("idle"))
-	systray.SetTooltip("Just Talk Plus · 待机")
+	systray.SetTooltip("Just Talk Plus")
 	cfg := p.env.Config()
+
+	// Usage stats shown at the very top of the main menu (no parent submenu).
+	p.statsItems[0] = systray.AddMenuItem("总使用次数：0", "Just Talk Plus 语音输入统计")
+	p.statsItems[1] = systray.AddMenuItem("输入字数：0", "")
+	p.statsItems[2] = systray.AddMenuItem("平均速度：0 字/分钟", "")
+	p.statsItems[3] = systray.AddMenuItem("最近速度：0 字/分钟", "")
+	for _, item := range p.statsItems {
+		item.Disable()
+	}
+	p.syncStatsMenu()
+
+	systray.AddSeparator()
 
 	// ASR engine picker. Checkable submenu items so the current engine shows a
 	// check mark.
@@ -188,7 +208,7 @@ func (p *Plugin) onReady() {
 
 	// Microphone device picker.
 	p.deviceMenu = systray.AddMenuItem("麦克风", "选择输入设备")
-	autoItem := p.deviceMenu.AddSubMenuItemCheckbox("自动（默认）", "", cfg.Voice.Device == "")
+	autoItem := p.deviceMenu.AddSubMenuItemCheckbox("自动（系统默认设备）", "", cfg.Voice.Device == "")
 	click(autoItem, func() { p.setDevice("") })
 	p.deviceItems[""] = autoItem
 	// Virtual microphone (AndroidMic) is always selectable, whether or not the
@@ -206,7 +226,7 @@ func (p *Plugin) onReady() {
 	}
 
 	// Recording behaviour: push-to-talk (hold) vs. toggle.
-	p.pttItem = systray.AddMenuItemCheckbox("按住说话", "按住热键说话，松开停止", p.currentMode() == "hold")
+	p.pttItem = systray.AddMenuItemCheckbox("按住快捷键说话", "按住热键说话，松开停止", p.currentMode() == "hold")
 	click(p.pttItem, func() { p.setMode(p.toggleMode()) })
 
 	systray.AddSeparator()
@@ -215,57 +235,47 @@ func (p *Plugin) onReady() {
 	p.androidMenu = systray.AddMenuItem("Android 虚拟麦克风", "把手机当麦克风（内嵌服务端）")
 	p.androidStatusItem = p.androidMenu.AddSubMenuItem("状态: 未运行", "")
 	p.androidStatusItem.Disable()
-	androidGuideItem := p.androidMenu.AddSubMenuItem("配置指南", "说明连接方式与使用步骤（当前仅支持 TCP/WIFI）")
-	click(androidGuideItem, func() { p.showAndroidMicGuide() })
-	p.androidAutoItem = p.androidMenu.AddSubMenuItemCheckbox("自动启用服务端", "启动时自动开启（androidmic_auto_start）", p.autoStart())
-	click(p.androidAutoItem, func() { p.setAutoStart(!p.autoStart()) })
-	click(p.androidMenu.AddSubMenuItem("启动服务端", ""), func() { p.startAndroidMic() })
-	click(p.androidMenu.AddSubMenuItem("停止服务端", ""), func() { p.stopAndroidMic() })
-	click(p.androidMenu.AddSubMenuItem("重启服务器", "停止并重新启动内嵌服务端，已连接的设备会重连"), func() { p.restartAndroidMic() })
+	click(p.androidMenu.AddSubMenuItem("启动/停止服务端", "切换内嵌服务端的运行状态"), func() { p.toggleAndroidMic() })
+	click(p.androidMenu.AddSubMenuItem("重启服务端", "停止并重新启动内嵌服务端，已连接的设备会重连"), func() { p.restartAndroidMic() })
 	click(p.androidMenu.AddSubMenuItem("设为当前输入设备", "device=androidmic"), func() {
 		p.setDevice(voice.AndroidMicDeviceName())
 		p.notifyAndroidMicDeviceSet()
 	})
-	click(p.androidMenu.AddSubMenuItem("复制诊断信息", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计"), func() {
-		p.copyAndroidMicDiagnostics()
-	})
+	androidGuideItem := p.androidMenu.AddSubMenuItem("配置指南", "说明连接方式与使用步骤（当前仅支持 TCP/WIFI）")
+	click(androidGuideItem, func() { p.showAndroidMicGuide() })
+	p.androidAutoItem = p.androidMenu.AddSubMenuItemCheckbox("自动启用服务端", "启动时自动开启（androidmic_auto_start）", p.autoStart())
+	click(p.androidAutoItem, func() { p.setAutoStart(!p.autoStart()) })
 
 	p.buildHistoryMenu()
 
-	p.statsMenu = systray.AddMenuItem("统计信息", "Just Talk Plus 语音输入统计")
-	p.statsItems[0] = p.statsMenu.AddSubMenuItem("总使用次数：0", "")
-	p.statsItems[1] = p.statsMenu.AddSubMenuItem("输入字数：0", "")
-	p.statsItems[2] = p.statsMenu.AddSubMenuItem("平均速度：0 字/分钟", "")
-	p.statsItems[3] = p.statsMenu.AddSubMenuItem("最近速度：0 字/分钟", "")
-	for _, item := range p.statsItems {
-		item.Disable()
-	}
-	p.syncStatsMenu()
-
-	p.configStatusItem = systray.AddMenuItem("配置状态: 未检测", "配置文件修改后的应用状态")
-	p.configStatusItem.Disable()
-
 	systray.AddSeparator()
 
-	// Open the run log.
-	logItem := systray.AddMenuItem("打开日志", "查看运行日志文件")
-	click(logItem, func() { p.openLog() })
+	// 配置 (open config mode) stays as a top-level item.
+	p.openConfigItem = systray.AddMenuItem("配置", "在终端打开 just-talk-plus 配置模式")
+	click(p.openConfigItem, func() { p.openConfigTerminal() })
 
-	// Config entry points. The daemon never runs the recording TUI, so the
-	// menu surfaces the ways to edit config, and can spawn a terminal running
-	// the config-only editor (--tui-config never grabs hotkeys, so it is safe
-	// to run alongside the daemon).
-	p.openFull = systray.AddMenuItem("完整设置", "修改配置的几种方式")
+	// Advanced submenu, placed above 帮助. Holds the less-frequent operations:
+	// manual config reload, viewing the log, and restarting the process.
+	p.advancedMenu = systray.AddMenuItem("高级", "高级操作")
+	p.configStatusItem = p.advancedMenu.AddSubMenuItem("刷新配置", "重新读取配置文件并应用变更")
+	click(p.configStatusItem, func() { p.refreshConfig() })
+	advancedLogItem := p.advancedMenu.AddSubMenuItem("查看核心日志", "查看运行日志文件")
+	click(advancedLogItem, func() { p.openLog() })
+	p.restartItem = p.advancedMenu.AddSubMenuItem("重启核心", "重新启动当前版本，不重启 systemd 用户服务")
+	click(p.restartItem, func() { p.restart() })
+	advancedDiagItem := p.advancedMenu.AddSubMenuItem("复制麦克风服务端日志", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计")
+	click(advancedDiagItem, func() { p.copyAndroidMicDiagnostics() })
+
+	// Help submenu: holds config-related entries, placed above 关于.
+	p.helpMenu = systray.AddMenuItem("帮助", "使用说明与配置入口")
+	p.openFull = p.helpMenu.AddSubMenuItem("完整设置", "修改配置的几种方式")
 	click(p.openFull, func() {
 		p.logger.Info("完整设置菜单点击：向用户说明如何修改配置")
 		go notifyMessage("修改配置", "你可以通过多种方式修改配置：\n\n· 配置模式：在终端运行 just-talk-plus --tui-config\n· 直接编辑配置文件：~/.config/just-talk-plus/config.toml\n· 托盘菜单：切换引擎 / 麦克风 / push-to-talk 等")
 	})
-
-	p.openConfigItem = systray.AddMenuItem("打开配置窗口", "在终端打开 just-talk-plus 配置模式")
-	click(p.openConfigItem, func() { p.openConfigTerminal() })
-
-	p.restartItem = systray.AddMenuItem("重启", "重新启动当前版本，不重启 systemd 用户服务")
-	click(p.restartItem, func() { p.restart() })
+	androidGuideFullItem := p.helpMenu.AddSubMenuItem("Android 麦克风配置指南", "Android 虚拟麦克风完整配置步骤")
+	click(androidGuideFullItem, func() { p.showAndroidMicFullGuide() })
+	click(p.helpMenu.AddSubMenuItem("下载 Android 客户端", "AndroidMic 官方客户端"), func() { p.openURL(aboutAmURL) })
 
 	p.buildAboutMenu()
 
@@ -322,10 +332,11 @@ func (p *Plugin) setStatusIcon(state string) {
 	systray.SetIcon(b)
 }
 
-func (p *Plugin) setTooltip(state string) {
-	cfg := p.env.Config()
-	tip := fmt.Sprintf("Just Talk Plus · %s · %s · %s",
-		stateLabel(state), cfg.Voice.Engine, modeLabel(cfg.Voice.Mode))
+func (p *Plugin) setTooltip(_ string) {
+	// The tray tooltip is intentionally just the app name — status/engine/mode
+	// detail is conveyed by the icon colour, and a verbose tooltip would be
+	// noisy when hovering the tray icon.
+	tip := "Just Talk Plus"
 	if tip == p.lastTooltip {
 		return
 	}
@@ -423,20 +434,38 @@ func modeLabel(mode string) string {
 
 // ---- Android virtual microphone ----
 
+// toggleAndroidMic starts the embedded server if it is stopped, or stops it if
+// it is running. The menu item is a single "启动/停止服务端" entry.
+func (p *Plugin) toggleAndroidMic() {
+	if voice.AndroidMicStatus().Running {
+		p.stopAndroidMic()
+		return
+	}
+	p.startAndroidMic()
+}
+
 func (p *Plugin) startAndroidMic() {
 	cfg := p.reloadConfig()
 	port := androidmicPort(cfg)
 	if err := voice.AndroidMicStart(port); err != nil {
 		p.logger.Error("tray: 启动 AndroidMic 服务端失败", "error", err)
+		go notifyMessage("启动失败", "Android 虚拟麦克风服务端启动失败：\n"+err.Error())
+		return
 	}
 	p.updateAndroidMic()
+	p.logger.Info("tray: 已启动 AndroidMic 服务端", "port", port)
+	go notifyMessage("服务端已启动", fmt.Sprintf("Android 虚拟麦克风服务端已在端口 %d 启动，可在手机端连接。", port))
 }
 
 func (p *Plugin) stopAndroidMic() {
 	if err := voice.AndroidMicStop(); err != nil {
 		p.logger.Error("tray: 停止 AndroidMic 服务端失败", "error", err)
+		go notifyMessage("停止失败", "Android 虚拟麦克风服务端停止失败：\n"+err.Error())
+		return
 	}
 	p.updateAndroidMic()
+	p.logger.Info("tray: 已停止 AndroidMic 服务端")
+	go notifyMessage("服务端已停止", "Android 虚拟麦克风服务端已停止，已断开连接的设备。")
 }
 
 // restartAndroidMic 停止并重新启动内嵌 AndroidMic 服务端。断开已连接的客户端
@@ -466,9 +495,15 @@ func (p *Plugin) notifyAndroidMicDeviceSet() {
 	go notifyMessage("已设为当前输入设备", "录音输入已切换到「Android 虚拟麦克风」（内嵌服务端）。\n\n影响：\n· 下次按下录音热键时，声音将从连接的 Android 设备采集（自动转换为 16 kHz / 单声道 / i16），而不是电脑麦克风。\n· 请在子菜单确认「Android 虚拟麦克风」服务端处于「运行中」，否则录音将采集不到声音。\n· 「麦克风」菜单中的勾选已同步到「虚拟麦克风（AndroidMic）」。")
 }
 
-// showAndroidMicGuide 弹出「配置指南」，说明当前版本 Android 虚拟麦克风的
-// 连接方式与使用步骤：仅支持 TCP（客户端显示为 WIFI），未适配 adb 等。
+// showAndroidMicGuide pops a brief "配置指南" from the Android 虚拟麦克风 submenu.
+// It stays short; the full step-by-step guide lives under 帮助 › Android 麦克风配置指南.
 func (p *Plugin) showAndroidMicGuide() {
+	go notifyMessage("Android 虚拟麦克风配置", "当前版本仅支持 TCP 连接（Android 客户端上显示为 WIFI），还没适配 adb 等其他方式。\n\n音频格式请设为 16000 Hz / 单声道 / i16（PCM16）。\n\n下载 Android 客户端（AndroidMic）：点菜单「帮助 › 下载 Android 客户端」在浏览器打开，或访问 https://github.com/teamclouday/AndroidMic\n\n详细连接步骤见「帮助 › Android 麦克风配置指南」。")
+}
+
+// showAndroidMicFullGuide pops the full step-by-step AndroidMic configuration
+// guide from the 帮助 submenu.
+func (p *Plugin) showAndroidMicFullGuide() {
 	port := p.androidPort()
 	msg := fmt.Sprintf(`「Android 虚拟麦克风」配置指南
 
@@ -482,7 +517,10 @@ func (p *Plugin) showAndroidMicGuide() {
 
 音频格式建议设为 16000 Hz / 单声道 / i16（PCM16）。其它格式难以保证识别质量，此前 F32 短读就出现过缓冲区尾部残留，会导致捕获的录音有概率完全无法识别。
 
-端口可在配置 [voice] androidmic_port 修改（重启生效）。`, port, port)
+端口可在配置 [voice] androidmic_port 修改（重启生效）。
+
+下载 Android 客户端（AndroidMic）：https://github.com/teamclouday/AndroidMic（也可点菜单「帮助 › 下载 Android 客户端」在浏览器打开）
+`, port, port)
 	go notifyMessage("Android 虚拟麦克风配置指南", msg)
 }
 
@@ -512,6 +550,11 @@ func (p *Plugin) setAutoStart(on bool) {
 		return
 	}
 	p.logger.Info("tray: AndroidMic 自动启用", "on", on)
+	if on {
+		go notifyMessage("自动启用已开启", "启动 Just Talk Plus 时将自动启动 Android 虚拟麦克风服务端。")
+	} else {
+		go notifyMessage("自动启用已关闭", "启动 Just Talk Plus 时将不再自动启动 Android 虚拟麦克风服务端。")
+	}
 }
 
 func (p *Plugin) autoStart() bool {
@@ -533,15 +576,107 @@ func (p *Plugin) OnConfigReloadResult(_ *config.Config, err error) {
 		return
 	}
 	p.setConfigStatus("配置状态: 已应用")
+	// During a manual refresh the handler shows the list of changed options, so
+	// suppress the generic toast to avoid two dialogs. Automatic hot-reload
+	// (WatchConfig) still reports here as usual.
+	if p.manualReload.Load() {
+		return
+	}
 	go notifyMessage("配置已生效", "配置修改已应用到当前运行中的 Just Talk Plus")
 }
 
-func (p *Plugin) setConfigStatus(text string) {
-	p.stateMu.Lock()
-	defer p.stateMu.Unlock()
-	if p.configStatusItem != nil {
-		p.configStatusItem.SetTitle(text)
+func (p *Plugin) setConfigStatus(_ string) {
+	// The former "配置状态" state row is now the clickable "刷新配置" action; keep
+	// this as a no-op so the periodic rewrite of that row's title (which used to
+	// be the feedback surface) no longer clobbers the action label. Feedback
+	// moves to the reload notification dialogs.
+}
+
+// refreshConfig manually re-reads the config file on disk, applies it to the
+// engine, and reports which options actually changed. Automatic hot-reload
+// (WatchConfig) is untouched — this is an explicit user-initiated reload.
+func (p *Plugin) refreshConfig() {
+	diskCfg := p.reloadConfig()
+	if diskCfg == nil {
+		go notifyMessage("刷新配置失败", "无法读取配置文件")
+		return
 	}
+	changes := diffConfig(p.env.Config(), diskCfg)
+	if len(changes) == 0 {
+		go notifyMessage("刷新配置", "完成重载，未发现配置变化")
+		return
+	}
+	p.logger.Info("tray: 手动刷新配置", "changes", len(changes))
+	p.manualReload.Store(true)
+	err := p.env.Engine().ReloadConfig(diskCfg)
+	p.manualReload.Store(false)
+	if err != nil {
+		p.logger.Error("tray: 刷新配置失败", "error", err)
+		go notifyMessage("刷新配置失败", "应用配置失败：\n"+err.Error())
+		return
+	}
+	go notifyMessage("配置已重载", "以下选项已改变并生效：\n\n"+strings.Join(changes, "\n"))
+}
+
+// diffConfig returns user-facing lines describing the options that differ
+// between old and new config. Sensitive credential fields are reported only as
+// "已变更" without exposing their values.
+func diffConfig(oldCfg, newCfg *config.Config) []string {
+	var changes []string
+	diffConfigValue("", reflect.ValueOf(oldCfg).Elem(), reflect.ValueOf(newCfg).Elem(), &changes)
+	return changes
+}
+
+func diffConfigValue(prefix string, oldV, newV reflect.Value, changes *[]string) {
+	t := oldV.Type()
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		key := f.Tag.Get("toml")
+		if key == "" || key == "-" {
+			continue
+		}
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		of := oldV.Field(i)
+		nf := newV.Field(i)
+		if reflect.DeepEqual(of.Interface(), nf.Interface()) {
+			continue
+		}
+		if isSensitiveField(key) {
+			*changes = append(*changes, path+": 已变更（凭据值不显示）")
+			continue
+		}
+		if of.Kind() == reflect.Struct {
+			diffConfigValue(path, of, nf, changes)
+			continue
+		}
+		if of.Kind() == reflect.Map || of.Kind() == reflect.Slice {
+			*changes = append(*changes, path+": 已变更")
+			continue
+		}
+		if of.Kind() == reflect.Pointer {
+			if of.IsNil() != nf.IsNil() {
+				*changes = append(*changes, path+": "+fmt.Sprint(of.Interface())+" → "+fmt.Sprint(nf.Interface()))
+			} else if !of.IsNil() {
+				*changes = append(*changes, path+": "+fmt.Sprint(of.Elem().Interface())+" → "+fmt.Sprint(nf.Elem().Interface()))
+			}
+			continue
+		}
+		*changes = append(*changes, path+": "+fmt.Sprint(of.Interface())+" → "+fmt.Sprint(nf.Interface()))
+	}
+}
+
+func isSensitiveField(key string) bool {
+	k := strings.ToLower(key)
+	return k == "app_key" ||
+		k == "access_key" ||
+		k == "resource_id" ||
+		strings.Contains(k, "api_key") ||
+		strings.Contains(k, "secret") ||
+		strings.Contains(k, "token") ||
+		strings.Contains(k, "password")
 }
 
 func (p *Plugin) updateAndroidMic() {
@@ -905,7 +1040,7 @@ const historyMenuSlots = 8
 // reach the open-source / license attributions of the project and its direct
 // dependencies. Each project carries a license dialog and a link to its source.
 func (p *Plugin) buildAboutMenu() {
-	about := systray.AddMenuItem("关于和许可", "开源与许可声明")
+	about := systray.AddMenuItem("关于", "开源与许可声明")
 	p.addAboutProject(about, "just-talk-go-plus（当前）", "just-talk-go-plus 开源与许可", aboutJtgpLicense, aboutJtgpURL)
 	p.addAboutProject(about, "just-talk-go", "just-talk-go 开源与许可", aboutJtgLicense, aboutJtgURL)
 	p.addAboutProject(about, "androidmic", "AndroidMic 开源与许可", aboutAmLicense, aboutAmURL)
@@ -1007,7 +1142,7 @@ func formatStatsSpeed(chars int, duration time.Duration) string {
 }
 
 func (p *Plugin) syncStatsMenu() {
-	if p.statsMenu == nil {
+	if p.statsItems[0] == nil {
 		return
 	}
 	stats := voice.TUIStats()
