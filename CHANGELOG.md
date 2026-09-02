@@ -10,6 +10,8 @@ All notable project changes are tracked here.
 
 ## Unreleased
 
+- **托盘「Android 虚拟麦克风」子菜单补强**：新增「重启服务器」入口（停止并重新启动内嵌服务端，已连接的 Android 设备需重新握手）；「设为当前输入设备」点击后弹出对话框，说明该操作的具体影响（录音输入切到 Android 设备采集、自动转 16 kHz / 单声道 / i16、需确认服务端运行中、麦克风菜单勾选同步）；原来禁用的「Android端：16kHz / 单声道 / i16」提示改为可点击的「配置指南」，弹出当前版本连接方式（仅支持 TCP / WIFI，未适配 adb）与使用步骤。
+
 - **托盘新增「关于和许可」子菜单**：含「just-talk-go-plus（当前）」「just-talk-go」「androidmic」三个项目，每项下设「开源许可」（弹窗显示许可、版权与修改声明）与「查看源码」（调用浏览器打开对应仓库），方便只运行 `--gui`（无终端）的用户也能查到开源与许可归属、源码与修改声明，无需翻源码或打开终端；just-talk-go 为直接上游（Go 版，作者 whoamihappyhacking），README/NOTICE 同步对齐。
 
 - **托盘菜单换用 `fyne.io/systray`（替换 `energye/systray`），修正历史/统计子菜单不实时刷新**：新库实现 `com.canonical.dbusmenu.ItemsPropertiesUpdated`，识别结果与统计数据变化能即时推送到二级子菜单项，不再依赖旧的 `LayoutUpdated(parent=0)` 顶层刷新（Plasma 只重拉顶层、子菜单内容停在首次展开时的快照）；移除为绕过该问题而加的 `scheduleHistoryRefresh` / `scheduleStatsRefresh` 分批重试与 `WithForce` 强制刷新路径，改为纯 `SubscribeHistory` / `SubscribeStats` 事件驱动，每次识别只触发一次菜单更新，消除之前的 D-Bus 信号风暴与菜单闪烁。

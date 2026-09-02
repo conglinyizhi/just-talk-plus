@@ -215,14 +215,16 @@ func (p *Plugin) onReady() {
 	p.androidMenu = systray.AddMenuItem("Android 虚拟麦克风", "把手机当麦克风（内嵌服务端）")
 	p.androidStatusItem = p.androidMenu.AddSubMenuItem("状态: 未运行", "")
 	p.androidStatusItem.Disable()
-	androidFormatHint := p.androidMenu.AddSubMenuItem("Android端：16kHz / 单声道 / i16", "推荐使用 16000 Hz、单声道、i16，避免 F32 缓冲区尾部残留")
-	androidFormatHint.Disable()
+	androidGuideItem := p.androidMenu.AddSubMenuItem("配置指南", "说明连接方式与使用步骤（当前仅支持 TCP/WIFI）")
+	click(androidGuideItem, func() { p.showAndroidMicGuide() })
 	p.androidAutoItem = p.androidMenu.AddSubMenuItemCheckbox("自动启用服务端", "启动时自动开启（androidmic_auto_start）", p.autoStart())
 	click(p.androidAutoItem, func() { p.setAutoStart(!p.autoStart()) })
 	click(p.androidMenu.AddSubMenuItem("启动服务端", ""), func() { p.startAndroidMic() })
 	click(p.androidMenu.AddSubMenuItem("停止服务端", ""), func() { p.stopAndroidMic() })
+	click(p.androidMenu.AddSubMenuItem("重启服务器", "停止并重新启动内嵌服务端，已连接的设备会重连"), func() { p.restartAndroidMic() })
 	click(p.androidMenu.AddSubMenuItem("设为当前输入设备", "device=androidmic"), func() {
 		p.setDevice(voice.AndroidMicDeviceName())
+		p.notifyAndroidMicDeviceSet()
 	})
 	click(p.androidMenu.AddSubMenuItem("复制诊断信息", "复制最近 10 次 AndroidMic 连接的收包与丢帧统计"), func() {
 		p.copyAndroidMicDiagnostics()
@@ -435,6 +437,53 @@ func (p *Plugin) stopAndroidMic() {
 		p.logger.Error("tray: 停止 AndroidMic 服务端失败", "error", err)
 	}
 	p.updateAndroidMic()
+}
+
+// restartAndroidMic 停止并重新启动内嵌 AndroidMic 服务端。断开已连接的客户端
+// 让其在同一端口重新握手，用于设备连接异常或想要重置接收缓冲时。
+func (p *Plugin) restartAndroidMic() {
+	cfg := p.reloadConfig()
+	port := androidmicPort(cfg)
+	if err := voice.AndroidMicStop(); err != nil {
+		p.logger.Error("tray: 重启 AndroidMic 服务端（停止阶段）失败", "error", err)
+		go notifyMessage("AndroidMic 重启失败", "停止服务端失败：\n"+err.Error())
+		return
+	}
+	if err := voice.AndroidMicStart(port); err != nil {
+		p.logger.Error("tray: 重启 AndroidMic 服务端（启动阶段）失败", "error", err)
+		go notifyMessage("AndroidMic 重启失败", "重新监听端口失败：\n"+err.Error())
+		return
+	}
+	p.updateAndroidMic()
+	p.logger.Info("tray: 已重启 AndroidMic 服务端", "port", port)
+	go notifyMessage("AndroidMic 已重启", fmt.Sprintf("服务端已在端口 %d 重新启动，已连接的 Android 设备需要重新握手连接。", port))
+}
+
+// notifyAndroidMicDeviceSet explains what switching the recording input to the
+// embedded Android virtual microphone affects, so the tray menu does not flip
+// the recording source without telling the user.
+func (p *Plugin) notifyAndroidMicDeviceSet() {
+	go notifyMessage("已设为当前输入设备", "录音输入已切换到「Android 虚拟麦克风」（内嵌服务端）。\n\n影响：\n· 下次按下录音热键时，声音将从连接的 Android 设备采集（自动转换为 16 kHz / 单声道 / i16），而不是电脑麦克风。\n· 请在子菜单确认「Android 虚拟麦克风」服务端处于「运行中」，否则录音将采集不到声音。\n· 「麦克风」菜单中的勾选已同步到「虚拟麦克风（AndroidMic）」。")
+}
+
+// showAndroidMicGuide 弹出「配置指南」，说明当前版本 Android 虚拟麦克风的
+// 连接方式与使用步骤：仅支持 TCP（客户端显示为 WIFI），未适配 adb 等。
+func (p *Plugin) showAndroidMicGuide() {
+	port := p.androidPort()
+	msg := fmt.Sprintf(`「Android 虚拟麦克风」配置指南
+
+当前版本仅支持使用 TCP 的方式连接（Android 客户端上显示为 WIFI），暂时没有适配 adb 等其他连接方式。
+
+使用步骤：
+1. 让手机与电脑连接同一个局域网（WIFI）。
+2. 点「启动服务端」，确认状态为「运行中（端口 %d）」。
+3. 在 AndroidMic 客户端里填写电脑的局域网 IP 和端口 %d。
+4. 连接成功后点「设为当前输入设备」，录音即从手机采集。
+
+音频格式建议：16000 Hz / 单声道 / i16（PCM16），避免 F32 短读造成缓冲区尾部残留。
+
+端口可在配置 [voice] androidmic_port 修改（重启生效）。`, port, port)
+	go notifyMessage("Android 虚拟麦克风配置指南", msg)
 }
 
 func (p *Plugin) copyAndroidMicDiagnostics() {
