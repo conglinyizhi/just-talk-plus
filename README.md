@@ -201,7 +201,7 @@ make dev ARGS="--gui --verbose"
 代码或配置变更后会自动重新构建并重启调试 CLI，临时二进制位于 `tmp/`。
 在 Linux/macOS 上，Air 会通过终端入口程序将前台终端临时交给 TUI，并在退出或热重载时交还给 Air；这样 Bubble Tea 可正常接收按键。如果需要观察 Air 自身日志，可临时执行 `air -c .air.toml -log.main_only false`。
 
-使用 `doubao-stream` 时，历史页会显示本次识别 WebSocket 握手响应中的 `X-Tt-Logid`，可用于向豆包支持团队追溯上游日志。
+识别历史会显示上游服务返回的追踪号：`doubao-stream` 是 WebSocket 握手响应里的 `X-Tt-Logid`，`siliconflow` 是响应头里的 `x-siliconcloud-trace-id`；报障时把它提供给对应厂商支持即可追溯上游日志。
 
 ## 配置
 
@@ -404,7 +404,7 @@ api_key = "sk-…"                              # 账户 API Key
 # model = "FunAudioLLM/SenseVoiceSmall"       # 默认；可换 TeleAI/TeleSpeechASR 等
 ```
 
-与豆包的边录边出字不同，硅基流动是整段识别：录音结束后把音频（≤50MB、≤1 小时）一次性提交到 `/v1/audio/transcriptions`，只返回一条完整文本，识别过程中没有中间结果；默认模型 `FunAudioLLM/SenseVoiceSmall`，模型名可在引擎配置里自行更换（以官网模型列表为准）。
+与豆包的边录边出字不同，硅基流动是整段识别：录音结束后把音频（≤50MB、≤1 小时）一次性提交到 `/v1/audio/transcriptions`，只返回一条完整文本，识别过程中没有中间结果；默认模型 `FunAudioLLM/SenseVoiceSmall`，模型名可在引擎配置里自行更换（以官网模型列表为准）。识别历史会显示本次响应头里的 `x-siliconcloud-trace-id`；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给硅基流动支持即可追溯上游日志。
 
 批处理引擎（auralwise / openai / mimo-asr / siliconflow）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 

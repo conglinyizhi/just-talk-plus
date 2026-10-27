@@ -1294,7 +1294,8 @@ func (m *Model) renderHistory(rows int) string {
 		ts := e.Time.Format("15:04:05")
 		b.WriteString(marker + idx + vStyle.Render(text) + "  " + dStyle.Render(ts) + "\n")
 		if e.UpstreamLogID != "" {
-			b.WriteString("       " + dStyle.Render("豆包 LogID: "+e.UpstreamLogID) + "\n")
+			// 上游追踪号不止豆包提供（硅基流动也有），标签用通用文案。
+			b.WriteString("       " + dStyle.Render("上游 LogID: "+e.UpstreamLogID) + "\n")
 		}
 	}
 	if end < len(hist) {

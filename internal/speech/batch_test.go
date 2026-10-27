@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,6 +18,7 @@ type stubEngine struct {
 	text    string
 	avail   bool
 	err     error
+	logID   string // 非空时随 TranscribeResult 上报
 	gotLang string
 	gotCT   string
 	gotWAV  []byte
@@ -40,7 +42,7 @@ func (s *stubEngine) Transcribe(ctx context.Context, req TranscribeRequest) (*Tr
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &TranscribeResult{Text: s.text, Engine: s.Name()}, nil
+	return &TranscribeResult{Text: s.text, Engine: s.Name(), UpstreamLogID: s.logID}, nil
 }
 
 // blockingStub 阻塞直到 ctx 取消（模拟慢转写）。
@@ -126,6 +128,88 @@ func TestBatchSessionTranscribesOnLast(t *testing.T) {
 	}
 	if len(eng.gotWAV) != 44+6 || !bytes.Equal(eng.gotWAV[:4], []byte("RIFF")) {
 		t.Fatalf("engine did not receive wav payload (%d bytes)", len(eng.gotWAV))
+	}
+}
+
+// transcribeOnce 跑一次完整批处理会话（单包即最后一包），返回已拿到 Final 的会话。
+func transcribeOnce(t *testing.T, eng *stubEngine) *BatchSession {
+	t.Helper()
+	sess := NewBatchSession(eng, StreamParams{})
+	ctx := context.Background()
+	if err := sess.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SendAudio(ctx, []byte{1, 2, 3, 4}, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Final():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Final not closed")
+	}
+	return sess
+}
+
+// TestBatchSessionExposesUpstreamLogID 批处理会话要把引擎给的追踪号透出去，
+// 插件靠 speech.UpstreamLogID(session) 写进识别历史。
+func TestBatchSessionExposesUpstreamLogID(t *testing.T) {
+	sess := transcribeOnce(t, &stubEngine{avail: true, text: "ok", logID: "trace-abc"})
+	if _, ok := any(sess).(TraceableSession); !ok {
+		t.Fatal("*BatchSession should implement TraceableSession")
+	}
+	if got := UpstreamLogID(sess); got != "trace-abc" {
+		t.Fatalf("UpstreamLogID = %q, want %q", got, "trace-abc")
+	}
+}
+
+// TestBatchSessionUpstreamLogIDEmpty 引擎没给追踪号时必须是空串（历史不写该行）。
+func TestBatchSessionUpstreamLogIDEmpty(t *testing.T) {
+	sess := transcribeOnce(t, &stubEngine{avail: true, text: "ok"})
+	if got := UpstreamLogID(sess); got != "" {
+		t.Fatalf("UpstreamLogID = %q, want empty", got)
+	}
+}
+
+// TestBatchSessionUpstreamLogIDConcurrentRead 插件在 Final() 关闭前后从别的
+// goroutine 读追踪号；-race 下必须无数据竞争。
+func TestBatchSessionUpstreamLogIDConcurrentRead(t *testing.T) {
+	eng := &stubEngine{avail: true, text: "ok", logID: "trace-race"}
+	sess := NewBatchSession(eng, StreamParams{})
+	ctx := context.Background()
+	if err := sess.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = UpstreamLogID(sess)
+				}
+			}
+		}()
+	}
+
+	if err := sess.SendAudio(ctx, []byte{1, 2, 3, 4}, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Final():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Final not closed")
+	}
+	got := UpstreamLogID(sess)
+	close(stop)
+	readers.Wait()
+	if got != "trace-race" {
+		t.Fatalf("UpstreamLogID = %q, want %q", got, "trace-race")
 	}
 }
 

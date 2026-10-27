@@ -121,6 +121,7 @@ func TestTranscribeRequestShape(t *testing.T) {
 		raw, _ := io.ReadAll(f)
 		gotUsage = string(raw)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(traceIDHeader, "trace-ok")
 		_, _ = w.Write([]byte(`{"text":"  你好，世界  "}`))
 	}))
 	defer srv.Close()
@@ -142,6 +143,10 @@ func TestTranscribeRequestShape(t *testing.T) {
 	}
 	if res.Engine != "siliconflow" {
 		t.Fatalf("engine = %q", res.Engine)
+	}
+	// 成功路径的追踪号要随结果上报，插件会把它写进识别历史。
+	if res.UpstreamLogID != "trace-ok" {
+		t.Fatalf("upstream log id = %q, want %q", res.UpstreamLogID, "trace-ok")
 	}
 	if gotMethod != http.MethodPost || gotPath != "/v1/audio/transcriptions" {
 		t.Fatalf("request = %s %s", gotMethod, gotPath)
@@ -195,9 +200,11 @@ func TestTranscribeMp3Filename(t *testing.T) {
 }
 
 // TestTranscribeHTTPErrorUsesMessage 实测错误体：{"code":30014,"data":null,"message":"Token is invalid."}
+// 错误路径同样要带 trace：用户拿它去找硅基流动排障，只留在成功路径等于白留。
 func TestTranscribeHTTPErrorUsesMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set(traceIDHeader, "trace-err")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"code":30014,"data":null,"message":"Token is invalid."}`))
 	}))
@@ -212,8 +219,54 @@ func TestTranscribeHTTPErrorUsesMessage(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	want := "siliconflow transcribe HTTP 401: Token is invalid. (code=30014)"
+	want := "siliconflow transcribe HTTP 401: Token is invalid. (code=30014; trace=trace-err)"
 	if msg != want {
+		t.Fatalf("error = %q, want %q", msg, want)
+	}
+}
+
+// TestTranscribeHTTPErrorWithoutTraceKeepsMessage 响应头没有 trace 时，错误串保持原样。
+func TestTranscribeHTTPErrorWithoutTraceKeepsMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code":50505,"data":null,"message":"Service is busy."}`))
+	}))
+	defer srv.Close()
+
+	e, err := NewFromMap(map[string]string{"api_key": "k", "base_url": srv.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Transcribe(context.Background(), speech.TranscribeRequest{Audio: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	want := "siliconflow transcribe HTTP 503: Service is busy. (code=50505)"
+	if msg := err.Error(); msg != want {
+		t.Fatalf("error = %q, want %q", msg, want)
+	}
+}
+
+// TestTranscribeHTTPErrorTraceWithoutCode 无 code 但有 trace（网关错误页等）时也不能丢 trace。
+func TestTranscribeHTTPErrorTraceWithoutCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(traceIDHeader, "trace-gw")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream connect error"))
+	}))
+	defer srv.Close()
+
+	e, err := NewFromMap(map[string]string{"api_key": "k", "base_url": srv.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Transcribe(context.Background(), speech.TranscribeRequest{Audio: []byte("x")})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	want := "siliconflow transcribe HTTP 502: upstream connect error (trace=trace-gw)"
+	if msg := err.Error(); msg != want {
 		t.Fatalf("error = %q, want %q", msg, want)
 	}
 }

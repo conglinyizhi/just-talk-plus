@@ -37,7 +37,7 @@ type StreamSession interface {
 }
 
 // TraceableSession 可选地暴露上游服务返回的排障追踪 ID。
-// 目前只有豆包 ASR 流式会话提供该字段。
+// 豆包流式会话与 BatchSession（批处理引擎转手 TranscribeResult.UpstreamLogID）都提供。
 type TraceableSession interface {
 	UpstreamLogID() string
 }

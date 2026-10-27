@@ -204,7 +204,7 @@ make dev ARGS="--gui --verbose"
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
 On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
 
-With `doubao-stream`, the History tab shows the `X-Tt-Logid` returned during the recognition WebSocket handshake, which can be used to trace the upstream log with Doubao support.
+The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, and `x-siliconcloud-trace-id` from the response headers for `siliconflow`. Pass it to the matching vendor's support team to trace the upstream log.
 
 ## Configuration
 
@@ -407,7 +407,7 @@ api_key = "sk-…"                              # account API Key
 # model = "FunAudioLLM/SenseVoiceSmall"       # default; TeleAI/TeleSpeechASR etc. also accepted
 ```
 
-Unlike Doubao's streaming recognition, SiliconFlow works on the whole recording: after you stop, the audio (≤50 MB, ≤1 hour) is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back, with no partial results while recording. The default model is `FunAudioLLM/SenseVoiceSmall`; swap the model name in the engine settings to another one from the official catalog.
+Unlike Doubao's streaming recognition, SiliconFlow works on the whole recording: after you stop, the audio (≤50 MB, ≤1 hour) is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back, with no partial results while recording. The default model is `FunAudioLLM/SenseVoiceSmall`; swap the model name in the engine settings to another one from the official catalog. The History tab shows the `x-siliconcloud-trace-id` from the response headers, and failed calls append the same trace ID to the error message, so you can hand it to SiliconFlow support when reporting a problem.
 
 Batch engines (auralwise / openai / mimo-asr / siliconflow) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 

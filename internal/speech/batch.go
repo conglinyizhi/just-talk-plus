@@ -43,7 +43,15 @@ type BatchSession struct {
 	textMu    sync.RWMutex
 	lastText  string
 	audioSent func([]byte)
+
+	// logMu 保护 upstreamLogID：转写 goroutine 写入，插件在 Final() 关闭后
+	// 从别的 goroutine 读取，两侧都过锁，不依赖 channel close 的 happens-before。
+	logMu         sync.RWMutex
+	upstreamLogID string
 }
+
+// BatchSession 上报上游追踪号，满足 TraceableSession（与豆包流式会话一致）。
+var _ TraceableSession = (*BatchSession)(nil)
 
 // SetAudioSentObserver 设置已被批处理会话接受、将作为转写请求音频的数据观察器。
 func (s *BatchSession) SetAudioSentObserver(observer func([]byte)) { s.audioSent = observer }
@@ -126,6 +134,12 @@ func (s *BatchSession) finish(ctx context.Context, audio []byte) {
 		Lang:        s.params.Lang,
 	}
 	result, err := s.engine.Transcribe(ctx, req)
+	// 引擎返回的追踪号先落盘再发结果：插件在 Final() 关闭后立刻读取。
+	if result != nil && result.UpstreamLogID != "" {
+		s.logMu.Lock()
+		s.upstreamLogID = result.UpstreamLogID
+		s.logMu.Unlock()
+	}
 	if err != nil {
 		select {
 		case s.resultCh <- StreamResult{Error: err}:
@@ -157,6 +171,14 @@ func (s *BatchSession) LastText() string {
 	s.textMu.RLock()
 	defer s.textMu.RUnlock()
 	return s.lastText
+}
+
+// UpstreamLogID 返回本次转写的上游追踪 ID；引擎未提供时为空字符串。
+// 插件在 Final() 关闭后调用，因此读路径与 finish() 的写入都加锁。
+func (s *BatchSession) UpstreamLogID() string {
+	s.logMu.RLock()
+	defer s.logMu.RUnlock()
+	return s.upstreamLogID
 }
 
 // Close 取消进行中的转写。

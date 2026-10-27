@@ -4,7 +4,7 @@ All notable project changes are tracked here.
 
 ## v0.2 - 2026-09-02
 
-- 新增硅基流动（SiliconFlow）语音转写引擎（`siliconflow`）：整段录音识别（非流式），请求体只提交 `file` 与 `model` 两个表单字段，默认模型 `FunAudioLLM/SenseVoiceSmall`，可在引擎配置中更换（如 `TeleAI/TeleSpeechASR`）；超过 50MB 在本地拦截并给出可读错误，HTTP 错误优先展示接口返回的 `message` 与 `code`；TUI 引擎选择、引擎配置弹层与「相关链接」同步更新，README 双语补充。
+- 新增硅基流动（SiliconFlow）语音转写引擎（`siliconflow`）：整段录音识别（非流式），请求体只提交 `file` 与 `model` 两个表单字段，默认模型 `FunAudioLLM/SenseVoiceSmall`，可在引擎配置中更换（如 `TeleAI/TeleSpeechASR`）；超过 50MB 在本地拦截并给出可读错误，HTTP 错误优先展示接口返回的 `message` 与 `code`；TUI 引擎选择、引擎配置弹层与「相关链接」同步更新，README 双语补充。识别历史会记录响应头 `x-siliconcloud-trace-id`（批处理引擎的上游追踪号现在也能写入历史，TUI 历史详情的标签由「豆包 LogID」改为通用的「上游 LogID」）；HTTP 错误同样在错误串末尾带上该 trace id，可直接提供给硅基流动支持排障。
 - Linux 录音优先使用 `parecord`，并支持直接选择 `virtual_mic_source`
 - 增强 Linux 录音进程诊断，记录启动命令、PID、退出状态、stderr 与停止错误
 - PipeWire 默认源为 `virtual_mic_source` 时自动读取有实际音频的 `virtual_mic.monitor`

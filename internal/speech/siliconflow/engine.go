@@ -34,6 +34,8 @@ const (
 	defaultModel = "FunAudioLLM/SenseVoiceSmall"
 	// maxAudioBytes 接口限制单文件 ≤ 50MB（≤1 小时音频）；超限本地拦截，不白跑一次往返。
 	maxAudioBytes = 50 << 20
+	// traceIDHeader 硅基流动的排障追踪号响应头；报障时连同它一起提供给客服。
+	traceIDHeader = "x-siliconcloud-trace-id"
 )
 
 func init() {
@@ -152,9 +154,11 @@ func (e *Engine) Transcribe(ctx context.Context, req speech.TranscribeRequest) (
 		return nil, fmt.Errorf("siliconflow transcribe: %w", err)
 	}
 	defer resp.Body.Close()
+	// 两种路径都要用：成功时随结果进识别历史，失败时拼进错误串给用户报障。
+	traceID := strings.TrimSpace(resp.Header.Get(traceIDHeader))
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("siliconflow transcribe %s", formatHTTPError(resp.StatusCode, data))
+		return nil, fmt.Errorf("siliconflow transcribe %s", formatHTTPError(resp.StatusCode, data, traceID))
 	}
 	var out struct {
 		Text string `json:"text"`
@@ -163,9 +167,10 @@ func (e *Engine) Transcribe(ctx context.Context, req speech.TranscribeRequest) (
 		return nil, fmt.Errorf("siliconflow transcribe json: %w", err)
 	}
 	return &speech.TranscribeResult{
-		Text:   strings.TrimSpace(out.Text),
-		Lang:   strings.TrimSpace(req.Lang),
-		Engine: e.Name(),
+		Text:          strings.TrimSpace(out.Text),
+		Lang:          strings.TrimSpace(req.Lang),
+		Engine:        e.Name(),
+		UpstreamLogID: traceID,
 	}, nil
 }
 
@@ -177,23 +182,36 @@ type errBody struct {
 
 // formatHTTPError 拼可读错误：优先取响应 JSON 的 message（附 code），
 // 解析不出（例如网关返回纯文本 / HTML）时回退原始 body 截断。
-func formatHTTPError(statusCode int, data []byte) string {
+// trace 非空时作为最后一个属性追加，便于用户直接拿去找硅基流动排障；
+// 取不到 trace 时输出与之前完全一致。
+func formatHTTPError(statusCode int, data []byte, trace string) string {
 	var e errBody
 	if err := json.Unmarshal(data, &e); err == nil {
 		msg := strings.TrimSpace(e.Message)
-		code := codeString(e.Code)
-		switch {
-		case msg != "" && code != "":
-			return fmt.Sprintf("HTTP %d: %s (code=%s)", statusCode, msg, code)
-		case msg != "":
-			return fmt.Sprintf("HTTP %d: %s", statusCode, msg)
+		if msg != "" {
+			return fmt.Sprintf("HTTP %d: %s%s", statusCode, msg, errorAttrs(codeString(e.Code), trace))
 		}
 	}
 	raw := strings.TrimSpace(string(data))
 	if raw == "" {
-		return fmt.Sprintf("HTTP %d: 空响应", statusCode)
+		return fmt.Sprintf("HTTP %d: 空响应%s", statusCode, errorAttrs("", trace))
 	}
-	return fmt.Sprintf("HTTP %d: %s", statusCode, truncate(raw, 300))
+	return fmt.Sprintf("HTTP %d: %s%s", statusCode, truncate(raw, 300), errorAttrs("", trace))
+}
+
+// errorAttrs 把 code / trace 拼成 `(code=...; trace=...)`；都没有时返回空串。
+func errorAttrs(code, trace string) string {
+	parts := make([]string, 0, 2)
+	if code != "" {
+		parts = append(parts, "code="+code)
+	}
+	if trace != "" {
+		parts = append(parts, "trace="+trace)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, "; ") + ")"
 }
 
 // codeString 兼容 code 为数字或字符串两种形态。

@@ -68,6 +68,9 @@ type TranscribeResult struct {
 	Lang       string
 	Confidence float64 // 0–1；未知为 0
 	Engine     string
+	// UpstreamLogID 上游服务返回的排障追踪 ID（如豆包 X-Tt-Logid、
+	// 硅基流动 x-siliconcloud-trace-id）；未知为空字符串。
+	UpstreamLogID string
 }
 
 // Voice 可选音色条目。
