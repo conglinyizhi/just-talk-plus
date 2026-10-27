@@ -13,7 +13,7 @@ It is built for people who want to type less and speak more while coding, chatti
 ## Features
 
 - Global-hotkey recording (`toggle` / `hold`); results are autotyped or copied to the clipboard.
-- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, and Xiaomi MiMo.
+- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, Xiaomi MiMo, and SiliconFlow.
 - Chinese input polish: trailing-punctuation omission, CJK space cleanup, and automatic CJK/Latin spacing.
 - An Android phone can serve as the microphone (built-in AndroidMic server; install the official APK on the phone).
 - Microphone debug panel: test recording, level/gain adjustment, adaptive gain.
@@ -395,7 +395,21 @@ api_key = "…"                          # Xiaomi MiMo API Key
 # language = "auto"                            # auto / zh / en; empty = auto
 ```
 
-Batch engines (auralwise / openai / mimo-asr) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
+SiliconFlow speech transcription (whole-recording transcription, non-streaming). Docs: [SiliconFlow transcription API](https://docs.siliconflow.cn/docs/api/audio-transcriptions-post); available models follow the official catalog:
+
+```toml
+[voice]
+engine = "siliconflow"
+
+[voice.engine_configs.siliconflow]
+api_key = "sk-…"                              # account API Key
+# base_url = "https://api.siliconflow.cn/v1"  # default
+# model = "FunAudioLLM/SenseVoiceSmall"       # default; TeleAI/TeleSpeechASR etc. also accepted
+```
+
+Unlike Doubao's streaming recognition, SiliconFlow works on the whole recording: after you stop, the audio (≤50 MB, ≤1 hour) is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back, with no partial results while recording. The default model is `FunAudioLLM/SenseVoiceSmall`; swap the model name in the engine settings to another one from the official catalog.
+
+Batch engines (auralwise / openai / mimo-asr / siliconflow) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 
 ### Microphone Debug And Recognition History
 

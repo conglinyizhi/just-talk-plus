@@ -9,7 +9,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 ## 功能
 
 - 全局热键录音（`toggle` / `hold`），流式识别后自动上屏或复制到剪贴板。
-- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo。
+- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo、硅基流动。
 - 中文输入优化：句尾标点省略、中文间空格清理、中英文间自动补空格。
 - Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
 - 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
@@ -392,7 +392,21 @@ api_key = "…"                          # 小米 MiMo API Key
 # language = "auto"                            # auto / zh / en；空 = 自动
 ```
 
-批处理引擎（auralwise / openai / mimo-asr）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+硅基流动（SiliconFlow）语音转写（整段录音识别，非流式）。文档见 [硅基流动语音转写文档](https://docs.siliconflow.cn/docs/api/audio-transcriptions-post)，可选模型以官网模型列表为准：
+
+```toml
+[voice]
+engine = "siliconflow"
+
+[voice.engine_configs.siliconflow]
+api_key = "sk-…"                              # 账户 API Key
+# base_url = "https://api.siliconflow.cn/v1"  # 默认即可
+# model = "FunAudioLLM/SenseVoiceSmall"       # 默认；可换 TeleAI/TeleSpeechASR 等
+```
+
+与豆包的边录边出字不同，硅基流动是整段识别：录音结束后把音频（≤50MB、≤1 小时）一次性提交到 `/v1/audio/transcriptions`，只返回一条完整文本，识别过程中没有中间结果；默认模型 `FunAudioLLM/SenseVoiceSmall`，模型名可在引擎配置里自行更换（以官网模型列表为准）。
+
+批处理引擎（auralwise / openai / mimo-asr / siliconflow）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 ### 麦克风调试与识别历史
 
