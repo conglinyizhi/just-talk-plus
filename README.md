@@ -294,6 +294,7 @@ enabled = true                   # 关掉则后台不挂托盘
 - 托盘仅在后台模式（`just-talk-plus --gui` / 默认后台）生效；完整 TUI（默认/`--tui`）会注册录音热键，勿与后台 daemon 并行；`--tui-config` 是配置模式，可与 daemon 并行。
 - 全局热键受与语音热键相同的按键约束（见上方「推荐热键配置」），留空即禁用；如与录音热键冲突，注册会失败并记录日志，不影响 daemon。
 - `Android 虚拟麦克风` 子菜单可启动/停止内嵌服务端、开关自动启用（`androidmic_auto_start`）、或一键把当前输入设为手机（`device = "androidmic"`）。
+- `引擎` 子菜单下，`siliconflow` 会再展开一层模型列表（引擎 → 模型）：勾选即换模型，同时把当前引擎切到 `siliconflow`，等价于写入 `[voice.engine_configs.siliconflow].model`。候选来自 `GET {base_url}/models?sub_type=speech-to-text`，缓存在用户缓存目录的 `just-talk-plus/models-cache.json`（24 小时有效）；缓存缺失、过期或拉取失败时菜单用内置候选（`FunAudioLLM/SenseVoiceSmall`、`TeleAI/TeleSpeechASR`），构建菜单本身不发网络请求，菜单不会空着，也不影响录音。想立即更新列表用 `高级 › 刷新模型列表`（成功后提示「已刷新 N 个模型，重启核心后菜单生效」）。已知限制：GTK 系托盘（Cinnamon / Xfce / GNOME）首次展开可能丢第三级条目，收起再展开即恢复；KDE Plasma 不受影响。
 
 ### 语音引擎
 

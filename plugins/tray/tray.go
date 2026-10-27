@@ -86,6 +86,9 @@ type Plugin struct {
 
 	engineMenu  *systray.MenuItem
 	engineItems map[string]*systray.MenuItem
+	// modelItems 是三级菜单「引擎 → 模型」的勾选项：engine → model id → item。
+	// 目前只有 siliconflow 有模型子菜单。
+	modelItems  map[string]map[string]*systray.MenuItem
 	deviceMenu  *systray.MenuItem
 	deviceItems map[string]*systray.MenuItem
 	pttItem     *systray.MenuItem
@@ -109,6 +112,7 @@ func NewPlugin(cfgPath string) *Plugin {
 	return &Plugin{
 		cfgPath:     cfgPath,
 		engineItems: make(map[string]*systray.MenuItem),
+		modelItems:  make(map[string]map[string]*systray.MenuItem),
 		deviceItems: make(map[string]*systray.MenuItem),
 	}
 }
@@ -204,6 +208,8 @@ func (p *Plugin) onReady() {
 		item := p.engineMenu.AddSubMenuItemCheckbox(name, "", name == cfg.Voice.Engine)
 		click(item, func() { p.setEngine(name) })
 		p.engineItems[name] = item
+		// 三级菜单：支持选模型的引擎在引擎项下再挂一层模型勾选项。
+		p.buildModelItems(item, name, cfg)
 	}
 
 	// Microphone device picker.
@@ -259,6 +265,8 @@ func (p *Plugin) onReady() {
 	p.advancedMenu = systray.AddMenuItem("高级", "高级操作")
 	p.configStatusItem = p.advancedMenu.AddSubMenuItem("刷新配置", "重新读取配置文件并应用变更")
 	click(p.configStatusItem, func() { p.refreshConfig() })
+	advancedModelsItem := p.advancedMenu.AddSubMenuItem("刷新模型列表", "重新拉取 siliconflow 语音转写模型列表（下次启动核心后菜单生效）")
+	click(advancedModelsItem, func() { p.refreshModels(true) })
 	advancedLogItem := p.advancedMenu.AddSubMenuItem("查看核心日志", "查看运行日志文件")
 	click(advancedLogItem, func() { p.openLog() })
 	p.restartItem = p.advancedMenu.AddSubMenuItem("重启核心", "重新启动当前版本，不重启 systemd 用户服务")
@@ -293,6 +301,10 @@ func (p *Plugin) onReady() {
 	p.syncHistoryMenu()
 	p.syncStatsMenu()
 	go p.tickLoop(statusChanges, unsubscribeStatus, historyChanges, unsubscribeHistory, statsChanges, unsubscribeStats)
+
+	// 模型列表的后台拉取放在菜单构建完成之后：构建阶段只用缓存/内置兜底，
+	// 这里异步刷一次缓存（成功打日志，失败只 Warn），不阻塞也不改菜单。
+	p.refreshModels(false)
 }
 
 func (p *Plugin) tickLoop(statusChanges <-chan struct{}, unsubscribeStatus func(), historyChanges <-chan struct{}, unsubscribeHistory func(), statsChanges <-chan struct{}, unsubscribeStats func()) {
@@ -355,6 +367,17 @@ func (p *Plugin) syncChecks() {
 			item.Uncheck()
 		}
 	}
+	// 三级菜单的勾选态跟着当前引擎的 model 走：切引擎 / 改模型后都要对上。
+	for engine, items := range p.modelItems {
+		cur := currentModel(cfg, engine)
+		for id, item := range items {
+			if id == cur {
+				item.Check()
+			} else {
+				item.Uncheck()
+			}
+		}
+	}
 	for name, item := range p.deviceItems {
 		if name == cfg.Voice.Device {
 			item.Check()
@@ -381,6 +404,97 @@ func (p *Plugin) setEngine(name string) {
 		return
 	}
 	p.logger.Info("tray: 切换引擎", "engine", name)
+}
+
+// buildModelItems 给支持选模型的引擎挂三级菜单「引擎 → 模型」。
+// 候选来自缓存或内置兜底，构建阶段绝不发网络请求。
+//
+// 已知库限制：GTK 系托盘（Cinnamon / Xfce / GNOME）首次 GetLayout 会丢孙项，
+// 靠 host 端 depth=1 再刷新兜底；Plasma（libdbusmenu-qt）不受影响。这里不做
+// 绕行 hack（不预先展开、不改库），因为菜单本身在 Plasma 上已验证可用。
+func (p *Plugin) buildModelItems(parent *systray.MenuItem, engine string, cfg *config.Config) {
+	cur := currentModel(cfg, engine)
+	choices := modelMenuChoices(engine, cur)
+	if len(choices) == 0 {
+		return
+	}
+	items := make(map[string]*systray.MenuItem, len(choices))
+	for _, choice := range choices {
+		choice := choice
+		item := parent.AddSubMenuItemCheckbox(choice.ID, choice.Label, choice.ID == cur)
+		click(item, func() { p.setEngineModel(engine, choice.ID) })
+		items[choice.ID] = item
+	}
+	p.modelItems[engine] = items
+}
+
+// setEngineModel 把某个引擎的模型切到 model 并写回配置。选模型等于同时把当前
+// 引擎切到该引擎（用户在引擎子菜单里点模型，显然是想用它识别）。
+func (p *Plugin) setEngineModel(engine, model string) {
+	cfg := p.reloadConfig()
+	if cfg == nil {
+		return
+	}
+	if !applyEngineModel(cfg, engine, model) {
+		p.syncChecks()
+		return
+	}
+	if err := p.apply(cfg); err != nil {
+		return
+	}
+	p.logger.Info("tray: 切换模型", "engine", engine, "model", model)
+}
+
+// refreshModels 在后台拉一次硅基流动的语音转写模型列表并写缓存。
+// explicit=false 是启动时的静默刷新（失败只 Warn）；explicit=true 是用户点
+// 「刷新模型列表」，成功或失败都弹桌面提示。
+//
+// 菜单项本身只在 onReady 构建一次，所以这里只更新缓存并告知用户重启核心后
+// 生效，不动态增删菜单项（避免运行中改动 D-Bus 菜单结构）。
+func (p *Plugin) refreshModels(explicit bool) {
+	cfg := p.env.Config()
+	var baseURL, apiKey string
+	if cfg != nil {
+		per := cfg.Voice.EngineConfigFor(siliconflowEngine)
+		baseURL, apiKey = per["base_url"], per["api_key"]
+	}
+	if strings.TrimSpace(apiKey) == "" {
+		// 没配 api_key 不算拉取失败（多数用户根本没用 siliconflow）：启动时的
+		// 静默刷新只记 Debug，别让每次启动都在日志里刷一行 Warn；用户主动点
+		// 刷新时才 Warn + 提示。
+		if !explicit {
+			p.logger.Debug("tray: 未配置 siliconflow api_key，跳过模型列表拉取")
+			return
+		}
+		p.logger.Warn("tray: 未配置 siliconflow api_key，无法拉取模型列表")
+		go notifyMessage("刷新模型列表", "还没有配置 siliconflow 的 api_key，无法拉取模型列表。\n\n模型菜单继续使用内置候选，不影响录音。")
+		return
+	}
+	if !explicit && len(cachedModels(siliconflowEngine, time.Now())) > 0 {
+		// 缓存还在有效期内就跳过启动拉取：daemon 在开发中会被反复重启，每次启动
+		// 打一发 GET 没有收益。要强制刷新走「高级 › 刷新模型列表」。
+		p.logger.Debug("tray: 模型缓存仍在有效期，跳过启动拉取", "engine", siliconflowEngine)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), modelsFetchTimeout)
+		defer cancel()
+		models, err := fetchModels(ctx, baseURL, apiKey)
+		if err != nil {
+			p.logger.Warn("tray: 拉取模型列表失败，继续使用缓存/内置候选", "engine", siliconflowEngine, "error", err)
+			if explicit {
+				go notifyMessage("刷新模型列表失败", err.Error()+"\n\n模型菜单继续使用上次缓存或内置候选，不影响录音。")
+			}
+			return
+		}
+		if err := writeModelsCache(siliconflowEngine, models, time.Now()); err != nil {
+			p.logger.Warn("tray: 写入模型缓存失败", "engine", siliconflowEngine, "error", err)
+		}
+		p.logger.Info("tray: 模型列表已更新", "engine", siliconflowEngine, "models", len(models))
+		if explicit {
+			go notifyMessage("模型列表已刷新", fmt.Sprintf("已刷新 %d 个模型，重启核心后菜单生效。", len(models)))
+		}
+	}()
 }
 
 func (p *Plugin) setDevice(name string) {

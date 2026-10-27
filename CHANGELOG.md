@@ -4,6 +4,7 @@ All notable project changes are tracked here.
 
 ## v0.2 - 2026-09-02
 
+- **托盘新增「引擎 → 模型」三级菜单（siliconflow）**：托盘「引擎」子菜单下，硅基流动多展开一层模型勾选项，`--gui` 后台模式不用开 TUI 就能换模型；勾选模型会同时把当前引擎切到 `siliconflow`，写入 `[voice.engine_configs.siliconflow].model`，其它引擎的分组配置不受影响（旧版平铺 `engine_config` 作为回退来源时，其内容会迁移进该引擎的分组配置，平铺配置本身保持原样）。模型候选来自 `GET {base_url}/models?sub_type=speech-to-text`，缓存在 `{用户缓存目录}/just-talk-plus/models-cache.json`（24 小时有效）；菜单构建只用缓存或内置候选（`FunAudioLLM/SenseVoiceSmall`、`TeleAI/TeleSpeechASR`），构建阶段不发网络请求、菜单永不为空；网络拉取只在后台进行（启动时一次 + `高级 › 刷新模型列表` 手动一次，5 秒超时），失败只记 Warn 不影响菜单与录音。手动刷新成功后提示「已刷新 N 个模型，重启核心后菜单生效」。已知限制：GTK 系托盘（Cinnamon / Xfce / GNOME）首次展开可能丢第三级条目，收起再展开即恢复；KDE Plasma 不受影响。
 - 新增硅基流动（SiliconFlow）语音转写引擎（`siliconflow`）：整段录音识别（非流式），请求体只提交 `file` 与 `model` 两个表单字段，默认模型 `FunAudioLLM/SenseVoiceSmall`，可在引擎配置中更换（如 `TeleAI/TeleSpeechASR`）；超过 50MB 在本地拦截并给出可读错误，HTTP 错误优先展示接口返回的 `message` 与 `code`；TUI 引擎选择、引擎配置弹层与「相关链接」同步更新，README 双语补充。识别历史会记录响应头 `x-siliconcloud-trace-id`（批处理引擎的上游追踪号现在也能写入历史，TUI 历史详情的标签由「豆包 LogID」改为通用的「上游 LogID」）；HTTP 错误同样在错误串末尾带上该 trace id，可直接提供给硅基流动支持排障。
 - Linux 录音优先使用 `parecord`，并支持直接选择 `virtual_mic_source`
 - 增强 Linux 录音进程诊断，记录启动命令、PID、退出状态、stderr 与停止错误
