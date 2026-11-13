@@ -32,6 +32,41 @@ func TestDiagnosticsConsumeStartup(t *testing.T) {
 	}
 }
 
+func TestEngineConfigForPerEngineWins(t *testing.T) {
+	vc := VoiceConfig{
+		EngineConfig:  map[string]string{"api_key": "flat-key"},
+		EngineConfigs: map[string]map[string]string{"doubao-stream": {"api_key": "grouped-key"}},
+	}
+	if got := vc.EngineConfigFor("doubao-stream"); got["api_key"] != "grouped-key" {
+		t.Fatalf("api_key = %q, want grouped value", got["api_key"])
+	}
+}
+
+func TestEngineConfigForFlatFallbackOnlyForDoubaoStream(t *testing.T) {
+	vc := VoiceConfig{EngineConfig: map[string]string{"api_key": "flat-key"}}
+	if got := vc.EngineConfigFor("doubao-stream"); got["api_key"] != "flat-key" {
+		t.Fatalf("doubao-stream should fall back to flat engine_config, got %v", got)
+	}
+	// 凭据隔离：豆包的平铺配置不借给别的引擎。
+	for _, engine := range []string{"auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "null"} {
+		if got := vc.EngineConfigFor(engine); got != nil {
+			t.Fatalf("%s must not inherit flat engine_config, got %v", engine, got)
+		}
+	}
+}
+
+func TestEngineConfigForUnconfigured(t *testing.T) {
+	var vc VoiceConfig
+	if got := vc.EngineConfigFor("doubao-stream"); got != nil {
+		t.Fatalf("empty flat config should yield nil, got %v", got)
+	}
+	// 空 map 也不算配置。
+	vc.EngineConfig = map[string]string{}
+	if got := vc.EngineConfigFor("doubao-stream"); got != nil {
+		t.Fatalf("empty flat map should yield nil, got %v", got)
+	}
+}
+
 func TestSaveToDoesNotPersistDiagnosticsActive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	cfg := Default()

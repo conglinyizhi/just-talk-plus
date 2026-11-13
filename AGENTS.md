@@ -51,7 +51,7 @@ Startup: `cmd/just-talk-plus/main.go` → `config.Load` → `doctor.Run` → `ho
 
 The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 
-- Selection: `[voice].engine` (default `doubao-stream`) + per-engine `[voice.engine_configs.<engine>]` (legacy flat `engine_config` is read as migration fallback); legacy `app_key`/`access_key`/`resource_id` are Doubao-only shortcuts.
+- Selection: `[voice].engine` (default `doubao-stream`) + per-engine `[voice.engine_configs.<engine>]`. The legacy flat `engine_config` is a fallback for `doubao-stream` **only** (it is a Doubao-era single-engine format); every other engine reads its own group and is unconfigured without one, so one vendor's credentials can never leak to another endpoint. Legacy `app_key`/`access_key`/`resource_id` are Doubao-only shortcuts.
 - Canonical types: `doubao-stream`, `auralwise`, `openai`, `dashscope`, `mimo-asr`, `siliconflow`. Do not add aliases (removed on purpose).
 - `null` is the internal fallback only; never list it in the TUI channel picker.
 - Streaming engines implement `speech.StreamingEngine`; batch-only engines are wrapped by `speech.BatchSession` (buffers PCM, `Transcribe` at stop; the plugin waits longer for them).

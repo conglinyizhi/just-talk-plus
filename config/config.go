@@ -143,7 +143,8 @@ type VoiceConfig struct {
 	// EngineConfigs 按引擎类型分组的私有配置（api_key、base_url、model 等）。
 	// 每个引擎一套，互不覆盖，可同时保存多个渠道的凭据。
 	EngineConfigs map[string]map[string]string `toml:"engine_configs"`
-	// EngineConfig 旧版平铺引擎配置（未按引擎分组）；仅作为读取兜底与迁移来源。
+	// EngineConfig 旧版平铺引擎配置（未按引擎分组）；只作为 doubao-stream
+	// 的读取兜底与迁移来源，其它引擎不读它（见 legacyFlatEngine）。
 	EngineConfig map[string]string `toml:"engine_config"`
 	// 以下为 doubao 旧版平铺字段，向后兼容；新配置建议写入 engine_config。
 	AppKey     string   `toml:"app_key"`
@@ -152,13 +153,27 @@ type VoiceConfig struct {
 	Hotwords   []string `toml:"hotwords"`
 }
 
+// legacyFlatEngine 是旧版平铺 engine_config 唯一归属的引擎。
+//
+// [voice.engine_config] 以及顶层的 app_key / access_key / resource_id 都是
+// 单引擎时代（豆包）的产物：2026-08-16 的 e7f8c27 才引入按引擎分组
+// [voice.engine_configs.<engine>]。所以那份平铺配置属于 doubao-stream，
+// 只有它能把它当回退来源。
+const legacyFlatEngine = "doubao-stream"
+
 // EngineConfigFor 返回指定引擎的私有配置：优先 engine_configs[engine]，
-// 旧版平铺 engine_config 作为回退（迁移来源）。nil 表示该引擎未配置。
+// 只有 doubao-stream 缺失分组时才回退到旧版平铺 engine_config。
+// nil 表示该引擎未配置。
+//
+// 平铺配置不跨引擎共享是刻意的（凭据隔离）：让 auralwise / openai /
+// siliconflow 之类的引擎读豆包的平铺配置，等于把一家的 key 发到另一家的
+// 端点——请求必然 401，还平白泄漏了凭据；TUI 的引擎配置弹层也会被预填成
+// 豆包凭据，一保存就把豆包 key 写进别的引擎分组。
 func (vc VoiceConfig) EngineConfigFor(engine string) map[string]string {
 	if per, ok := vc.EngineConfigs[engine]; ok {
 		return per
 	}
-	if vc.EngineConfig != nil && len(vc.EngineConfig) > 0 {
+	if engine == legacyFlatEngine && len(vc.EngineConfig) > 0 {
 		return vc.EngineConfig
 	}
 	return nil

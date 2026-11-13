@@ -126,7 +126,7 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 			Name: "ASR 配置", OK: false, Severity: Warning,
 			Detail: fmt.Sprintf("语音引擎 %q 未配置凭据，请任选 %s 之一配置",
 				asrcfg.EngineType(cfg.Voice), engineChoices()),
-			Fix: "在 " + cfgPath + " 的 [voice].engine 选择引擎，并在 [voice.engine_configs.<引擎>] 填写对应 api_key 等凭据。",
+			Fix: "在 " + cfgPath + " 的 [voice].engine 选择引擎，并在 [voice.engine_configs.<引擎>] 填写对应 api_key 等凭据。" + legacyFlatHint(cfg.Voice),
 		}
 	}
 	ok, detail := eng.Available(context.Background())
@@ -135,10 +135,25 @@ func asrEngineCheck(cfg *config.Config, cfgPath string) Check {
 		return Check{
 			Name: "ASR 配置", OK: false, Severity: Warning,
 			Detail: name + "：" + detail,
-			Fix:    "在 " + cfgPath + " 的 [voice.engine_configs.<引擎>] 中填写所需凭据（如 api_key）。",
+			Fix:    "在 " + cfgPath + " 的 [voice.engine_configs.<引擎>] 中填写所需凭据（如 api_key）。" + legacyFlatHint(cfg.Voice),
 		}
 	}
 	return Check{Name: "ASR 配置", OK: true, Severity: Warning, Detail: name + "：" + detail}
+}
+
+// legacyFlatHint 在「当前引擎未配置」且配置里还留着旧版平铺 engine_config 时，
+// 补一句说明：那份配置只对 doubao-stream 生效，别家引擎不会再借用它。
+// 升级后突然看到「未配置凭据」的用户需要知道原因，否则只会以为是配置丢了。
+func legacyFlatHint(vc config.VoiceConfig) string {
+	if asrcfg.EngineType(vc) == asrcfg.DefaultEngine {
+		return ""
+	}
+	if len(vc.EngineConfig) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" 注意：旧版平铺 [voice.engine_config] 只对 %s 生效，"+
+		"不会给 %s 使用；请把该引擎的凭据填到它自己的分组里。",
+		asrcfg.DefaultEngine, asrcfg.EngineType(vc))
 }
 
 // engineChoices 面向用户的引擎候选文案（与 README 保持一致）。

@@ -244,11 +244,15 @@ func TestCurrentModel(t *testing.T) {
 		t.Errorf("currentModel(分组配置) = %q", got)
 	}
 
-	// 旧版平铺 engine_config 作为回退来源。
+	// 旧版平铺 engine_config 只对 doubao-stream 生效（凭据隔离）：
+	// siliconflow 没有分组配置时用内置默认模型，不读豆包的平铺配置。
 	legacy := config.Default()
 	legacy.Voice.EngineConfig = map[string]string{"model": "legacy/Model"}
-	if got := currentModel(legacy, siliconflowEngine); got != "legacy/Model" {
-		t.Errorf("currentModel(旧版平铺) = %q, want legacy/Model", got)
+	if got := currentModel(legacy, siliconflowEngine); got != siliconflowDefaultModel {
+		t.Errorf("currentModel(siliconflow, 旧版平铺) = %q, want %q", got, siliconflowDefaultModel)
+	}
+	if got := currentModel(legacy, "doubao-stream"); got != "legacy/Model" {
+		t.Errorf("currentModel(doubao-stream, 旧版平铺) = %q, want legacy/Model", got)
 	}
 }
 
@@ -300,9 +304,33 @@ func TestApplyEngineModelWritesGroupedConfig(t *testing.T) {
 }
 
 func TestApplyEngineModelPromotesLegacyFlatConfig(t *testing.T) {
+	// 旧版平铺 engine_config 是 doubao-stream 的回退来源：改模型时其内容会被
+	// 复制进该引擎的分组配置（平铺 map 本身不动）。
 	cfg := config.Default()
-	cfg.Voice.Engine = siliconflowEngine
+	cfg.Voice.Engine = "auralwise"
 	cfg.Voice.EngineConfig = map[string]string{"api_key": "sk-legacy", "model": "legacy/Old"}
+
+	if !applyEngineModel(cfg, "doubao-stream", "legacy/New") {
+		t.Fatal("应报告变更")
+	}
+	got := cfg.Voice.EngineConfigs["doubao-stream"]
+	if got["model"] != "legacy/New" {
+		t.Errorf("分组配置 model = %q", got["model"])
+	}
+	if got["api_key"] != "sk-legacy" {
+		t.Errorf("旧版平铺凭据没迁移进分组配置: %q", got)
+	}
+	// 旧版平铺 map 保持原样（不原地改、不清空）。
+	if cfg.Voice.EngineConfig["model"] != "legacy/Old" {
+		t.Errorf("旧版平铺 engine_config 被改动: %v", cfg.Voice.EngineConfig)
+	}
+}
+
+func TestApplyEngineModelDoesNotInheritLegacyFlatForOtherEngines(t *testing.T) {
+	// 凭据隔离：给 siliconflow 选模型时，不能把豆包平铺配置里的凭据带进它的分组。
+	cfg := config.Default()
+	cfg.Voice.Engine = "doubao-stream"
+	cfg.Voice.EngineConfig = map[string]string{"api_key": "sk-doubao", "model": "legacy/Old"}
 
 	if !applyEngineModel(cfg, siliconflowEngine, "TeleAI/TeleSpeechASR") {
 		t.Fatal("应报告变更")
@@ -311,11 +339,10 @@ func TestApplyEngineModelPromotesLegacyFlatConfig(t *testing.T) {
 	if got["model"] != "TeleAI/TeleSpeechASR" {
 		t.Errorf("分组配置 model = %q", got["model"])
 	}
-	if got["api_key"] != "sk-legacy" {
-		t.Errorf("旧版平铺凭据没迁移进分组配置: %q", got)
+	if v, ok := got["api_key"]; ok {
+		t.Errorf("siliconflow 分组继承了豆包平铺凭据: api_key=%q", v)
 	}
-	// 旧版平铺 map 保持原样（不原地改、不清空）。
-	if cfg.Voice.EngineConfig["model"] != "legacy/Old" {
+	if cfg.Voice.EngineConfig["api_key"] != "sk-doubao" {
 		t.Errorf("旧版平铺 engine_config 被改动: %v", cfg.Voice.EngineConfig)
 	}
 }

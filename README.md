@@ -298,7 +298,7 @@ enabled = true                   # 关掉则后台不挂托盘
 
 ### 语音引擎
 
-`[voice]` 下的 `engine` 选择识别引擎，每个引擎的私有配置单独存放于 `[voice.engine_configs.<engine>]`（如 `[voice.engine_configs.openai]`），可同时保存多个渠道的凭据、互不覆盖。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；「引擎配置」二级弹层（按回车进入、`s` 保存、`esc` 取消）编辑当前引擎的凭据与专属设置，保存后写入 `engine_configs.<engine>`；「相关链接」弹层汇总全部引擎的文档链接，回车用浏览器打开。旧版平铺 `engine_config` 与 `app_key` / `access_key` / `resource_id` 字段仍作为迁移读取的兼容写法保留。
+`[voice]` 下的 `engine` 选择识别引擎，每个引擎的私有配置单独存放于 `[voice.engine_configs.<engine>]`（如 `[voice.engine_configs.openai]`），可同时保存多个渠道的凭据、互不覆盖。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；「引擎配置」二级弹层（按回车进入、`s` 保存、`esc` 取消）编辑当前引擎的凭据与专属设置，保存后写入 `engine_configs.<engine>`；「相关链接」弹层汇总全部引擎的文档链接，回车用浏览器打开。旧版平铺 `engine_config` 与 `app_key` / `access_key` / `resource_id` 字段仍保留在配置文件里（不会自动删除或迁移），但它们只对 `doubao-stream` 生效：只有该引擎缺失 `[voice.engine_configs.doubao-stream]` 时才回退到平铺配置，其它引擎一律各读自己的分组配置，缺了就是「未配置」——避免把一家厂商的凭据发给另一家的端点。要把旧的平铺凭据迁到别的引擎，在 TUI 的「引擎配置」弹层里按引擎分别填一次即可。
 
 #### 豆包（火山引擎）流式 ASR
 

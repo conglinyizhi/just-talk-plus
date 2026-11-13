@@ -41,18 +41,18 @@ func TestConfigMapLegacyDoubao(t *testing.T) {
 }
 
 func TestConfigMapEngineConfigWins(t *testing.T) {
+	// 引擎分组配置里的键优先于共享字段
 	m := ConfigMap(config.VoiceConfig{
 		Engine:   "auralwise",
 		Language: "en",
-		EngineConfig: map[string]string{
-			"api_key":  "k1",
-			"language": "ja",
+		EngineConfigs: map[string]map[string]string{
+			"auralwise": {"api_key": "k1", "language": "ja"},
 		},
 	})
 	if m["api_key"] != "k1" {
 		t.Fatalf("api_key = %q", m["api_key"])
 	}
-	// engine_config 中的 language 优先于共享字段
+	// 分组配置中的 language 优先于共享字段
 	if m["language"] != "ja" {
 		t.Fatalf("language = %q", m["language"])
 	}
@@ -217,15 +217,30 @@ func TestConfigMapPerEngineWins(t *testing.T) {
 	}
 }
 
-func TestConfigMapFallsBackToFlatForUnconfiguredEngine(t *testing.T) {
-	// 引擎尚无分组配置时回退旧平铺 engine_config（迁移读取）
+func TestConfigMapDoubaoStreamFallsBackToFlat(t *testing.T) {
+	// 旧版平铺 engine_config 属于 doubao-stream：该引擎尚无分组配置时回退读取
 	m := ConfigMap(config.VoiceConfig{
-		Engine: "auralwise",
+		Engine: "doubao-stream",
 		EngineConfig: map[string]string{
 			"api_key": "flat-key",
 		},
 	})
 	if m["api_key"] != "flat-key" {
-		t.Fatalf("api_key = %q, want flat fallback", m["api_key"])
+		t.Fatalf("api_key = %q, want flat fallback for doubao-stream", m["api_key"])
+	}
+}
+
+func TestConfigMapFlatConfigNotSharedWithOtherEngines(t *testing.T) {
+	// 凭据隔离：豆包的平铺配置不能漏给别的引擎，否则请求会 401 还泄漏 key
+	for _, engine := range []string{"auralwise", "openai", "dashscope", "mimo-asr", "siliconflow"} {
+		m := ConfigMap(config.VoiceConfig{
+			Engine: engine,
+			EngineConfig: map[string]string{
+				"api_key": "doubao-flat-key",
+			},
+		})
+		if got, ok := m["api_key"]; ok {
+			t.Fatalf("%s 从旧版平铺 engine_config 拿到了凭据: api_key=%q", engine, got)
+		}
 	}
 }
