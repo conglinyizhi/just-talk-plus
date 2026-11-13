@@ -149,6 +149,9 @@ var engineLinks = map[string][]docLink{
 		{name: "Mosi 音频转写文档", url: "https://platform.moss.cn/docs/reference/transcriptions"},
 		{name: "Mosi 转写模型说明", url: "https://platform.moss.cn/docs/models/transcribe"},
 	},
+	"deepseek": {
+		{name: "DeepSeek 语音识别文档", url: "https://api-docs.deepseek.com/zh-cn/guides/asr/"},
+	},
 }
 
 // pickerState 渠道选择弹层状态；nil 表示未打开。
@@ -187,6 +190,10 @@ var engineChannels = []pickerItem{
 	{
 		name:     "mosi",
 		subtitle: "Mosi 音频转写，整段识别、同步返回；模型可在引擎配置中更换",
+	},
+	{
+		name:     "deepseek",
+		subtitle: "DeepSeek 语音识别，整段识别、语种自动；单次上限 120 秒 / 8 MiB",
 	},
 }
 
@@ -455,6 +462,13 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "API Key", key: "ec.api_key", help: "必填（Mosi API Key，文档里叫 MOSS_API_KEY）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.mosi.cn/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 moss-transcribe-1.0（当前普通转写只有这一个）；moss-transcribe-diarize-pro 支持多说话人与热词", fType: fString, input: ti(ec["model"])},
+		}
+	case "deepseek":
+		// DeepSeek 的转写接口只有 file 一个入参：没有模型参数，也没有语言参数
+		// （语种按音频自动识别），所以这里只放凭据与端点。
+		fields = []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（DeepSeek API Key）", fType: fString, input: ti(ec["api_key"])},
+			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.deepseek.com/v1", fType: fString, input: ti(ec["base_url"])},
 		}
 	case "dashscope":
 		rateOpts := []string{"16000", "8000"}

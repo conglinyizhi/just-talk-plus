@@ -73,7 +73,7 @@ func TestConfigMapEngineConfigWins(t *testing.T) {
 func TestConfigMapIgnoresDeprecatedGlobalLanguage(t *testing.T) {
 	// 旧版全局 [voice].language 已废弃：只在 config.Load 迁移进分组，
 	// 引擎构建不再从全局字段取语言（否则等于把一门语言强加给所有引擎）。
-	for _, engine := range []string{"doubao-stream", "auralwise", "openai", "siliconflow", "dashscope", "mimo-asr", "mosi"} {
+	for _, engine := range []string{"doubao-stream", "auralwise", "openai", "siliconflow", "dashscope", "mimo-asr", "mosi", "deepseek"} {
 		m := ConfigMap(config.VoiceConfig{
 			Engine:   engine,
 			Language: "zh-CN",
@@ -143,7 +143,7 @@ func TestTypesUserFacing(t *testing.T) {
 		seen[typ] = true
 	}
 	// 只暴露规范引擎名，不暴露 null 与旧别名
-	for _, want := range []string{"doubao-stream", "auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "mosi"} {
+	for _, want := range []string{"doubao-stream", "auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "mosi", "deepseek"} {
 		if !seen[want] {
 			t.Fatalf("missing engine type %q in %v", want, types)
 		}
@@ -261,7 +261,7 @@ func TestConfigMapDoubaoStreamFallsBackToFlat(t *testing.T) {
 
 func TestConfigMapFlatConfigNotSharedWithOtherEngines(t *testing.T) {
 	// 凭据隔离：豆包的平铺配置不能漏给别的引擎，否则请求会 401 还泄漏 key
-	for _, engine := range []string{"auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "mosi"} {
+	for _, engine := range []string{"auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "mosi", "deepseek"} {
 		m := ConfigMap(config.VoiceConfig{
 			Engine: engine,
 			EngineConfig: map[string]string{

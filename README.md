@@ -9,7 +9,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 ## 功能
 
 - 全局热键录音（`toggle` / `hold`），流式识别后自动上屏或复制到剪贴板。
-- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo、硅基流动、Mosi。
+- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo、硅基流动、Mosi、DeepSeek。
 - 中文输入优化：句尾标点省略、中文间空格清理、中英文间自动补空格。
 - Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
 - 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
@@ -201,7 +201,7 @@ make dev ARGS="--gui --verbose"
 代码或配置变更后会自动重新构建并重启调试 CLI，临时二进制位于 `tmp/`。
 在 Linux/macOS 上，Air 会通过终端入口程序将前台终端临时交给 TUI，并在退出或热重载时交还给 Air；这样 Bubble Tea 可正常接收按键。如果需要观察 Air 自身日志，可临时执行 `air -c .air.toml -log.main_only false`。
 
-识别历史会显示上游服务返回的追踪号：`doubao-stream` 是 WebSocket 握手响应里的 `X-Tt-Logid`，`siliconflow` 是响应头里的 `x-siliconcloud-trace-id`，`mosi` 是响应头里的 `x-trace-id`；报障时把它提供给对应厂商支持即可追溯上游日志。
+识别历史会显示上游服务返回的追踪号：`doubao-stream` 是 WebSocket 握手响应里的 `X-Tt-Logid`，`siliconflow` 是响应头里的 `x-siliconcloud-trace-id`，`mosi` 是响应头里的 `x-trace-id`，`deepseek` 是响应体里的 `request_id`（取不到时回退响应头 `x-ds-trace-id`）；报障时把它提供给对应厂商支持即可追溯上游日志。
 
 ## 配置
 
@@ -429,7 +429,20 @@ api_key = "…"                            # Mosi API Key（文档里叫 MOSS_AP
 
 与豆包的区别和硅基流动一致：录音结束后把音频一次性提交到 `/v1/audio/transcriptions`，同步返回一条完整文本，识别过程中没有中间结果。输入源只能是文件上传（multipart `file`）或 `file_id` / `url` / `audio_url` 三种引用，**接口不接受 Base64 / 内联音频**，本引擎只走 multipart `file`；请求体只提交 `file` 与 `model` 两个表单字段（`response_format` 不显式发送，接口默认就是 json）。默认模型 `moss-transcribe-1.0`；`moss-transcribe-diarize-pro` 支持多说话人分段与热词，本引擎只取返回的完整文本、忽略分段结构。识别历史会显示响应头里的 `x-trace-id`；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给 Mosi 支持即可追溯上游日志。异步任务（`async=true` + 任务查询）本轮未实现，只做同步调用。
 
-批处理引擎（auralwise / openai / mimo-asr / siliconflow / mosi）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+DeepSeek 语音识别（整段录音识别，同步返回，非流式）。文档见 [DeepSeek 语音识别文档](https://api-docs.deepseek.com/zh-cn/guides/asr/)：
+
+```toml
+[voice]
+engine = "deepseek"
+
+[voice.engine_configs.deepseek]
+api_key = "sk-…"                             # DeepSeek API Key
+# base_url = "https://api.deepseek.com/v1"   # 默认即可
+```
+
+与豆包的区别：录音结束后把音频一次性提交到 `/v1/tools/asr`，只返回一条完整文本，识别过程中没有中间结果。请求体只有 `file` 一个表单字段——接口没有 `model`、`language`、`response_format` 参数，语种按音频自动识别（文档列出中文、粤语、英语、日语等，无入参），所以引擎配置里也没有模型和语言项。音频只接受 16 位 PCM WAV 或 Ogg Opus，单次上限 **120 秒 / 8 MiB**，两项都在本地先拦截、不发送请求：时长靠解析 WAV 头算真实秒数（按 `fmt` 的字节率折算，不是假定 16 kHz 单声道硬除），非 WAV（Ogg Opus）解析不出时长时跳过时长检查、只靠大小上限兜底；超限直接给出可读错误，省掉一次注定失败的往返。双声道音频上游只识别左声道。识别历史会显示响应体里的 `request_id`（取不到时回退响应头 `x-ds-trace-id`）；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给 DeepSeek 支持即可追溯上游日志。流式识别、并发 429 重试与 Ogg Opus 转码本轮未实现。
+
+批处理引擎（auralwise / openai / mimo-asr / siliconflow / mosi / deepseek）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 ### 麦克风调试与识别历史
 

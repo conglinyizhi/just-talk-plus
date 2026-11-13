@@ -759,6 +759,36 @@ func TestMosiOverlayHasNoLanguageField(t *testing.T) {
 	}
 }
 
+// TestDeepseekOverlayHasNoModelOrLanguageField deepseek 的转写接口只有一个 file 入参：
+// 没有模型参数，也没有语言参数（语种自动识别），弹层里这两个字段都不该出现。
+func TestDeepseekOverlayHasNoModelOrLanguageField(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "deepseek"
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	if len(ov.fields) != 2 {
+		t.Fatalf("deepseek overlay should have exactly API Key + Base URL, fields = %v", ov.fields)
+	}
+	for i := range ov.fields {
+		switch ov.fields[i].key {
+		case "ec.model", "ec.language":
+			t.Fatalf("deepseek overlay must not expose %s, fields = %v", ov.fields[i].key, ov.fields)
+		}
+	}
+	// 已有 language / model 的历史配置保存时不能丢。
+	cfg.Voice.SetEngineConfig("deepseek", map[string]string{"api_key": "k", "language": "zh-CN", "model": "old"})
+	m2 := readyModel(cfg)
+	m2.openChannelConfig()
+	m2.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["deepseek"]["language"]; got != "zh-CN" {
+		t.Fatalf("保存不该丢已有 language: %q", got)
+	}
+}
+
 func TestEngineConfigOverlayShowsStoredLanguage(t *testing.T) {
 	cfg := config.Default()
 	cfg.Voice.Engine = "openai"

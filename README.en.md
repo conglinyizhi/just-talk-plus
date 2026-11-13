@@ -13,7 +13,7 @@ It is built for people who want to type less and speak more while coding, chatti
 ## Features
 
 - Global-hotkey recording (`toggle` / `hold`); results are autotyped or copied to the clipboard.
-- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, Xiaomi MiMo, SiliconFlow, and Mosi.
+- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, Xiaomi MiMo, SiliconFlow, Mosi, and DeepSeek.
 - Chinese input polish: trailing-punctuation omission, CJK space cleanup, and automatic CJK/Latin spacing.
 - An Android phone can serve as the microphone (built-in AndroidMic server; install the official APK on the phone).
 - Microphone debug panel: test recording, level/gain adjustment, adaptive gain.
@@ -204,7 +204,7 @@ make dev ARGS="--gui --verbose"
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
 On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
 
-The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, `x-siliconcloud-trace-id` from the response headers for `siliconflow`, and `x-trace-id` from the response headers for `mosi`. Pass it to the matching vendor's support team to trace the upstream log.
+The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, `x-siliconcloud-trace-id` from the response headers for `siliconflow`, `x-trace-id` from the response headers for `mosi`, and the `request_id` from the response body for `deepseek` (falling back to the `x-ds-trace-id` response header). Pass it to the matching vendor's support team to trace the upstream log.
 
 ## Configuration
 
@@ -432,7 +432,20 @@ api_key = "…"                            # Mosi API Key (called MOSS_API_KEY i
 
 The difference from Doubao matches SiliconFlow: after you stop, the audio is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back synchronously, with no partial results while recording. The input source is either a file upload (multipart `file`) or one of the `file_id` / `url` / `audio_url` references; **the API does not accept Base64 or inline audio**, and this engine only uses the multipart `file` form. The request carries just two form fields, `file` and `model` (`response_format` is not sent explicitly, since the API already defaults to json). The default model is `moss-transcribe-1.0`; `moss-transcribe-diarize-pro` adds speaker diarization and keyterms, but this engine only takes the full `text` and ignores the segment structure. The History tab shows the `x-trace-id` from the response headers, and failed calls append the same trace ID to the error message, so you can hand it to Mosi support when reporting a problem. Async tasks (`async=true` plus task polling) are not implemented yet; only synchronous calls are supported.
 
-Batch engines (auralwise / openai / mimo-asr / siliconflow / mosi) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
+DeepSeek speech recognition (whole-recording transcription, synchronous, non-streaming). Docs: [DeepSeek speech-to-text](https://api-docs.deepseek.com/guides/asr/):
+
+```toml
+[voice]
+engine = "deepseek"
+
+[voice.engine_configs.deepseek]
+api_key = "sk-…"                             # DeepSeek API Key
+# base_url = "https://api.deepseek.com/v1"   # default
+```
+
+The difference from Doubao: after you stop, the audio is submitted to `/v1/tools/asr` in one request and a single final text comes back, with no partial results while recording. The request carries only one form field, `file`: the API has no `model`, `language`, or `response_format` parameter and detects the language from the audio (the docs list Chinese, Cantonese, English, Japanese and more, with no input parameter), so the engine config has no model or language field either. Only 16-bit PCM WAV or Ogg Opus is accepted, with a per-request limit of **120 seconds / 8 MiB**; both limits are enforced locally before sending (duration comes from parsing the WAV header and its byte rate rather than assuming 16 kHz mono; when a non-WAV file's duration cannot be parsed, only the size limit applies), so oversize audio fails with a readable error instead of a doomed round trip. Stereo input is transcribed from the left channel only. The History tab shows the `request_id` from the response body (falling back to the `x-ds-trace-id` response header), and failed calls append that trace ID to the error message, so you can hand it to DeepSeek support when reporting a problem. Streaming recognition, concurrent 429 retries, and Ogg Opus transcoding are not implemented yet.
+
+Batch engines (auralwise / openai / mimo-asr / siliconflow / mosi / deepseek) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 
 ### Microphone Debug And Recognition History
 
