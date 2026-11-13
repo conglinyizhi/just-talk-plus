@@ -48,17 +48,15 @@ func EngineType(vc config.VoiceConfig) string {
 }
 
 // ConfigMap 把 VoiceConfig 转成引擎配置 map：
-// 按引擎分组存储 engine_configs[engine] 优先，其次共享字段（language），
-// 最后旧版平铺字段（doubao app_key 等）。
+// 按引擎分组存储 engine_configs[engine] 优先，其次旧版平铺字段（doubao app_key 等）。
+// 语言（language）只来自当前引擎的分组配置——它是引擎相关的设置，
+// 旧版全局 [voice].language 由 config 迁移进分组，这里不再注入。
 func ConfigMap(vc config.VoiceConfig) map[string]string {
 	typ := EngineType(vc)
 	per := vc.EngineConfigFor(typ)
 	m := make(map[string]string, len(per)+6)
 	for k, v := range per {
 		m[k] = v
-	}
-	if vc.Language != "" && m["language"] == "" {
-		m["language"] = vc.Language
 	}
 	if typ == "doubao-stream" {
 		// 新版 api_key 时不合并旧版平铺字段：顶层 resource_id 会钉死 1.0 的 bigasr 资源，
@@ -90,4 +88,39 @@ func Build(vc config.VoiceConfig) (speech.Engine, error) {
 		return nil, fmt.Errorf("语音引擎 %q 配置错误: %w", typ, err)
 	}
 	return eng, nil
+}
+
+// StreamParams 从当前引擎的私有配置解析会话参数：
+//   - Lang 取分组里的 language（doubao-stream 可回退旧版平铺 engine_config）
+//   - Hotwords 取分组里的 hotwords，逗号分隔，去空白、丢空项
+//
+// 语言与热词都按引擎隔离存放，voice 插件不自己解析这些字符串。
+func StreamParams(vc config.VoiceConfig) speech.StreamParams {
+	ec := vc.EngineConfigFor(EngineType(vc))
+	return speech.StreamParams{
+		Lang:     strings.TrimSpace(ec["language"]),
+		Hotwords: splitHotwords(ec["hotwords"]),
+	}
+}
+
+// splitHotwords 解析逗号分隔的热词字符串（中英文逗号、换行都算分隔符）；
+// 去空白、丢空项、保序去重。
+func splitHotwords(s string) []string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == '，' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
 }

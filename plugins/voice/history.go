@@ -66,10 +66,12 @@ func RetryHistory(ctx context.Context, entry HistoryEntry, vc config.VoiceConfig
 		audio = pcm
 		contentType = "audio/pcm"
 	}
+	// 语言按引擎存放：重试走与正常录音相同的解析路径（旧版全局字段已废弃）。
+	params := asrcfg.StreamParams(vc)
 	result, err := eng.Transcribe(ctx, speech.TranscribeRequest{
 		Audio:       audio,
 		ContentType: contentType,
-		Lang:        vc.Language,
+		Lang:        params.Lang,
 	})
 	if err != nil {
 		return RetryResult{}, fmt.Errorf("%s 识别失败: %w", eng.Name(), err)

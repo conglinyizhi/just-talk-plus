@@ -764,7 +764,8 @@ func (p *VoicePlugin) startRecording() {
 		return
 	}
 	vc := p.cfg.Load().Voice
-	params := speech.StreamParams{Lang: vc.Language, Hotwords: vc.Hotwords}
+	// 语言与热词按引擎存放：解析交给 asrcfg（配置 → 引擎参数的唯一翻译层）。
+	params := asrcfg.StreamParams(vc)
 	var rec *Recorder
 	if vc.Device != "" {
 		rec = NewRecorderWithDevice(p.logger, vc.Device, vc.Gain)

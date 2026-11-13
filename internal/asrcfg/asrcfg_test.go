@@ -6,6 +6,9 @@
 package asrcfg
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -21,7 +24,6 @@ func TestEngineTypeDefault(t *testing.T) {
 func TestConfigMapLegacyDoubao(t *testing.T) {
 	m := ConfigMap(config.VoiceConfig{
 		Engine:     "doubao-stream",
-		Language:   "zh-CN",
 		AppKey:     "app123",
 		AccessKey:  "secret",
 		ResourceID: "volc.custom.resource",
@@ -35,16 +37,16 @@ func TestConfigMapLegacyDoubao(t *testing.T) {
 	if m["resource_id"] != "volc.custom.resource" {
 		t.Fatalf("resource_id = %q", m["resource_id"])
 	}
-	if m["language"] != "zh-CN" {
-		t.Fatalf("language = %q", m["language"])
+	// 废弃的全局 language 不再注入引擎配置
+	if got, ok := m["language"]; ok {
+		t.Fatalf("global language must not be injected into engine config, got %q", got)
 	}
 }
 
 func TestConfigMapEngineConfigWins(t *testing.T) {
-	// 引擎分组配置里的键优先于共享字段
+	// 语言只来自当前引擎的分组配置
 	m := ConfigMap(config.VoiceConfig{
-		Engine:   "auralwise",
-		Language: "en",
+		Engine: "auralwise",
 		EngineConfigs: map[string]map[string]string{
 			"auralwise": {"api_key": "k1", "language": "ja"},
 		},
@@ -52,9 +54,36 @@ func TestConfigMapEngineConfigWins(t *testing.T) {
 	if m["api_key"] != "k1" {
 		t.Fatalf("api_key = %q", m["api_key"])
 	}
-	// 分组配置中的 language 优先于共享字段
 	if m["language"] != "ja" {
 		t.Fatalf("language = %q", m["language"])
+	}
+	// 旧版平铺 engine_config 对 doubao-stream 仍是回退来源
+	m2 := ConfigMap(config.VoiceConfig{
+		Engine: "doubao-stream",
+		EngineConfig: map[string]string{
+			"api_key":  "k1",
+			"language": "ja",
+		},
+	})
+	if m2["api_key"] != "k1" || m2["language"] != "ja" {
+		t.Fatalf("flat engine_config should be read for doubao-stream: %v", m2)
+	}
+}
+
+func TestConfigMapIgnoresDeprecatedGlobalLanguage(t *testing.T) {
+	// 旧版全局 [voice].language 已废弃：只在 config.Load 迁移进分组，
+	// 引擎构建不再从全局字段取语言（否则等于把一门语言强加给所有引擎）。
+	for _, engine := range []string{"doubao-stream", "auralwise", "openai", "siliconflow", "dashscope", "mimo-asr"} {
+		m := ConfigMap(config.VoiceConfig{
+			Engine:   engine,
+			Language: "zh-CN",
+			EngineConfigs: map[string]map[string]string{
+				engine: {"api_key": "k"},
+			},
+		})
+		if got, ok := m["language"]; ok {
+			t.Fatalf("%s 从废弃的全局 language 拿到了语言: %q", engine, got)
+		}
 	}
 }
 
@@ -242,5 +271,112 @@ func TestConfigMapFlatConfigNotSharedWithOtherEngines(t *testing.T) {
 		if got, ok := m["api_key"]; ok {
 			t.Fatalf("%s 从旧版平铺 engine_config 拿到了凭据: api_key=%q", engine, got)
 		}
+	}
+}
+
+func TestStreamParamsPerEngine(t *testing.T) {
+	vc := config.VoiceConfig{
+		Engine: "doubao-stream",
+		EngineConfigs: map[string]map[string]string{
+			"doubao-stream": {"language": " zh-CN ", "hotwords": "Wayland, wl-copy，Sway\n , Wayland"},
+			"openai":        {"language": "en", "hotwords": "Groq"},
+		},
+	}
+	p := StreamParams(vc)
+	if p.Lang != "zh-CN" {
+		t.Fatalf("lang = %q, want trimmed zh-CN", p.Lang)
+	}
+	// 逗号分隔 → 列表：去空白、丢空项、去重
+	want := []string{"Wayland", "wl-copy", "Sway"}
+	if !reflect.DeepEqual(p.Hotwords, want) {
+		t.Fatalf("hotwords = %v, want %v", p.Hotwords, want)
+	}
+
+	// 切引擎后各读自己的分组，互不影响
+	vc.Engine = "openai"
+	p = StreamParams(vc)
+	if p.Lang != "en" {
+		t.Fatalf("openai lang = %q, want en", p.Lang)
+	}
+	if !reflect.DeepEqual(p.Hotwords, []string{"Groq"}) {
+		t.Fatalf("openai hotwords = %v, want [Groq]", p.Hotwords)
+	}
+}
+
+func TestStreamParamsIgnoresDeprecatedGlobalFields(t *testing.T) {
+	// 旧版全局 language/hotwords 不再进会话参数（迁移在 config.Load 里做）
+	p := StreamParams(config.VoiceConfig{
+		Engine:   "openai",
+		Language: "zh-CN",
+		Hotwords: []string{"Wayland"},
+	})
+	if p.Lang != "" || len(p.Hotwords) != 0 {
+		t.Fatalf("deprecated global fields leaked into session params: %+v", p)
+	}
+}
+
+func TestStreamParamsDoubaoFlatFallback(t *testing.T) {
+	vc := config.VoiceConfig{
+		Engine: "doubao-stream",
+		EngineConfig: map[string]string{
+			"api_key":  "flat-key",
+			"language": "en",
+			"hotwords": "Sway, wtype",
+		},
+	}
+	p := StreamParams(vc)
+	if p.Lang != "en" {
+		t.Fatalf("doubao lang = %q, want flat fallback en", p.Lang)
+	}
+	if !reflect.DeepEqual(p.Hotwords, []string{"Sway", "wtype"}) {
+		t.Fatalf("doubao hotwords = %v", p.Hotwords)
+	}
+
+	// 平铺配置只属于 doubao-stream：别的引擎拿不到它的语言与热词
+	vc.Engine = "siliconflow"
+	p = StreamParams(vc)
+	if p.Lang != "" || len(p.Hotwords) != 0 {
+		t.Fatalf("siliconflow must not inherit flat language/hotwords: %+v", p)
+	}
+}
+
+func TestStreamParamsEmptyHotwords(t *testing.T) {
+	p := StreamParams(config.VoiceConfig{
+		Engine: "openai",
+		EngineConfigs: map[string]map[string]string{
+			"openai": {"hotwords": " , ， \n"},
+		},
+	})
+	if len(p.Hotwords) != 0 {
+		t.Fatalf("hotwords = %v, want empty", p.Hotwords)
+	}
+}
+
+func TestStreamParamsAfterLegacyMigration(t *testing.T) {
+	// 端到端：旧版全局 language/hotwords 经 config.Load 迁移后，
+	// 会话参数应真的拿到该引擎的语言与热词（跨包接缝）。
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `
+[voice]
+engine = "doubao-stream"
+language = "zh-CN"
+hotwords = ["Wayland", "wl-copy"]
+
+[voice.engine_configs.doubao-stream]
+api_key = "k"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := StreamParams(cfg.Voice)
+	if p.Lang != "zh-CN" {
+		t.Fatalf("lang = %q, want migrated zh-CN", p.Lang)
+	}
+	if !reflect.DeepEqual(p.Hotwords, []string{"Wayland", "wl-copy"}) {
+		t.Fatalf("hotwords = %v, want migrated list", p.Hotwords)
 	}
 }

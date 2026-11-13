@@ -111,10 +111,14 @@ func TestBuildTabFields(t *testing.T) {
 	m := New(config.Default())
 
 	general := tabKeys(m.tabField[tabGeneral])
-	for _, want := range []string{"enabled", "push_to_talk", "mode", "language", "stop_delay_ms", "stop_after_silence", "diagnostics_startup_runs"} {
+	for _, want := range []string{"enabled", "push_to_talk", "mode", "stop_delay_ms", "stop_after_silence", "diagnostics_startup_runs"} {
 		if !general[want] {
 			t.Fatalf("general missing %q: %v", want, general)
 		}
+	}
+	// 语言改为按引擎存放（引擎配置弹层里的 ec.language），通用 tab 不再有全局语言
+	if general["language"] {
+		t.Fatal("general tab must not carry the deprecated global language field")
 	}
 	if general["auto_submit"] {
 		t.Fatal("auto_submit moved to Output tab (上屏与复制行为)")
@@ -279,24 +283,24 @@ func TestFieldNavigation(t *testing.T) {
 
 func TestFieldEditingString(t *testing.T) {
 	m := readyModel(config.Default())
-	// 定位到语言字段（通用 tab 第 4 个）
-	for m.cursor < 3 {
+	// 定位到热键字段（通用 tab 第 2 个）
+	for m.cursor < 1 {
 		m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
 	}
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.editing {
 		t.Fatal("should enter editing")
 	}
-	lang := fieldByKey(m, "language")
-	lang.input.SetValue("")
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
-	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	hotkey := fieldByKey(m, "push_to_talk")
+	hotkey.input.SetValue("")
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("F")})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("9")})
 	m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.editing {
 		t.Fatal("should exit editing")
 	}
-	if got := lang.input.Value(); got != "en" {
-		t.Fatalf("language = %q", got)
+	if got := hotkey.input.Value(); got != "F9" {
+		t.Fatalf("push_to_talk = %q", got)
 	}
 }
 
@@ -669,6 +673,121 @@ func TestConfigOverlayToggleSave(t *testing.T) {
 	}
 }
 
+func TestEngineConfigOverlayLanguagePerEngine(t *testing.T) {
+	// 语言按引擎存放：这些引擎的配置弹层要有 ec.language，保存写进各自分组
+	for _, engine := range []string{"doubao-stream", "auralwise", "openai"} {
+		cfg := config.Default()
+		cfg.Voice.Engine = engine
+		m := readyModel(cfg)
+		m.openChannelConfig()
+		ov := m.configOverlay
+		if ov == nil {
+			t.Fatalf("%s: overlay should open", engine)
+		}
+		var langField *field
+		for i := range ov.fields {
+			if ov.fields[i].key == "ec.language" {
+				langField = &ov.fields[i]
+				break
+			}
+		}
+		if langField == nil {
+			t.Fatalf("%s overlay missing ec.language field: %v", engine, ov.fields)
+		}
+		langField.input.SetValue("ja-JP")
+		m.applyConfigOverlay()
+		if got := cfg.Voice.EngineConfigs[engine]["language"]; got != "ja-JP" {
+			t.Fatalf("%s language = %q, want ja-JP", engine, got)
+		}
+		if cfg.Voice.Language != "" {
+			t.Fatalf("%s wrote the deprecated global language: %q", engine, cfg.Voice.Language)
+		}
+	}
+}
+
+// TestSiliconflowOverlayHasNoLanguageField 硅基流动的转写接口不接收 language，
+// 弹层就不该给这个字段——给了只会让人以为设了有用。
+func TestSiliconflowOverlayHasNoLanguageField(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "siliconflow"
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	for i := range ov.fields {
+		if ov.fields[i].key == "ec.language" {
+			t.Fatalf("siliconflow overlay must not expose ec.language, fields = %v", ov.fields)
+		}
+	}
+	// 但历史配置里若已有 language（迁移带过来的），保存时不能把它抹掉。
+	cfg.Voice.SetEngineConfig("siliconflow", map[string]string{"api_key": "k", "language": "zh-CN"})
+	m2 := readyModel(cfg)
+	m2.openChannelConfig()
+	m2.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["siliconflow"]["language"]; got != "zh-CN" {
+		t.Fatalf("保存在不该丢已有 language: %q", got)
+	}
+}
+
+func TestEngineConfigOverlayShowsStoredLanguage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "openai"
+	cfg.Voice.SetEngineConfig("openai", map[string]string{"api_key": "k", "language": "en"})
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	var got string
+	for i := range m.configOverlay.fields {
+		if m.configOverlay.fields[i].key == "ec.language" {
+			got = m.configOverlay.fields[i].input.Value()
+			break
+		}
+	}
+	if got != "en" {
+		t.Fatalf("language field = %q, want en", got)
+	}
+}
+
+func TestDoubaoOverlayHotwordsSavedPerEngine(t *testing.T) {
+	cfg := config.Default() // engine = doubao-stream
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	var hotwords *field
+	for i := range ov.fields {
+		switch ov.fields[i].key {
+		case "ec.hotwords":
+			hotwords = &ov.fields[i]
+		case "hotwords":
+			t.Fatal("doubao overlay must store hotwords as ec.hotwords, not the global key")
+		}
+	}
+	if hotwords == nil {
+		t.Fatal("doubao overlay missing ec.hotwords field")
+	}
+	hotwords.input.SetValue("Wayland, wl-copy")
+	m.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["doubao-stream"]["hotwords"]; got != "Wayland, wl-copy" {
+		t.Fatalf("hotwords = %q, want per-engine value", got)
+	}
+	if len(cfg.Voice.Hotwords) != 0 {
+		t.Fatalf("deprecated global hotwords written: %v", cfg.Voice.Hotwords)
+	}
+
+	// 其它引擎保存配置不能覆盖豆包的热词
+	cfg.Voice.Engine = "openai"
+	m = readyModel(cfg)
+	m.openChannelConfig()
+	m.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["doubao-stream"]["hotwords"]; got != "Wayland, wl-copy" {
+		t.Fatalf("doubao hotwords clobbered by openai save: %q", got)
+	}
+}
+
 func TestEngineConfigPerEngineIsolation(t *testing.T) {
 	// 不同引擎的配置互不覆盖：doubao 的 key 与 openai 的 key 独立保存
 	cfg := config.Default()
@@ -849,15 +968,19 @@ func TestAndroidPanelRender(t *testing.T) {
 func TestApplyFieldsTo(t *testing.T) {
 	cfg := config.Default()
 	m := New(cfg)
-	fieldByKey(m, "language").input.SetValue("ja-JP")
+	fieldByKey(m, "push_to_talk").input.SetValue("F9")
 	fieldByKey(m, "auto_submit").boolVal = false
 	fieldByKey(m, "omit_trailing_punct").boolVal = true
 	fieldByKey(m, "androidmic_auto_start").boolVal = true
 
 	next := *cfg
 	m.applyFieldsTo(&next)
-	if next.Voice.Language != "ja-JP" {
-		t.Fatalf("language = %q", next.Voice.Language)
+	if next.Voice.PushToTalk != "F9" {
+		t.Fatalf("push_to_talk = %q", next.Voice.PushToTalk)
+	}
+	// 全局 language / hotwords 已废弃：通用 tab 的保存路径不能再写它们
+	if next.Voice.Language != "" || len(next.Voice.Hotwords) != 0 {
+		t.Fatalf("deprecated global language/hotwords written back: %q %v", next.Voice.Language, next.Voice.Hotwords)
 	}
 	if next.Voice.AutoSubmit {
 		t.Fatal("auto_submit should be false")

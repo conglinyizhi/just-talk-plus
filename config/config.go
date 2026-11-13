@@ -114,8 +114,11 @@ type VoiceConfig struct {
 	StopAfterSilence   bool     `toml:"stop_after_silence"` // 停止请求后检测有效人声并重置静音倒计时
 	// HotkeyCooldownMs 一次录音会话结束后的热键冷却（毫秒）：冷却期内再按
 	// 录音热键静默忽略，防止结束瞬间误触导致秒开秒关。默认 100ms。
-	HotkeyCooldownMs int    `toml:"hotkey_cooldown_ms"`
-	Language         string `toml:"language"`
+	HotkeyCooldownMs int `toml:"hotkey_cooldown_ms"`
+	// Language 已废弃：语言改为按引擎存放在 engine_configs[engine]["language"]。
+	// 该字段只用于旧配置的迁移读取（见 migrateLegacySharedASRConfig），
+	// 不再参与引擎构建；迁移后清空，因 omitempty 不再写回文件。
+	Language string `toml:"language,omitempty"`
 	// 句尾标点省略（输出前统一处理）：主开关省略句号「。」。
 	OmitTrailingPunct bool `toml:"omit_trailing_punct"`
 	// 副设置（依赖主开关）：切断句尾所有标点（含英文符号）。
@@ -147,10 +150,13 @@ type VoiceConfig struct {
 	// 的读取兜底与迁移来源，其它引擎不读它（见 legacyFlatEngine）。
 	EngineConfig map[string]string `toml:"engine_config"`
 	// 以下为 doubao 旧版平铺字段，向后兼容；新配置建议写入 engine_config。
-	AppKey     string   `toml:"app_key"`
-	AccessKey  string   `toml:"access_key"`
-	ResourceID string   `toml:"resource_id"`
-	Hotwords   []string `toml:"hotwords"`
+	AppKey     string `toml:"app_key"`
+	AccessKey  string `toml:"access_key"`
+	ResourceID string `toml:"resource_id"`
+	// Hotwords 已废弃：热词改为按引擎存放在
+	// engine_configs[engine]["hotwords"]（逗号分隔字符串）。
+	// 该字段只用于旧配置的迁移读取，不再参与引擎构建。
+	Hotwords []string `toml:"hotwords,omitempty"`
 }
 
 // legacyFlatEngine 是旧版平铺 engine_config 唯一归属的引擎。
@@ -206,7 +212,7 @@ func Default() *Config {
 	return &Config{
 		Voice: VoiceConfig{
 			Enabled: true, Mode: "toggle", PushToTalk: "Alt+Super",
-			Language: "zh-CN", AutoSubmit: true, AutoGain: true, AutoSpace: true,
+			AutoSubmit: true, AutoGain: true, AutoSpace: true,
 			WriteClipboard: true, RestoreClipboard: true, NoClipboardOnFail: true,
 			Engine: "doubao-stream", StopDelayMs: 800, NoiseThreshold: 0.015, NoiseDeadband: 0.1,
 			AndroidMicPort: 54345, HotkeyCooldownMs: 100, // 热键冷却默认 100ms；AndroidMicAutoStart 默认关闭
@@ -238,7 +244,99 @@ func Load(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	cfg.Voice.migrateLegacySharedASRConfig()
 	return cfg, nil
+}
+
+// migrateLegacySharedASRConfig 把旧版全局 [voice].language / [voice].hotwords
+// 复制进引擎配置，然后清空全局字段。
+//
+// 语言与热词都是引擎相关的设置（同一句中文交给不同厂商，能填的值也不一样），
+// 所以按引擎隔离存放：engine_configs[engine]["language"|"hotwords"]。
+// 迁移只补缺失的键、不覆盖分组里已有的值，用户可以按引擎各自覆盖；
+// 也不为没配过的引擎凭空创建分组。只在内存里发生（Load 之后不主动写盘），
+// 下次用户保存配置时才自然落盘；调用幂等，字段清空后再调用是 no-op。
+func (vc *VoiceConfig) migrateLegacySharedASRConfig() {
+	lang := strings.TrimSpace(vc.Language)
+	hotwords := joinHotwords(vc.Hotwords)
+	if lang == "" && hotwords == "" {
+		return
+	}
+	for _, per := range vc.EngineConfigs {
+		fillLegacySharedASR(per, lang, hotwords)
+	}
+	// 旧版平铺 engine_config 是 doubao-stream 的回退来源，同样补上。
+	fillLegacySharedASR(vc.EngineConfig, lang, hotwords)
+	vc.migrateSharedASRToLegacyDoubao(lang, hotwords)
+	vc.Language = ""
+	vc.Hotwords = nil
+}
+
+// migrateSharedASRToLegacyDoubao 兜住最老的一批配置：只有顶层
+// app_key / access_key / resource_id（单引擎时代），既没有 engine_configs
+// 分组、也没有平铺 engine_config。这种配置没有地方挂 language / hotwords，
+// 直接丢弃等于静默改用户的语种，所以在 doubao-stream 下建一个只含这两项
+// 的分组——顶层凭据仍会被 asrcfg 合并进来，认证不受影响。
+//
+// 平铺 engine_config 有内容时不建组：那时豆包读的是平铺配置，再建一个分组
+// 会盖住平铺里的 api_key。
+func (vc *VoiceConfig) migrateSharedASRToLegacyDoubao(lang, hotwords string) {
+	if len(vc.EngineConfig) > 0 {
+		return
+	}
+	if _, exists := vc.EngineConfigs[legacyFlatEngine]; exists {
+		return
+	}
+	hasTopLevelCreds := strings.TrimSpace(vc.AppKey) != "" ||
+		strings.TrimSpace(vc.AccessKey) != "" ||
+		strings.TrimSpace(vc.ResourceID) != ""
+	if !hasTopLevelCreds {
+		return
+	}
+	if vc.EngineConfigs == nil {
+		vc.EngineConfigs = map[string]map[string]string{}
+	}
+	per := map[string]string{}
+	if lang != "" {
+		per["language"] = lang
+	}
+	if hotwords != "" {
+		per["hotwords"] = hotwords
+	}
+	vc.EngineConfigs[legacyFlatEngine] = per
+}
+
+// fillLegacySharedASR 往单个引擎配置 map 里补缺失的 language / hotwords。
+// 空 map 与 nil 都不写（不创建、不初始化），已有值不覆盖。
+func fillLegacySharedASR(m map[string]string, lang, hotwords string) {
+	if len(m) == 0 {
+		return
+	}
+	if lang != "" && strings.TrimSpace(m["language"]) == "" {
+		m["language"] = lang
+	}
+	if hotwords != "" && strings.TrimSpace(m["hotwords"]) == "" {
+		m["hotwords"] = hotwords
+	}
+}
+
+// joinHotwords 把旧版热词列表拼成引擎分组里的逗号分隔形式：
+// 去空白、丢空项、去重（与引擎侧的解析规则一致）。
+func joinHotwords(words []string) string {
+	out := make([]string, 0, len(words))
+	seen := make(map[string]struct{}, len(words))
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if _, ok := seen[w]; ok {
+			continue
+		}
+		seen[w] = struct{}{}
+		out = append(out, w)
+	}
+	return strings.Join(out, ", ")
 }
 
 func FindConfig() string {

@@ -204,7 +204,7 @@ make dev ARGS="--gui --verbose"
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
 On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
 
-The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, and `x-siliconcloud-trace-id` from the response headers for `siliconflow`. Pass it to the matching vendor's support team to trace the upstream log.
+The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, `x-siliconcloud-trace-id` from the response headers for `siliconflow`. Pass it to the matching vendor's support team to trace the upstream log.
 
 ## Configuration
 
@@ -266,12 +266,15 @@ Voice hotkeys only support keys suitable for global shortcuts:
 
 > Note: if you also run the upstream just-talk-go (Go version), both programs default to the same recording shortcut (`Alt+Super`). Configure different shortcuts in each to avoid triggering both at once.
 
-Hotword example:
+Language and hotwords are stored per engine (under that engine's config group, so they only affect that engine):
 
 ```toml
-[voice]
-hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-plus"]
+[voice.engine_configs.doubao-stream]
+language = "zh-CN"   # empty = let the engine auto-detect
+hotwords = "Wayland, Sway, wl-copy, wtype, just-talk-plus"   # comma separated
 ```
+
+Configs that still put `language` / `hotwords` under `[voice]` keep working: on load those values are copied into the engine groups that **already exist** (and into the legacy flat `engine_config`), existing keys are left untouched, and no group is created for an engine you never configured. The migration happens in memory only and never writes to disk; your next save in the app writes it in the new shape.
 
 macOS hotkey example:
 
@@ -301,7 +304,7 @@ enabled = true                   # turn off to disable the tray in background mo
 
 ### Speech Engines
 
-The `engine` key under `[voice]` selects the ASR engine, and each engine keeps its own private settings under `[voice.engine_configs.<engine>]` (e.g. `[voice.engine_configs.openai]`), so you can store credentials for several channels at once without them overwriting each other. The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description; the "engine config" overlay (Enter to open, `s` to save, `esc` to cancel) edits the current engine's credentials and settings and persists them into `engine_configs.<engine>`; the "related links" overlay lists documentation links for all engines and opens one in the browser with Enter. The legacy flat `engine_config` and the `app_key` / `access_key` / `resource_id` fields stay in the file (they are never deleted or migrated automatically), but they only apply to `doubao-stream`: that engine falls back to the flat config only when `[voice.engine_configs.doubao-stream]` is missing, while every other engine reads its own grouped config only, so a missing group means "not configured". This keeps one vendor's credentials away from another vendor's endpoint. To move old flat credentials to another engine, enter them per engine in the TUI "engine config" overlay.
+The `engine` key under `[voice]` selects the ASR engine, and each engine keeps its own private settings under `[voice.engine_configs.<engine>]` (e.g. `[voice.engine_configs.openai]`), so you can store credentials for several channels at once without them overwriting each other. Language (`language`) and hotwords (`hotwords`) live in the same group and apply per engine: Doubao can use `zh-CN` while an OpenAI-compatible endpoint uses `zh`, without interfering. Legacy global `language` / `hotwords` under `[voice]` are copied into the existing engine groups on load (existing values win, and nothing is written to disk). The default is `engine = "doubao-stream"`. In the TUI, pressing Enter on the Engine field opens a channel picker overlay where each channel shows its description; the "engine config" overlay (Enter to open, `s` to save, `esc` to cancel) edits the current engine's credentials and settings and persists them into `engine_configs.<engine>`; the "related links" overlay lists documentation links for all engines and opens one in the browser with Enter. The legacy flat `engine_config` and the `app_key` / `access_key` / `resource_id` fields stay in the file (they are never deleted or migrated automatically), but they only apply to `doubao-stream`: that engine falls back to the flat config only when `[voice.engine_configs.doubao-stream]` is missing, while every other engine reads its own grouped config only, so a missing group means "not configured". This keeps one vendor's credentials away from another vendor's endpoint. To move old flat credentials to another engine, enter them per engine in the TUI "engine config" overlay.
 
 #### Doubao (Volcano Engine) Streaming ASR
 
@@ -317,7 +320,6 @@ Credentials: use `api_key` with the `X-Api-Key` from the new console, or `app_id
 ```toml
 [voice]
 engine = "doubao-stream"
-language = "zh-CN"
 
 [voice.engine_configs.doubao-stream]
 # New console credentials
@@ -325,6 +327,9 @@ api_key = "…"
 # Or legacy credentials:
 # app_id = "…"
 # access_key = "…"
+# Language and hotwords (this engine only):
+language = "zh-CN"         # empty = auto
+# hotwords = "Wayland, wtype"  # comma separated, sent with the session
 # Access mode:
 model_version = "1.0"      # 1.0=bigasr (default) | 2.0=seedasr
 stream_mode = "async"      # async=bidirectional (low latency, live results) | nostream=one-way (final result after complete audio)
@@ -355,6 +360,7 @@ api_key = "asr_…"
 # base_url = "https://api.auralwise.cn/v1"
 # optimize = "auto"          # auto | true | false
 # poll_timeout = "10m"
+# language = "zh"            # ISO 639-1 / BCP-47; empty = auto
 ```
 
 OpenAI-compatible Whisper endpoint (official API, Groq, local whisper server, etc.):
@@ -367,6 +373,7 @@ engine = "openai"
 api_key = "sk-…"
 # base_url = "https://api.openai.com/v1"   # point at any compatible endpoint
 # model = "whisper-1"
+# language = "zh"            # ISO-639-1; empty = auto
 ```
 
 Qianwen (DashScope) Fun-ASR realtime streaming recognition (WebSocket, live partial results). Docs: [Realtime ASR](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime). Available ASR models: [Qianwen realtime ASR model catalog (search asr)](https://www.qianwenai.com/models?search=asr):
@@ -406,6 +413,7 @@ engine = "siliconflow"
 api_key = "sk-…"                              # account API Key
 # base_url = "https://api.siliconflow.cn/v1"  # default
 # model = "FunAudioLLM/SenseVoiceSmall"       # default; TeleAI/TeleSpeechASR etc. also accepted
+# language = "zh-CN"                          # stored per engine only; the API takes no language parameter, so the request is unchanged
 ```
 
 Unlike Doubao's streaming recognition, SiliconFlow works on the whole recording: after you stop, the audio (≤50 MB, ≤1 hour) is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back, with no partial results while recording. The default model is `FunAudioLLM/SenseVoiceSmall`; swap the model name in the engine settings to another one from the official catalog. The History tab shows the `x-siliconcloud-trace-id` from the response headers, and failed calls append the same trace ID to the error message, so you can hand it to SiliconFlow support when reporting a problem.

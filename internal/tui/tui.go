@@ -290,7 +290,6 @@ func buildTabFields(cfg *config.Config) map[tabID][]field {
 		{label: "语音输入", key: "enabled", help: "关闭后不注册热键", fType: fToggle, boolVal: vc.Enabled},
 		{label: "热键", key: "push_to_talk", help: "例: Alt+Super / F9；不支持字母数字等普通字符键", fType: fString, input: ti(vc.PushToTalk)},
 		{label: "模式", key: "mode", help: "toggle 切换 / hold 按住", fType: fSelect, opts: []string{"toggle", "hold"}, optIdx: idxOf([]string{"toggle", "hold"}, vc.Mode)},
-		{label: "语言", key: "language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(vc.Language)},
 		{label: "停止延迟(ms)", key: "stop_delay_ms", help: "松手后补录毫秒", fType: fString, input: ti(fmt.Sprintf("%d", vc.StopDelayMs))},
 		{label: "热键冷却(ms)", key: "hotkey_cooldown_ms", help: "一次录音结束后，冷却期内再按热键静默忽略，防误触秒开秒关；0 = 关闭", fType: fString, input: ti(fmt.Sprintf("%d", vc.HotkeyCooldownMs))},
 		{label: "有声后停止", key: "stop_after_silence", help: "停止请求后，检测到有效人声会重置倒计时；静音满「停止延迟」才截断录音", fType: fToggle, boolVal: vc.StopAfterSilence},
@@ -417,12 +416,14 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "API Key", key: "ec.api_key", help: "必填（asr_…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.auralwise.cn/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "Optimize", key: "ec.optimize", help: "auto | true | false", fType: fSelect, opts: []string{"auto", "true", "false"}, optIdx: idxOf([]string{"auto", "true", "false"}, def(ec["optimize"], "auto"))},
+			{label: "语言", key: "ec.language", help: "ISO 639-1 / BCP-47，如 zh / zh-CN；空 = 自动", fType: fString, input: ti(ec["language"])},
 		}
 	case "openai":
 		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（sk-…）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.openai.com/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 whisper-1", fType: fString, input: ti(ec["model"])},
+			{label: "语言", key: "ec.language", help: "ISO-639-1，如 zh / en；空 = 自动", fType: fString, input: ti(ec["language"])},
 		}
 	case "mimo-asr":
 		fields = []field{
@@ -432,6 +433,8 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "语言", key: "ec.language", help: "auto / zh / en；空 = 自动", fType: fString, input: ti(ec["language"])},
 		}
 	case "siliconflow":
+		// 硅基流动的转写接口只收 file 与 model，不接收 language；这里不放语言
+		// 字段，免得用户以为设了有用（历史配置里已有的 language 保存时不会丢）。
 		fields = []field{
 			{label: "API Key", key: "ec.api_key", help: "必填（账户 API Key）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.siliconflow.cn/v1", fType: fString, input: ti(ec["base_url"])},
@@ -466,7 +469,8 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "App ID(旧版)", key: "ec.app_id", help: "旧版控制台 App ID（无 api_key 时使用）", fType: fString, input: ti(get("app_id"))},
 			{label: "Access Key(旧版)", key: "ec.access_key", help: "旧版 Access Token", fType: fString, input: ti(get("access_key"))},
 			{label: "Base Host", key: "ec.base_host", help: "默认 openspeech.bytedance.com", fType: fString, input: ti(ec["base_host"])},
-			{label: "热词", key: "hotwords", help: "逗号分隔术语", fType: fString, input: ti(strings.Join(vc.Hotwords, ", "))},
+			{label: "语言", key: "ec.language", help: "BCP-47，如 zh-CN；空 = 自动", fType: fString, input: ti(ec["language"])},
+			{label: "热词", key: "ec.hotwords", help: "逗号分隔术语，随该引擎的会话发送；仅此引擎生效", fType: fString, input: ti(ec["hotwords"])},
 			{label: "中英文识别", key: "ec.enable_lid", help: "中英混说/方言识别；语言需为自动或 zh-CN", fType: fToggle, boolVal: bval("enable_lid", "false")},
 			{label: "二遍识别", key: "ec.enable_nonstream", help: "分句二次识别，最终更准；仅流式模式=async 生效", fType: fToggle, boolVal: bval("enable_nonstream", "true")},
 			{label: "数字规范化", key: "ec.enable_itn", help: "口语数字/金额转阿拉伯数字（一九七零年→1970年）", fType: fToggle, boolVal: bval("enable_itn", "true")},
@@ -854,8 +858,6 @@ func (m *Model) applyFieldsTo(next *config.Config) {
 				vc.PushToTalk = f.input.Value()
 			case "mode":
 				vc.Mode = f.selectValue()
-			case "language":
-				vc.Language = f.input.Value()
 			case "auto_submit":
 				vc.AutoSubmit = f.boolVal
 			case "omit_trailing_punct":
@@ -1945,9 +1947,9 @@ func (m *Model) applyConfigOverlay() {
 	}
 	for _, f := range ov.fields {
 		switch {
-		case f.key == "hotwords":
-			vc.Hotwords = splitList(f.input.Value())
 		case strings.HasPrefix(f.key, "ec."):
+			// 语言与热词也在引擎分组里（ec.language / ec.hotwords），
+			// 各引擎独立保存，不再写全局 [voice].language / hotwords。
 			name := strings.TrimPrefix(f.key, "ec.")
 			var val string
 			if f.fType == fToggle {

@@ -263,12 +263,15 @@ omit_trailing_punct = false  # 输出前省略句尾句号「。」（主设置�
 
 > 提示：若与本项目的上游 just-talk-go（Go 版）同时安装使用，两边默认录音热键相同（`Alt+Super`），请把两边的热键配置成不同的按键，避免同时触发。
 
-热词示例：
+语言与热词都按引擎存放（写在对应引擎的配置分组里，只对该引擎生效）：
 
 ```toml
-[voice]
-hotwords = ["Wayland", "Sway", "wl-copy", "wtype", "just-talk-plus"]
+[voice.engine_configs.doubao-stream]
+language = "zh-CN"   # 空 = 引擎自动判定
+hotwords = "Wayland, Sway, wl-copy, wtype, just-talk-plus"   # 逗号分隔
 ```
+
+旧版把 `language` / `hotwords` 写在 `[voice]` 下的配置仍可继续用：程序加载时会把这些值自动复制进**已经存在**的引擎分组（以及旧版平铺 `engine_config`），不覆盖分组里已有的值，也不会凭空给没配过的引擎建组；迁移只发生在内存里、不主动写盘，下次在程序里保存配置时才自然落盘成新写法。
 
 macOS 热键写法：
 
@@ -298,7 +301,7 @@ enabled = true                   # 关掉则后台不挂托盘
 
 ### 语音引擎
 
-`[voice]` 下的 `engine` 选择识别引擎，每个引擎的私有配置单独存放于 `[voice.engine_configs.<engine>]`（如 `[voice.engine_configs.openai]`），可同时保存多个渠道的凭据、互不覆盖。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；「引擎配置」二级弹层（按回车进入、`s` 保存、`esc` 取消）编辑当前引擎的凭据与专属设置，保存后写入 `engine_configs.<engine>`；「相关链接」弹层汇总全部引擎的文档链接，回车用浏览器打开。旧版平铺 `engine_config` 与 `app_key` / `access_key` / `resource_id` 字段仍保留在配置文件里（不会自动删除或迁移），但它们只对 `doubao-stream` 生效：只有该引擎缺失 `[voice.engine_configs.doubao-stream]` 时才回退到平铺配置，其它引擎一律各读自己的分组配置，缺了就是「未配置」——避免把一家厂商的凭据发给另一家的端点。要把旧的平铺凭据迁到别的引擎，在 TUI 的「引擎配置」弹层里按引擎分别填一次即可。
+`[voice]` 下的 `engine` 选择识别引擎，每个引擎的私有配置单独存放于 `[voice.engine_configs.<engine>]`（如 `[voice.engine_configs.openai]`），可同时保存多个渠道的凭据、互不覆盖。语言（`language`）与热词（`hotwords`）也在这个分组里，按引擎各自生效：同一台机器上豆包可以填 `zh-CN`，OpenAI 兼容端点填 `zh`，互不影响；旧版写在 `[voice]` 下的全局 `language` / `hotwords` 会在加载时自动复制进已存在的引擎分组（不覆盖已有值，也不主动写盘）。默认 `engine = "doubao-stream"`。TUI 中「引擎」字段按回车会打开渠道选择弹层，每个渠道附特点说明；「引擎配置」二级弹层（按回车进入、`s` 保存、`esc` 取消）编辑当前引擎的凭据与专属设置，保存后写入 `engine_configs.<engine>`；「相关链接」弹层汇总全部引擎的文档链接，回车用浏览器打开。旧版平铺 `engine_config` 与 `app_key` / `access_key` / `resource_id` 字段仍保留在配置文件里（不会自动删除或迁移），但它们只对 `doubao-stream` 生效：只有该引擎缺失 `[voice.engine_configs.doubao-stream]` 时才回退到平铺配置，其它引擎一律各读自己的分组配置，缺了就是「未配置」——避免把一家厂商的凭据发给另一家的端点。要把旧的平铺凭据迁到别的引擎，在 TUI 的「引擎配置」弹层里按引擎分别填一次即可。
 
 #### 豆包（火山引擎）流式 ASR
 
@@ -314,7 +317,6 @@ enabled = true                   # 关掉则后台不挂托盘
 ```toml
 [voice]
 engine = "doubao-stream"
-language = "zh-CN"
 
 [voice.engine_configs.doubao-stream]
 # 新版控制台凭据
@@ -322,6 +324,9 @@ api_key = "…"
 # 或用旧版凭据：
 # app_id = "…"
 # access_key = "…"
+# 语言与热词（仅本引擎生效）：
+language = "zh-CN"         # 空 = 自动
+# hotwords = "Wayland, wtype"  # 逗号分隔术语，随会话发送
 # 接入方式：
 model_version = "1.0"      # 1.0=bigasr（默认） | 2.0=seedasr
 stream_mode = "async"      # async=双向流式（低延迟、实时结果） | nostream=单向流式（完整音频后给最终结果）
@@ -352,6 +357,7 @@ api_key = "asr_…"
 # base_url = "https://api.auralwise.cn/v1"
 # optimize = "auto"          # auto | true | false
 # poll_timeout = "10m"
+# language = "zh"            # ISO 639-1 / BCP-47；空 = 自动
 ```
 
 OpenAI 兼容 Whisper 接口（官方 API、Groq、本地 whisper 服务等）：
@@ -364,6 +370,7 @@ engine = "openai"
 api_key = "sk-…"
 # base_url = "https://api.openai.com/v1"   # 可指向兼容端点
 # model = "whisper-1"
+# language = "zh"            # ISO-639-1；空 = 自动
 ```
 
 千问（DashScope）Fun-ASR 实时流式识别（WebSocket，边录边出字）。文档见 [实时语音识别](https://platform.qianwenai.com/docs/developer-guides/speech/asr-realtime)，可用的 ASR 模型可参考 [千问实时 ASR 模型库（搜索 asr）](https://www.qianwenai.com/models?search=asr)：
@@ -403,6 +410,7 @@ engine = "siliconflow"
 api_key = "sk-…"                              # 账户 API Key
 # base_url = "https://api.siliconflow.cn/v1"  # 默认即可
 # model = "FunAudioLLM/SenseVoiceSmall"       # 默认；可换 TeleAI/TeleSpeechASR 等
+# language = "zh-CN"                          # 仅按引擎保存；该接口不接收语言参数，不改变请求
 ```
 
 与豆包的边录边出字不同，硅基流动是整段识别：录音结束后把音频（≤50MB、≤1 小时）一次性提交到 `/v1/audio/transcriptions`，只返回一条完整文本，识别过程中没有中间结果；默认模型 `FunAudioLLM/SenseVoiceSmall`，模型名可在引擎配置里自行更换（以官网模型列表为准）。识别历史会显示本次响应头里的 `x-siliconcloud-trace-id`；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给硅基流动支持即可追溯上游日志。
