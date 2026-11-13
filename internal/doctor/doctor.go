@@ -158,5 +158,5 @@ func legacyFlatHint(vc config.VoiceConfig) string {
 
 // engineChoices 面向用户的引擎候选文案（与 README 保持一致）。
 func engineChoices() string {
-	return "doubao-stream / auralwise / openai / dashscope / mimo-asr / siliconflow"
+	return "doubao-stream / auralwise / openai / dashscope / mimo-asr / siliconflow / mosi"
 }

@@ -731,6 +731,34 @@ func TestSiliconflowOverlayHasNoLanguageField(t *testing.T) {
 	}
 }
 
+// TestMosiOverlayHasNoLanguageField mosi 的转写接口同样不接收 language。
+func TestMosiOverlayHasNoLanguageField(t *testing.T) {
+	cfg := config.Default()
+	cfg.Voice.Engine = "mosi"
+	m := readyModel(cfg)
+	m.openChannelConfig()
+	ov := m.configOverlay
+	if ov == nil {
+		t.Fatal("overlay should open")
+	}
+	if len(ov.fields) == 0 {
+		t.Fatal("mosi overlay should have fields")
+	}
+	for i := range ov.fields {
+		if ov.fields[i].key == "ec.language" {
+			t.Fatalf("mosi overlay must not expose ec.language, fields = %v", ov.fields)
+		}
+	}
+	// 已有 language 的历史配置保存时不能丢。
+	cfg.Voice.SetEngineConfig("mosi", map[string]string{"api_key": "k", "language": "zh-CN"})
+	m2 := readyModel(cfg)
+	m2.openChannelConfig()
+	m2.applyConfigOverlay()
+	if got := cfg.Voice.EngineConfigs["mosi"]["language"]; got != "zh-CN" {
+		t.Fatalf("保存不该丢已有 language: %q", got)
+	}
+}
+
 func TestEngineConfigOverlayShowsStoredLanguage(t *testing.T) {
 	cfg := config.Default()
 	cfg.Voice.Engine = "openai"

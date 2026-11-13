@@ -19,6 +19,7 @@ import (
 	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/dashscope"
 	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/doubao"
 	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/mimo"
+	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/mosi"
 	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/openai"
 	_ "github.com/conglinyizhi/just-talk-plus/internal/speech/siliconflow"
 )
@@ -28,7 +29,7 @@ const DefaultEngine = "doubao-stream"
 
 // userEngines 面向用户的引擎类型，与 README / doctor 文案保持一致。
 // null 是内部兜底（Build 空类型 / 显式 "null" 时返回），不列在候选里。
-var userEngines = []string{"doubao-stream", "auralwise", "openai", "dashscope", "mimo-asr", "siliconflow"}
+var userEngines = []string{"doubao-stream", "auralwise", "openai", "dashscope", "mimo-asr", "siliconflow", "mosi"}
 
 // Types 面向用户的引擎类型（排序），供 TUI/设置页选择。
 func Types() []string {

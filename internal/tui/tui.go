@@ -145,6 +145,10 @@ var engineLinks = map[string][]docLink{
 	"siliconflow": {
 		{name: "硅基流动语音转写文档", url: "https://docs.siliconflow.cn/docs/api/audio-transcriptions-post"},
 	},
+	"mosi": {
+		{name: "Mosi 音频转写文档", url: "https://platform.moss.cn/docs/reference/transcriptions"},
+		{name: "Mosi 转写模型说明", url: "https://platform.moss.cn/docs/models/transcribe"},
+	},
 }
 
 // pickerState 渠道选择弹层状态；nil 表示未打开。
@@ -179,6 +183,10 @@ var engineChannels = []pickerItem{
 	{
 		name:     "siliconflow",
 		subtitle: "硅基流动语音转写，整段识别；模型可在引擎配置中自行更换",
+	},
+	{
+		name:     "mosi",
+		subtitle: "Mosi 音频转写，整段识别、同步返回；模型可在引擎配置中更换",
 	},
 }
 
@@ -439,6 +447,14 @@ func channelConfigFields(vc config.VoiceConfig, ti func(string) textinput.Model)
 			{label: "API Key", key: "ec.api_key", help: "必填（账户 API Key）", fType: fString, input: ti(ec["api_key"])},
 			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.siliconflow.cn/v1", fType: fString, input: ti(ec["base_url"])},
 			{label: "模型", key: "ec.model", help: "默认 FunAudioLLM/SenseVoiceSmall；也可填 TeleAI/TeleSpeechASR 等，以官网模型列表为准", fType: fString, input: ti(ec["model"])},
+		}
+	case "mosi":
+		// Mosi 的转写接口只收 file 与 model，没有 language 参数；这里不放语言
+		// 字段，免得用户以为设了有用（历史配置里已有的 language 保存时不会丢）。
+		fields = []field{
+			{label: "API Key", key: "ec.api_key", help: "必填（Mosi API Key，文档里叫 MOSS_API_KEY）", fType: fString, input: ti(ec["api_key"])},
+			{label: "Base URL", key: "ec.base_url", help: "默认 https://api.mosi.cn/v1", fType: fString, input: ti(ec["base_url"])},
+			{label: "模型", key: "ec.model", help: "默认 moss-transcribe-1.0（当前普通转写只有这一个）；moss-transcribe-diarize-pro 支持多说话人与热词", fType: fString, input: ti(ec["model"])},
 		}
 	case "dashscope":
 		rateOpts := []string{"16000", "8000"}

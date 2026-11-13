@@ -13,7 +13,7 @@ It is built for people who want to type less and speak more while coding, chatti
 ## Features
 
 - Global-hotkey recording (`toggle` / `hold`); results are autotyped or copied to the clipboard.
-- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, Xiaomi MiMo, and SiliconFlow.
+- Multiple ASR engines: Doubao streaming ASR (default), Qianwen Fun-ASR, AuralWise, OpenAI-compatible endpoints, Xiaomi MiMo, SiliconFlow, and Mosi.
 - Chinese input polish: trailing-punctuation omission, CJK space cleanup, and automatic CJK/Latin spacing.
 - An Android phone can serve as the microphone (built-in AndroidMic server; install the official APK on the phone).
 - Microphone debug panel: test recording, level/gain adjustment, adaptive gain.
@@ -204,7 +204,7 @@ make dev ARGS="--gui --verbose"
 Go or config changes rebuild and restart the debug CLI automatically; the temporary binary is written to `tmp/`.
 On Linux and macOS, Air uses a terminal entrypoint to temporarily hand the foreground terminal to the TUI and restore it on exit or reload, so Bubble Tea can receive keyboard input. To inspect Air logs, run `air -c .air.toml -log.main_only false` temporarily.
 
-The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, `x-siliconcloud-trace-id` from the response headers for `siliconflow`. Pass it to the matching vendor's support team to trace the upstream log.
+The History tab shows the upstream trace ID returned by the service: `X-Tt-Logid` from the WebSocket handshake for `doubao-stream`, `x-siliconcloud-trace-id` from the response headers for `siliconflow`, and `x-trace-id` from the response headers for `mosi`. Pass it to the matching vendor's support team to trace the upstream log.
 
 ## Configuration
 
@@ -418,7 +418,21 @@ api_key = "sk-…"                              # account API Key
 
 Unlike Doubao's streaming recognition, SiliconFlow works on the whole recording: after you stop, the audio (≤50 MB, ≤1 hour) is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back, with no partial results while recording. The default model is `FunAudioLLM/SenseVoiceSmall`; swap the model name in the engine settings to another one from the official catalog. The History tab shows the `x-siliconcloud-trace-id` from the response headers, and failed calls append the same trace ID to the error message, so you can hand it to SiliconFlow support when reporting a problem.
 
-Batch engines (auralwise / openai / mimo-asr / siliconflow) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
+Mosi (api.mosi.cn) audio transcription (whole-recording transcription, synchronous, non-streaming). Docs: [Mosi transcription API](https://platform.moss.cn/docs/reference/transcriptions); model notes: [MOSS-Transcribe](https://platform.moss.cn/docs/models/transcribe):
+
+```toml
+[voice]
+engine = "mosi"
+
+[voice.engine_configs.mosi]
+api_key = "…"                            # Mosi API Key (called MOSS_API_KEY in the docs)
+# base_url = "https://api.mosi.cn/v1"    # default
+# model = "moss-transcribe-1.0"          # default; the only model for plain transcription
+```
+
+The difference from Doubao matches SiliconFlow: after you stop, the audio is submitted to `/v1/audio/transcriptions` in one request and a single final text comes back synchronously, with no partial results while recording. The input source is either a file upload (multipart `file`) or one of the `file_id` / `url` / `audio_url` references; **the API does not accept Base64 or inline audio**, and this engine only uses the multipart `file` form. The request carries just two form fields, `file` and `model` (`response_format` is not sent explicitly, since the API already defaults to json). The default model is `moss-transcribe-1.0`; `moss-transcribe-diarize-pro` adds speaker diarization and keyterms, but this engine only takes the full `text` and ignores the segment structure. The History tab shows the `x-trace-id` from the response headers, and failed calls append the same trace ID to the error message, so you can hand it to Mosi support when reporting a problem. Async tasks (`async=true` plus task polling) are not implemented yet; only synchronous calls are supported.
+
+Batch engines (auralwise / openai / mimo-asr / siliconflow / mosi) transcribe the whole recording after you stop and need a longer wait; streaming engines (doubao-stream / dashscope) show partial results while recording. Set `engine = "null"` to disable recognition.
 
 ### Microphone Debug And Recognition History
 

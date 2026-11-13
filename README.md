@@ -9,7 +9,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 ## 功能
 
 - 全局热键录音（`toggle` / `hold`），流式识别后自动上屏或复制到剪贴板。
-- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo、硅基流动。
+- 多引擎可选：豆包流式 ASR（默认）、千问 Fun-ASR、AuralWise、OpenAI 兼容端点、小米 MiMo、硅基流动、Mosi。
 - 中文输入优化：句尾标点省略、中文间空格清理、中英文间自动补空格。
 - Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
 - 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
@@ -201,7 +201,7 @@ make dev ARGS="--gui --verbose"
 代码或配置变更后会自动重新构建并重启调试 CLI，临时二进制位于 `tmp/`。
 在 Linux/macOS 上，Air 会通过终端入口程序将前台终端临时交给 TUI，并在退出或热重载时交还给 Air；这样 Bubble Tea 可正常接收按键。如果需要观察 Air 自身日志，可临时执行 `air -c .air.toml -log.main_only false`。
 
-识别历史会显示上游服务返回的追踪号：`doubao-stream` 是 WebSocket 握手响应里的 `X-Tt-Logid`，`siliconflow` 是响应头里的 `x-siliconcloud-trace-id`；报障时把它提供给对应厂商支持即可追溯上游日志。
+识别历史会显示上游服务返回的追踪号：`doubao-stream` 是 WebSocket 握手响应里的 `X-Tt-Logid`，`siliconflow` 是响应头里的 `x-siliconcloud-trace-id`，`mosi` 是响应头里的 `x-trace-id`；报障时把它提供给对应厂商支持即可追溯上游日志。
 
 ## 配置
 
@@ -415,7 +415,21 @@ api_key = "sk-…"                              # 账户 API Key
 
 与豆包的边录边出字不同，硅基流动是整段识别：录音结束后把音频（≤50MB、≤1 小时）一次性提交到 `/v1/audio/transcriptions`，只返回一条完整文本，识别过程中没有中间结果；默认模型 `FunAudioLLM/SenseVoiceSmall`，模型名可在引擎配置里自行更换（以官网模型列表为准）。识别历史会显示本次响应头里的 `x-siliconcloud-trace-id`；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给硅基流动支持即可追溯上游日志。
 
-批处理引擎（auralwise / openai / mimo-asr / siliconflow）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
+Mosi（api.mosi.cn）音频转写（整段录音识别，同步返回，非流式）。文档见 [Mosi 音频转写文档](https://platform.moss.cn/docs/reference/transcriptions)，模型说明见 [MOSS-Transcribe](https://platform.moss.cn/docs/models/transcribe)：
+
+```toml
+[voice]
+engine = "mosi"
+
+[voice.engine_configs.mosi]
+api_key = "…"                            # Mosi API Key（文档里叫 MOSS_API_KEY）
+# base_url = "https://api.mosi.cn/v1"    # 默认即可
+# model = "moss-transcribe-1.0"          # 默认；普通转写当前只有这一个
+```
+
+与豆包的区别和硅基流动一致：录音结束后把音频一次性提交到 `/v1/audio/transcriptions`，同步返回一条完整文本，识别过程中没有中间结果。输入源只能是文件上传（multipart `file`）或 `file_id` / `url` / `audio_url` 三种引用，**接口不接受 Base64 / 内联音频**，本引擎只走 multipart `file`；请求体只提交 `file` 与 `model` 两个表单字段（`response_format` 不显式发送，接口默认就是 json）。默认模型 `moss-transcribe-1.0`；`moss-transcribe-diarize-pro` 支持多说话人分段与热词，本引擎只取返回的完整文本、忽略分段结构。识别历史会显示响应头里的 `x-trace-id`；调用失败时该 trace id 也会拼在错误信息末尾，报障时提供给 Mosi 支持即可追溯上游日志。异步任务（`async=true` + 任务查询）本轮未实现，只做同步调用。
+
+批处理引擎（auralwise / openai / mimo-asr / siliconflow / mosi）在录音结束后一次性转写，需要更长的等待时间；流式引擎（doubao-stream / dashscope）在识别过程中即可看到部分结果。`engine = "null"` 用于禁用识别。
 
 ### 麦克风调试与识别历史
 
