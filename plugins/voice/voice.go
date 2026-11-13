@@ -394,6 +394,7 @@ type VoicePlugin struct {
 	captureDone            <-chan struct{}
 	stopDelayMs            int
 	stopAfterSilence       bool
+	audioLimitHit          bool // 本次会话是否已因引擎上限触发过自动停止（锁内访问）
 	hotkeyCooldownMs       int
 	cooldownUntil          time.Time // 录音会话结束后的热键冷却截止时间（锁内访问）
 	noiseThreshold         float64
@@ -796,6 +797,7 @@ func (p *VoicePlugin) startRecording() {
 	p.captureDone = captureDone
 	p.startedAt = startedAt
 	p.stopping = false
+	p.audioLimitHit = false
 	p.stopAt = time.Time{}
 	p.voiceToSendMs = 0
 	p.voiceDetected = false
@@ -851,6 +853,8 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		return
 	}
 	client, engineInfo, err := p.newSession(ctx, params)
+	// 引擎自己的单次音频上限（如 deepseek 的 120 秒）；0 = 无已知上限。
+	maxAudioMs := speech.MaxAudioDurationMs(engineInfo)
 	if err != nil {
 		wasCanceled := ctx.Err() != nil
 		cancel()
@@ -948,7 +952,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 
 	go func() {
 		defer close(audioDone)
-		if err := p.streamAudio(ctx, client, prebuffer, audioQueue, recordedAudio, startedAt); err != nil && ctx.Err() == nil {
+		if err := p.streamAudio(ctx, client, prebuffer, audioQueue, recordedAudio, startedAt, sessionID, maxAudioMs); err != nil && ctx.Err() == nil {
 			p.logger.Error("ASR audio stream interrupted", "session_id", sessionID, "error", err)
 			pout("❌ ASR 音频传输中断: %v", shortError(err))
 			p.failRecordingSession(sessionID, "ASR 音频传输中断: "+shortError(err))
@@ -1038,6 +1042,36 @@ func (p *VoicePlugin) retryLastError() {
 	p.publishStatusLocked()
 	p.mu.Unlock()
 	p.startRecording()
+}
+
+// stopForAudioLimit 在已送入引擎的音频达到该引擎单次上限时主动停止录音。
+//
+// 目的不是「省一次失败」，而是把失败提前：否则用户录满一整段，要等到最后
+// 一次性转写时才收到「超过上限」，那段时间白说了。停止后 BatchSession 还会
+// 按同一上限截断尾音，保证请求本身不超限。
+func (p *VoicePlugin) stopForAudioLimit(sessionID uint64, maxMs int) {
+	p.mu.Lock()
+	if !p.recording || p.sessionID != sessionID || p.stopping {
+		p.mu.Unlock()
+		return
+	}
+	first := !p.audioLimitHit
+	p.audioLimitHit = true
+	p.mu.Unlock()
+	if first {
+		pout("⚠️  已达引擎单次上限 %s，自动停止录音", formatLimitDuration(maxMs))
+		p.logger.Info("录音达到引擎单次时长上限，自动停止", "session_id", sessionID, "limit_ms", maxMs)
+	}
+	p.stopRecordingAsync()
+}
+
+// formatLimitDuration 把毫秒上限写成「120 秒」这类便于阅读的形式。
+func formatLimitDuration(ms int) string {
+	seconds := float64(ms) / 1000
+	if seconds == float64(int(seconds)) {
+		return fmt.Sprintf("%d 秒", int(seconds))
+	}
+	return fmt.Sprintf("%.1f 秒", seconds)
 }
 
 func (p *VoicePlugin) stopRecordingAsync() {
@@ -1635,7 +1669,7 @@ func (p *VoicePlugin) noteVoiceDetected() {
 	}
 }
 
-func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSession, initial []byte, audioQueue *audioQueue, recordedAudio *bytes.Buffer, startedAt time.Time) error {
+func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSession, initial []byte, audioQueue *audioQueue, recordedAudio *bytes.Buffer, startedAt time.Time, sessionID uint64, maxAudioMs int) error {
 	voiceSent := false
 	markFirstSend := func() {
 		if voiceSent {
@@ -1662,6 +1696,14 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSessi
 	// writing per-packet diagnostics or changing the recorded audio audit.
 	_, isBatch := client.(*speech.BatchSession)
 	keepalive := make([]byte, speech.PCMByteRate/10)
+	// 已送入引擎的 PCM 字节数；到引擎上限就主动收手，而不是让用户录满一整段
+	// 之后才在最后一步收到「超限」失败。BatchSession 另有一层字节截断兜底，
+	// 所以这里早一步停只是为了少丢内容、早给反馈。
+	sentBytes := len(initial)
+	limitBytes := 0
+	if maxAudioMs > 0 {
+		limitBytes = maxAudioMs * speech.PCMByteRate / 1000
+	}
 	for {
 		chunkCtx := ctx
 		var cancel context.CancelFunc
@@ -1699,6 +1741,11 @@ func (p *VoicePlugin) streamAudio(ctx context.Context, client speech.StreamSessi
 		}
 		recordAudioAfterSend(client, recordedAudio, chunk.pcm)
 		markFirstSend()
+		sentBytes += len(chunk.pcm)
+		if limitBytes > 0 && sentBytes >= limitBytes {
+			p.stopForAudioLimit(sessionID, maxAudioMs)
+			return nil
+		}
 	}
 }
 

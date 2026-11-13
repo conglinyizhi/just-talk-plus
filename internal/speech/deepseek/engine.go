@@ -76,6 +76,9 @@ func ParseConfig(m map[string]string) (Config, error) {
 	return c, nil
 }
 
+// 声明单次音频上限，供录制侧提前停止与 BatchSession 兜底截断。
+var _ speech.AudioLimiter = (*Engine)(nil)
+
 // Engine 实现 speech.Engine（仅 STT，批处理）。
 type Engine struct {
 	cfg    Config
@@ -101,6 +104,10 @@ func NewFromMap(m map[string]string) (speech.Engine, error) {
 func (e *Engine) Name() string {
 	return "deepseek"
 }
+
+// MaxAudioDurationMs 实现 speech.AudioLimiter：接口单次音频上限 120 秒。
+// 录制侧与 BatchSession 都靠这个值提前收手，不必等一次注定失败的往返。
+func (e *Engine) MaxAudioDurationMs() int { return maxAudioSeconds * 1000 }
 
 func (e *Engine) Capabilities() speech.Capabilities {
 	return speech.Capabilities{STT: true}

@@ -225,3 +225,47 @@ func TestHotkeyCooldown(t *testing.T) {
 		}
 	})
 }
+
+// TestFormatLimitDuration 上限文案：整数秒不带小数点，非整数保留一位。
+func TestFormatLimitDuration(t *testing.T) {
+	cases := []struct {
+		ms   int
+		want string
+	}{
+		{120000, "120 秒"},
+		{12500, "12.5 秒"},
+		{1000, "1 秒"},
+		{1500, "1.5 秒"},
+	}
+	for _, tc := range cases {
+		if got := formatLimitDuration(tc.ms); got != tc.want {
+			t.Fatalf("formatLimitDuration(%d) = %q, want %q", tc.ms, got, tc.want)
+		}
+	}
+}
+
+// TestStopForAudioLimitGuards 未录音或会话已换时不产生副作用：
+// 音频上限触发可能晚于用户手动停止，此时不能再动状态。
+func TestStopForAudioLimitGuards(t *testing.T) {
+	t.Run("未录音时不动作", func(t *testing.T) {
+		p := &VoicePlugin{}
+		p.stopForAudioLimit(1, 120000)
+		if p.audioLimitHit {
+			t.Fatal("未录音时不应记录上限命中")
+		}
+	})
+	t.Run("会话不匹配时不动作", func(t *testing.T) {
+		p := &VoicePlugin{recording: true, sessionID: 7}
+		p.stopForAudioLimit(1, 120000)
+		if p.audioLimitHit {
+			t.Fatal("旧会话的上限触发不应影响当前会话")
+		}
+	})
+	t.Run("已在停止中时不动作", func(t *testing.T) {
+		p := &VoicePlugin{recording: true, stopping: true, sessionID: 1}
+		p.stopForAudioLimit(1, 120000)
+		if p.audioLimitHit {
+			t.Fatal("停止过程中不应重复触发")
+		}
+	})
+}

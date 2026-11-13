@@ -156,6 +156,81 @@ func TestBatchSessionReportsExactDuration(t *testing.T) {
 	}
 }
 
+// limitedStub 声明单次音频上限的引擎桩。
+type limitedStub struct {
+	stubEngine
+	maxMs int
+}
+
+func (l *limitedStub) MaxAudioDurationMs() int { return l.maxMs }
+
+// TestMaxAudioDurationMsHelper 上限读取：未实现或非正数都视为无上限。
+func TestMaxAudioDurationMsHelper(t *testing.T) {
+	if got := MaxAudioDurationMs(&stubEngine{}); got != 0 {
+		t.Fatalf("未实现 AudioLimiter 应为 0，实际 %d", got)
+	}
+	if got := MaxAudioDurationMs(&limitedStub{maxMs: 120000}); got != 120000 {
+		t.Fatalf("应读到 120000，实际 %d", got)
+	}
+	if got := MaxAudioDurationMs(&limitedStub{maxMs: -1}); got != 0 {
+		t.Fatalf("负数上限应视为无上限，实际 %d", got)
+	}
+	if got := MaxAudioDurationMs(nil); got != 0 {
+		t.Fatalf("nil 引擎应为 0，实际 %d", got)
+	}
+}
+
+// TestBatchSessionTruncatesToEngineLimit 引擎声明上限后，超出部分的音频必须在
+// 本地丢掉：宁可截断一段注定被拒的请求，也不要白跑一次往返。
+func TestBatchSessionTruncatesToEngineLimit(t *testing.T) {
+	const limitMs = 1000 // 1 秒 = PCMByteRate 字节
+	eng := &limitedStub{stubEngine: stubEngine{avail: true, text: "ok"}, maxMs: limitMs}
+	sess := NewBatchSession(eng, StreamParams{})
+	ctx := context.Background()
+	if err := sess.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// 送 3 秒音频，只应留下 1 秒。
+	payload := make([]byte, PCMByteRate*3)
+	if err := sess.SendAudio(ctx, payload, true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Final():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Final not closed")
+	}
+	// 引擎收到的 WAV 减去 44 字节头就是实际转写的 PCM。
+	gotPCM := len(eng.gotWAV) - 44
+	if gotPCM != PCMByteRate {
+		t.Fatalf("转写 PCM = %d 字节, want %d（1 秒）", gotPCM, PCMByteRate)
+	}
+	if eng.gotDur != limitMs {
+		t.Fatalf("DurationMs = %d, want %d", eng.gotDur, limitMs)
+	}
+}
+
+// TestBatchSessionNoLimitKeepsAll 未声明上限的引擎不受截断影响（回归保护）。
+func TestBatchSessionNoLimitKeepsAll(t *testing.T) {
+	eng := &stubEngine{avail: true, text: "ok"}
+	sess := NewBatchSession(eng, StreamParams{})
+	ctx := context.Background()
+	if err := sess.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SendAudio(ctx, make([]byte, PCMByteRate*3), true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Final():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Final not closed")
+	}
+	if gotPCM := len(eng.gotWAV) - 44; gotPCM != PCMByteRate*3 {
+		t.Fatalf("无上限引擎不应被截断，收到 %d 字节", gotPCM)
+	}
+}
+
 // TestBatchSessionDurationZeroForEmpty 空音频不调用引擎，时长恒为 0。
 func TestBatchSessionDurationZeroForEmpty(t *testing.T) {
 	if got := pcmDurationMs(0); got != 0 {

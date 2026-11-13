@@ -6,6 +6,7 @@ package voice
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestStreamAudioDrainsQueuedAudioAfterDelayedConnection(t *testing.T) {
 	client := &recordingStreamSession{}
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, time.Now()); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, time.Now(), 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(client.audio(), want) {
@@ -60,7 +61,7 @@ func TestStreamAudioSendsKeepaliveDuringCaptureGap(t *testing.T) {
 		time.Sleep(audioKeepaliveEvery + 100*time.Millisecond)
 		queue.Close(nil)
 	}()
-	if err := p.streamAudio(context.Background(), client, nil, queue, nil, time.Now()); err != nil {
+	if err := p.streamAudio(context.Background(), client, nil, queue, nil, time.Now(), 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	got := client.audio()
@@ -84,7 +85,7 @@ func TestStreamAudioRecordsBelowThresholdAsIs(t *testing.T) {
 	client.SetAudioSentObserver(func(pcm []byte) { _, _ = audit.Write(pcm) })
 	p := NewVoicePlugin()
 
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, &audit, time.Now()); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, &audit, time.Now(), 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(audit.Bytes(), want) {
@@ -103,7 +104,7 @@ func TestStreamAudioRecordsVoiceToSendLatency(t *testing.T) {
 	p := NewVoicePlugin()
 
 	startedAt := time.Now().Add(-1500 * time.Millisecond)
-	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, startedAt); err != nil {
+	if err := p.streamAudio(context.Background(), client, []byte{1, 2}, queue, nil, startedAt, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if p.voiceToSendMs < 1400 || p.voiceToSendMs > 5000 {
@@ -143,4 +144,58 @@ func (s *recordingStreamSession) audio() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]byte(nil), s.pcm...)
+}
+
+// TestStreamAudioStopsAtEngineAudioLimit 达到引擎单次上限时，streamAudio 必须
+// 主动收手并触发停止，而不是继续录到用户自己按停。
+func TestStreamAudioStopsAtEngineAudioLimit(t *testing.T) {
+	// 上限设成 3 个 chunk 的量，队列里塞 10 个，验证它在第 3 个之后停下。
+	const chunkBytes = 3200
+	const limitMs = 3 * chunkBytes * 1000 / speech.PCMByteRate
+
+	queue := newAudioQueue()
+	for i := 0; i < 10; i++ {
+		queue.Push(audioChunk{pcm: make([]byte, chunkBytes), gainedPeak: 0.1, gainedRMS: 0.1})
+	}
+	queue.Close(nil)
+
+	client := &recordingStreamSession{}
+	p := NewVoicePlugin()
+	p.logger = slog.Default()
+	p.recording = true
+	p.sessionID = 1
+
+	if err := p.streamAudio(context.Background(), client, nil, queue, nil, time.Now(), 1, limitMs); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(client.audio()); got != 3*chunkBytes {
+		t.Fatalf("送达引擎 %d 字节, want %d（达到上限即停）", got, 3*chunkBytes)
+	}
+	if !p.audioLimitHit {
+		t.Fatal("应记录上限命中，供状态/日志使用")
+	}
+}
+
+// TestStreamAudioNoLimitKeepsDraining 未声明上限时照旧把队列读完（回归保护）。
+func TestStreamAudioNoLimitKeepsDraining(t *testing.T) {
+	const chunkBytes = 3200
+	queue := newAudioQueue()
+	for i := 0; i < 10; i++ {
+		queue.Push(audioChunk{pcm: make([]byte, chunkBytes), gainedPeak: 0.1, gainedRMS: 0.1})
+	}
+	queue.Close(nil)
+
+	client := &recordingStreamSession{}
+	p := NewVoicePlugin()
+
+	if err := p.streamAudio(context.Background(), client, nil, queue, nil, time.Now(), 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(client.audio()); got != 10*chunkBytes {
+		t.Fatalf("无上限时应全部送达，实际 %d 字节", got)
+	}
+	if p.audioLimitHit {
+		t.Fatal("无上限时不应标记命中")
+	}
 }

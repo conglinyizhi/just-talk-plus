@@ -48,6 +48,10 @@ type BatchSession struct {
 	// 从别的 goroutine 读取，两侧都过锁，不依赖 channel close 的 happens-before。
 	logMu         sync.RWMutex
 	upstreamLogID string
+
+	// maxBytes 是引擎声明的单次音频上限（字节），0 = 无上限。缓冲区到达上限
+	// 后多余音频直接丢弃：宁可截断一段注定被拒的请求，也不要白跑一次往返。
+	maxBytes int
 }
 
 // BatchSession 上报上游追踪号，满足 TraceableSession（与豆包流式会话一致）。
@@ -61,7 +65,7 @@ func (s *BatchSession) AudioSentSampleRate() int { return PCMRate }
 // NewBatchSession 包装一个批处理引擎。
 func NewBatchSession(engine Engine, params StreamParams) *BatchSession {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &BatchSession{
+	s := &BatchSession{
 		engine:   engine,
 		params:   params,
 		ctx:      ctx,
@@ -70,6 +74,12 @@ func NewBatchSession(engine Engine, params StreamParams) *BatchSession {
 		done:     make(chan struct{}),
 		final:    make(chan struct{}),
 	}
+	// 引擎若声明了时长上限，换算成字节上限并在这里兜底截断：录制侧会提前
+	// 自动停止，但停止到真正静默之间还有尾音，绝不能让它把请求推过上限。
+	if ms := MaxAudioDurationMs(engine); ms > 0 {
+		s.maxBytes = ms * PCMByteRate / 1000
+	}
+	return s
 }
 
 // Connect 校验引擎可用性；不可用返回可读错误。
@@ -86,6 +96,18 @@ func (s *BatchSession) Connect(ctx context.Context) error {
 	return nil
 }
 
+// roomLocked 返回缓冲区还能接收多少字节；无上限时返回最大值。
+func (s *BatchSession) roomLocked() int {
+	if s.maxBytes <= 0 {
+		return int(^uint(0) >> 1)
+	}
+	room := s.maxBytes - len(s.buf)
+	if room < 0 {
+		room = 0
+	}
+	return room
+}
+
 // SendAudio 缓冲音频；isLast=true 时触发批处理转写。
 func (s *BatchSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) error {
 	if err := ctx.Err(); err != nil {
@@ -97,9 +119,16 @@ func (s *BatchSession) SendAudio(ctx context.Context, pcm []byte, isLast bool) e
 		return nil
 	}
 	if len(pcm) > 0 {
-		s.buf = append(s.buf, pcm...)
-		if s.audioSent != nil {
-			s.audioSent(pcm)
+		// 到达引擎上限后只收能装下的部分：审计录音（audioSent）与被转写的
+		// 音频必须一致，所以截断在两者之前做。
+		if room := s.roomLocked(); room < len(pcm) {
+			pcm = pcm[:room]
+		}
+		if len(pcm) > 0 {
+			s.buf = append(s.buf, pcm...)
+			if s.audioSent != nil {
+				s.audioSent(pcm)
+			}
 		}
 	}
 	if !isLast {

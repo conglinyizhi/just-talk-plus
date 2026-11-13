@@ -87,6 +87,28 @@ type Voice struct {
 	Gender string `json:"gender,omitempty"`
 }
 
+// AudioLimiter 由对单次请求音频有硬上限的引擎实现。
+//
+// 声明上限有两个用处：BatchSession 据此保证交给引擎的音频不超限（超出部分
+// 直接丢弃，不让一次注定失败的请求白跑），录制侧据此在到达上限前自动停止
+// 录音并提示用户——否则用户会录满一整段才在最后一步收到失败，白录一遍。
+//
+// 未实现该接口，或返回 0，表示没有已知上限。
+type AudioLimiter interface {
+	// MaxAudioDurationMs 返回单次请求允许的最长音频时长（毫秒）。
+	MaxAudioDurationMs() int
+}
+
+// MaxAudioDurationMs 返回引擎声明的时长上限；未实现或非正数返回 0。
+func MaxAudioDurationMs(e Engine) int {
+	if lim, ok := e.(AudioLimiter); ok {
+		if ms := lim.MaxAudioDurationMs(); ms > 0 {
+			return ms
+		}
+	}
+	return 0
+}
+
 // Engine 语音引擎。实现方应：
 //   - 不在构造时强连外网；把探测放进 Available
 //   - Speak/Transcribe 尊重 ctx 取消

@@ -465,6 +465,25 @@ func TestTranscribeNonWAVSkipsDurationCheck(t *testing.T) {
 	}
 }
 
+// TestEngineDeclaresAudioLimit deepseek 必须声明 120 秒上限，录制侧与
+// BatchSession 都依赖这个值提前收手。
+func TestEngineDeclaresAudioLimit(t *testing.T) {
+	e, err := NewFromMap(map[string]string{"api_key": "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lim, ok := e.(speech.AudioLimiter)
+	if !ok {
+		t.Fatal("deepseek 引擎应实现 speech.AudioLimiter")
+	}
+	if got := lim.MaxAudioDurationMs(); got != 120000 {
+		t.Fatalf("MaxAudioDurationMs = %d, want 120000", got)
+	}
+	if got := speech.MaxAudioDurationMs(e); got != 120000 {
+		t.Fatalf("辅助函数读到 %d, want 120000", got)
+	}
+}
+
 // TestTranscribeUsesRequestDuration 调用方给的 DurationMs 是权威时长，
 // 优先于对容器头的解析：WAV 头声明 10 秒、DurationMs 报 121 秒时必须拦截。
 func TestTranscribeUsesRequestDuration(t *testing.T) {
