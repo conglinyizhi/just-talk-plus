@@ -126,17 +126,25 @@ func (e *Engine) Transcribe(ctx context.Context, req speech.TranscribeRequest) (
 	if len(req.Audio) == 0 {
 		return nil, speech.ErrInvalidInput
 	}
-	// 先查大小（便宜），再查时长（要解析 WAV 头）。
+	// 先查大小（便宜），再查时长。
 	if err := oversizeError(len(req.Audio)); err != nil {
 		return nil, err
 	}
-	if seconds, ok := wavDurationSeconds(req.Audio); ok {
+	// 时长优先用调用方给的 DurationMs：录制侧直接知道 PCM 长度与采样率，
+	// 算出来比反推容器可靠，对非 WAV 输入同样有效。
+	//
+	// 只有调用方没给时才退回去解析 WAV 头（例如外部直接调用引擎、塞了一段
+	// 裸音频）；两者都拿不到就跳过时长检查——没有可靠来源时硬估会误伤能用的
+	// 音频，交给接口自己判断，大小上限仍然生效。
+	if req.DurationMs > 0 {
+		if err := durationError(float64(req.DurationMs) / 1000); err != nil {
+			return nil, err
+		}
+	} else if seconds, ok := wavDurationSeconds(req.Audio); ok {
 		if err := durationError(seconds); err != nil {
 			return nil, err
 		}
 	}
-	// 解析失败（非 WAV，例如 Ogg Opus）就跳过时长检查：没有可靠的时长来源，
-	// 硬估一个秒数去拦截会误伤能用的音频，交给接口自己判断；大小上限仍然生效。
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

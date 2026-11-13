@@ -22,6 +22,7 @@ type stubEngine struct {
 	gotLang string
 	gotCT   string
 	gotWAV  []byte
+	gotDur  int // 收到的 DurationMs
 }
 
 func (s *stubEngine) Name() string               { return "stub" }
@@ -39,6 +40,7 @@ func (s *stubEngine) Transcribe(ctx context.Context, req TranscribeRequest) (*Tr
 	s.gotLang = req.Lang
 	s.gotCT = req.ContentType
 	s.gotWAV = req.Audio
+	s.gotDur = req.DurationMs
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -128,6 +130,43 @@ func TestBatchSessionTranscribesOnLast(t *testing.T) {
 	}
 	if len(eng.gotWAV) != 44+6 || !bytes.Equal(eng.gotWAV[:4], []byte("RIFF")) {
 		t.Fatalf("engine did not receive wav payload (%d bytes)", len(eng.gotWAV))
+	}
+}
+
+// TestBatchSessionReportsExactDuration 时长由缓冲的 PCM 字节数直接算出，
+// 不依赖引擎解析容器：10 秒 PCM 应报 10000 毫秒。
+func TestBatchSessionReportsExactDuration(t *testing.T) {
+	const seconds = 10
+	eng := &stubEngine{avail: true, text: "ok"}
+	sess := NewBatchSession(eng, StreamParams{})
+	ctx := context.Background()
+	if err := sess.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SendAudio(ctx, make([]byte, PCMByteRate*seconds), true); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sess.Final():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Final not closed")
+	}
+	if eng.gotDur != seconds*1000 {
+		t.Fatalf("DurationMs = %d, want %d", eng.gotDur, seconds*1000)
+	}
+}
+
+// TestBatchSessionDurationZeroForEmpty 空音频不调用引擎，时长恒为 0。
+func TestBatchSessionDurationZeroForEmpty(t *testing.T) {
+	if got := pcmDurationMs(0); got != 0 {
+		t.Fatalf("pcmDurationMs(0) = %d, want 0", got)
+	}
+	if got := pcmDurationMs(-5); got != 0 {
+		t.Fatalf("pcmDurationMs(negative) = %d, want 0", got)
+	}
+	// 不足 1 毫秒的零头向下取整
+	if got := pcmDurationMs(1); got != 0 {
+		t.Fatalf("pcmDurationMs(1) = %d, want 0", got)
 	}
 }
 

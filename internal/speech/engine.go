@@ -60,6 +60,12 @@ type TranscribeRequest struct {
 	Audio       []byte
 	ContentType string // 如 audio/wav；以 url: 前缀约定公网 URL 时引擎可走文件 API
 	Lang        string // 空 = 自动/引擎默认
+	// DurationMs 音频时长（毫秒），0 = 未知。
+	//
+	// 由录制侧直接给出，而不是让引擎从容器格式反推：Buffer 的 PCM 长度与
+	// 采样率都是已知量，算出来精确到字节。引擎应当优先用它做时长限制判断，
+	// 容器解析只作为兜底（例如调用方直接塞了一段外部音频、没有 DurationMs）。
+	DurationMs int
 }
 
 // TranscribeResult 识别结果。

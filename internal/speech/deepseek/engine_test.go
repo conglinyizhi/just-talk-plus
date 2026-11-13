@@ -465,6 +465,95 @@ func TestTranscribeNonWAVSkipsDurationCheck(t *testing.T) {
 	}
 }
 
+// TestTranscribeUsesRequestDuration 调用方给的 DurationMs 是权威时长，
+// 优先于对容器头的解析：WAV 头声明 10 秒、DurationMs 报 121 秒时必须拦截。
+func TestTranscribeUsesRequestDuration(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{"text":"should not reach"}`))
+	}))
+	defer srv.Close()
+
+	// 头里只有 10 秒音频，但调用方明确说是 121 秒：以调用方为准。
+	audio := speech.EncodeWAVWithSampleRate(make([]byte, 10*speech.PCMByteRate), speech.PCMRate)
+	e, err := NewFromMap(map[string]string{"api_key": "k", "base_url": srv.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Transcribe(context.Background(), speech.TranscribeRequest{
+		Audio:       audio,
+		ContentType: speech.PCMContentType,
+		DurationMs:  121000,
+	})
+	if err == nil {
+		t.Fatal("expected duration error from DurationMs")
+	}
+	if !strings.Contains(err.Error(), "121.0 秒") || !strings.Contains(err.Error(), "未发送请求") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Fatalf("server hit %d times, want 0", got)
+	}
+}
+
+// TestTranscribeDurationMsCoversNonWAV 有了 DurationMs，非 WAV 输入也能做时长
+// 限制——这正是它比解析容器头强的地方。
+func TestTranscribeDurationMsCoversNonWAV(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{"text":"should not reach"}`))
+	}))
+	defer srv.Close()
+
+	audio := append([]byte("OggS\x00\x02"), make([]byte, 1<<20)...)
+	e, err := NewFromMap(map[string]string{"api_key": "k", "base_url": srv.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Transcribe(context.Background(), speech.TranscribeRequest{
+		Audio:       audio,
+		ContentType: "audio/ogg",
+		DurationMs:  180000,
+	})
+	if err == nil {
+		t.Fatal("expected duration error for non-WAV with DurationMs")
+	}
+	if !strings.Contains(err.Error(), "180.0 秒") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Fatalf("server hit %d times, want 0", got)
+	}
+}
+
+// TestTranscribeDurationMsBoundaryPasses DurationMs 正好 120000 放行。
+func TestTranscribeDurationMsBoundaryPasses(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{"request_id":"r","text":"ok"}`))
+	}))
+	defer srv.Close()
+
+	audio := append([]byte("OggS\x00\x02"), make([]byte, 1<<20)...)
+	e, err := NewFromMap(map[string]string{"api_key": "k", "base_url": srv.URL + "/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Transcribe(context.Background(), speech.TranscribeRequest{
+		Audio:       audio,
+		ContentType: "audio/ogg",
+		DurationMs:  120000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("server hit %d times, want 1", got)
+	}
+}
+
 // TestTranscribeEmptyAudio 空音频不发请求，直接返回 ErrInvalidInput。
 func TestTranscribeEmptyAudio(t *testing.T) {
 	var hits int32

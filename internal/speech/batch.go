@@ -132,6 +132,8 @@ func (s *BatchSession) finish(ctx context.Context, audio []byte) {
 		Audio:       EncodeWAV(audio),
 		ContentType: PCMContentType,
 		Lang:        s.params.Lang,
+		// 时长是已知量：缓冲的 PCM 字节数除以每秒字节数，不必让引擎解析 WAV。
+		DurationMs: pcmDurationMs(len(audio)),
 	}
 	result, err := s.engine.Transcribe(ctx, req)
 	// 引擎返回的追踪号先落盘再发结果：插件在 Final() 关闭后立刻读取。
@@ -185,6 +187,15 @@ func (s *BatchSession) UpstreamLogID() string {
 func (s *BatchSession) Close() error {
 	s.cancel()
 	return nil
+}
+
+// pcmDurationMs 由 16 kHz 16-bit 单声道 PCM 的字节数算出毫秒时长。
+// 录制器固定输出该格式，所以这里不需要解析容器；向下取整，不足 1 毫秒记 0。
+func pcmDurationMs(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return n * 1000 / PCMByteRate
 }
 
 // EncodeWAV 把 16 kHz 16-bit 单声道 PCM 打包成 WAV（RIFF/WAVE）。
