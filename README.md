@@ -122,8 +122,8 @@ macOS 与 Windows 的代码仍在仓库里（热键、录音、剪贴板、自�
 发布流程使用 GoReleaser v2 和官方 `goreleaser/goreleaser-action`；维护者推送 `v*` 标签时会自动构建并发布，例如：
 
 ```bash
-git tag v0.2
-git push origin v0.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 ## 使用

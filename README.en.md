@@ -126,8 +126,8 @@ The macOS and Windows code is still in the tree (hotkeys, recording, clipboard, 
 The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Maintainers can build and publish a release by pushing a `v*` tag, for example:
 
 ```bash
-git tag v0.2
-git push origin v0.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 ## Usage
