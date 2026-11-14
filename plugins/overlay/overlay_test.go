@@ -52,9 +52,9 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-5 * time.Second)}, 0); got != "R  55s" {
 		t.Fatalf("软上限倒计时 = %q", got)
 	}
-	// 录制结束、会话还在收尾：显示 UPLOAD，正好填满一栏
-	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != uploadPlaceholder {
-		t.Fatalf("收尾阶段应显示 UPLOAD, got %q", got)
+	// 没有时间可显示时返回空串，占位符由调用方决定
+	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != "" {
+		t.Fatalf("无时间时应返回空串, got %q", got)
 	}
 	if len(uploadPlaceholder) != columnCols {
 		t.Fatalf("UPLOAD 长度 %d 应等于列宽 %d", len(uploadPlaceholder), columnCols)
@@ -68,6 +68,25 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	}, false, 120000)
 	if got := strings.TrimSpace(awaitingUpload.Left); got != uploadPlaceholder {
 		t.Fatalf("停止采集后左栏应立即显示 UPLOAD, got %q", got)
+	}
+
+	// 出错时左栏不能用 UPLOAD：「上传中」和「出错了」是两句话打架
+	failed := contentForStatus(voice.TUIVoiceStatus{State: "error", Detail: "ASR 连接失败"}, false, 120000)
+	if got := strings.TrimSpace(failed.Right); got != "ERR" {
+		t.Fatalf("错误态右栏 = %q", got)
+	}
+	if got := strings.TrimSpace(failed.Left); got == uploadPlaceholder {
+		t.Fatal("错误态左栏不应显示 UPLOAD")
+	}
+	if got := strings.TrimSpace(failed.Left); got != idlePlaceholder {
+		t.Fatalf("错误态左栏应是中性占位, got %q", got)
+	}
+	// 错误发生时如果还在录音，左栏应继续显示时间
+	failedWhileRecording := contentForStatus(voice.TUIVoiceStatus{
+		State: "error", Recording: true, StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-10 * time.Second),
+	}, false, 120000)
+	if got := strings.TrimSpace(failedWhileRecording.Left); got != "R 110s" {
+		t.Fatalf("录音中出错应保留倒计时, got %q", got)
 	}
 
 	// 停止状态下左栏不能是空的——那是用户报告的失衡场景

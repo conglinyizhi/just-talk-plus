@@ -43,7 +43,18 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 	// 左栏以前会在 MIC ON / STOP 倒计时 / MIC .. 之间切换，按下停止的那一刻
 	// 会连续横跳好几次，看起来像闪烁。现在它唯二的两种内容都是时间，而且
 	// 停止后冻结在最后一帧，不再回退到别的文案。
-	left := padLeft(timeLabel(status, limitMs))
+	timer := timeLabel(status, limitMs)
+	left := padLeft(timer)
+
+	// 左栏空着会让球看起来偏向一边，所以没有时间可显示时用占位符顶住。
+	// 收尾阶段用 UPLOAD（确实在传），出错时用中性的短横线。
+	placeholder := func(p string) string {
+		if timer == "" {
+			return padLeft(p)
+		}
+		return left
+	}
+
 	switch status.State {
 	case "connecting":
 		if status.VoiceDetected {
@@ -57,11 +68,11 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 		// 还在录（等静音结束）：左栏的时间继续走，不换成别的文案
 		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "waiting_asr":
-		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: placeholder(uploadPlaceholder), Right: padRight("A.WAIT"), Color: colorCapturing, Visible: true}
 	case "stopping":
-		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
+		return capsuleContent{Left: placeholder(uploadPlaceholder), Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "error":
-		return capsuleContent{Left: left, Right: padRight("ERR"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: placeholder(idlePlaceholder), Right: padRight("ERR"), Color: colorCapturing, Visible: true}
 	default:
 		return capsuleContent{Left: padLeft(idlePlaceholder), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
@@ -98,12 +109,11 @@ const softLimitMs = 60 * 1000
 //
 // 宽度固定，百位出现或消失时不会推动后面的字符。
 func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
-	// WaitingForASR 在本地已经停掉采集、开始等云端识别时就置位了，此时
-	// startedAt 还没清（要等会话 detach）。只看 startedAt 会让左栏在这段
-	// 时间里继续倒计时，而音频其实早就录完了——那正是「停止后要等一会儿
-	// 才变成 UPLOAD」的来源。
+	// 没有可显示的时间时返回空串，由调用方决定填什么占位符。不能在这里
+	// 一律返回 UPLOAD：出错时左栏也走这条路径，而「上传中」和「出错了」
+	// 摆在一起是两句话打架。
 	if status.StartedAt.IsZero() || status.WaitingForASR {
-		return uploadPlaceholder
+		return ""
 	}
 	limit := limitMs
 	if limit <= 0 {
