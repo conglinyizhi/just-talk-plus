@@ -52,3 +52,30 @@ Just Talk Plus 依赖以下第三方组件。各组件版权归其作者所有�
   见文件内完整版权声明
 - wlr-layer-shell-unstable-v1-client-protocol.h / -protocol.c：
   Copyright 2017 Drew DeVault，见文件内完整版权声明
+
+系统库依赖（Linux）
+-------------------
+
+以下内容由发行版提供，不随本项目二进制分发；许可版本以各发行版打包信息为准。
+本项目为 GPL-3.0-only，与下列许可均兼容。
+
+编译期链接（cgo）：
+
+| 库 | 用途 | 许可 |
+| --- | --- | --- |
+| libcairo | 胶囊文字渲染（X11 / Wayland 后端） | LGPL-2.1 或 MPL-1.1（双许可，本项目按 LGPL-2.1 使用） |
+| libwayland-client | Wayland 窗口与层表面 | MIT |
+| libX11 | X11 窗口与全局热键 | MIT/X11（X Consortium） |
+| libXext | X11 扩展（含 XShape 输入穿透） | MIT/X11 |
+| libXinerama | X11 多显示器定位 | MIT/X11 |
+| libXrender | X11 ARGB 合成 | MIT/X11 |
+| libXtst | X11 自动上屏（XTest 扩展） | MIT/X11 |
+
+运行时调用的外部程序：
+
+| 程序 | 用途 | 许可 |
+| --- | --- | --- |
+| arecord（alsa-utils） | Linux 录音后端 | GPL-2.0-or-later |
+| wl-copy / wl-paste（wl-clipboard） | Wayland 剪贴板 | GPL-3.0-or-later |
+| wtype | Wayland 自动上屏 | MIT |
+| xclip | X11 剪贴板 | GPL-2.0-or-later |
