@@ -116,14 +116,14 @@ Install on Windows to `%LOCALAPPDATA%\Programs\Just Talk Plus\just-talk-plus.exe
 
 ## Release Downloads
 
-GitHub Releases provide prebuilt archives for:
+GitHub Releases ship **only Linux x86_64 (amd64)**:
 
-- Linux amd64 / arm64
-- macOS Intel / Apple Silicon
-- Windows amd64 / arm64
+- `just-talk-plus_linux_amd64.tar.gz`
 - `SHA256SUMS.txt` checksum verification
 
-The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Linux, macOS, and Windows binaries are built natively on matching GitHub-hosted runners. Maintainers can build and publish a release by pushing a `v*` tag, for example:
+The macOS and Windows code is still in the tree (hotkeys, recording, clipboard, auto-submit) but no prebuilt binaries are published: the maintainer has no way to verify those platforms, and shipping something nobody can vouch for is worse than not shipping it. Build them yourself with the instructions above if you need them; macOS must be built on macOS.
+
+The release workflow uses GoReleaser v2 with the official `goreleaser/goreleaser-action`. Maintainers can build and publish a release by pushing a `v*` tag, for example:
 
 ```bash
 git tag v0.2

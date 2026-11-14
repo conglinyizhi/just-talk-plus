@@ -18,11 +18,11 @@ This project is **GPL-3.0-only** (`LICENSE`). These rules are not optional:
 
 ## Project
 
-Just Talk Plus is a desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. Targets: Linux, macOS, Windows. (Successor of Just Talk; the binary and config paths now use the `just-talk-plus` name.)
+Just Talk Plus is a desktop voice input tool: a global hotkey records audio, streaming ASR recognizes it, and the text is copied to the clipboard or submitted into the focused input field. **Releases ship Linux amd64 only**; the macOS, Windows and Linux-arm64 code stays in the tree but is not published as binaries (nobody can verify it — see the overlay and platform notes below). (Successor of Just Talk; the binary and config paths now use the `just-talk-plus` name.)
 
 ## Build And Test
 
-Linux/macOS need cgo; Windows builds with `CGO_ENABLED=0`.
+Linux/macOS need cgo; Windows builds with `CGO_ENABLED=0`. Only Linux amd64 is released. Everything else (macOS, Windows, Linux arm64) is buildable-but-unverified: keep it compiling, but do not add it back to the release matrix without a machine to test on.
 
 ```bash
 go test ./...            # tests
