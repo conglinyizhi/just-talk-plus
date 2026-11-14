@@ -60,6 +60,16 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 		t.Fatalf("UPLOAD 长度 %d 应等于列宽 %d", len(uploadPlaceholder), columnCols)
 	}
 
+	// 已经停止采集、在等云端识别：即使 startedAt 还在，也必须立刻显示 UPLOAD，
+	// 不能继续倒计时——那会造成「停止后要等一会儿才变 UPLOAD」的延迟。
+	awaitingUpload := contentForStatus(voice.TUIVoiceStatus{
+		State: "waiting_asr", Recording: true, RecorderReady: true, WaitingForASR: true,
+		StartedAt: time.Now().Add(-30 * time.Second), VoiceStartedAt: time.Now().Add(-30 * time.Second),
+	}, false, 120000)
+	if got := strings.TrimSpace(awaitingUpload.Left); got != uploadPlaceholder {
+		t.Fatalf("停止采集后左栏应立即显示 UPLOAD, got %q", got)
+	}
+
 	// 停止状态下左栏不能是空的——那是用户报告的失衡场景
 	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping", PendingFinishes: 1}, false, 120000)
 	if strings.TrimSpace(stopping.Left) != uploadPlaceholder {

@@ -98,9 +98,11 @@ const softLimitMs = 60 * 1000
 //
 // 宽度固定，百位出现或消失时不会推动后面的字符。
 func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
-	if status.StartedAt.IsZero() {
-		// 录制结束、会话还在收尾（上传并等云端识别）。左栏留空会让球看起来
-		// 偏向右边，所以用等宽占位符顶住位置。
+	// WaitingForASR 在本地已经停掉采集、开始等云端识别时就置位了，此时
+	// startedAt 还没清（要等会话 detach）。只看 startedAt 会让左栏在这段
+	// 时间里继续倒计时，而音频其实早就录完了——那正是「停止后要等一会儿
+	// 才变成 UPLOAD」的来源。
+	if status.StartedAt.IsZero() || status.WaitingForASR {
 		return uploadPlaceholder
 	}
 	limit := limitMs
