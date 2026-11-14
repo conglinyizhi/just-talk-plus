@@ -72,7 +72,7 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 	case "stopping":
 		return capsuleContent{Left: placeholder(uploadPlaceholder), Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "error":
-		return capsuleContent{Left: placeholder(idlePlaceholder), Right: padRight("ERR"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: padLeft(errorCrashLabel), Right: padRight(errorCode(status.ErrorKind)), Color: colorCapturing, Visible: true}
 	default:
 		return capsuleContent{Left: padLeft(idlePlaceholder), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
@@ -92,6 +92,26 @@ const timePrefix = "R "
 // uploadPlaceholder 录音已结束、音频正在上传并等待云端识别时占据左栏。
 // 六个字符正好填满一栏，替换时不会改变胶囊尺寸或球的位置。
 const uploadPlaceholder = "UPLOAD"
+
+// errorCrashLabel 出错时左栏固定显示这个，右栏给出错误类别。
+// 左侧不再显示时间——出错时「还能录多久」已经没有意义了。
+const errorCrashLabel = "CRASH:"
+
+// errorCodes 把 voice 插件给出的错误类别翻成六字符的胶囊文案。
+var errorCodes = map[string]string{
+	"asr": "ASRERR", // 识别侧：服务端报错、识别超时、结束识别失败
+	"net": "NETERR", // 连接与传输：建连失败、音频发送中断、发送超时
+	"dev": "DEVERR", // 本地录音设备：启动失败、读取失败
+	"cfg": "CFGERR", // 引擎配置错误
+}
+
+// errorCode 未知类别统一回落成 ERR，不把内部字符串直接漏到屏幕上。
+func errorCode(kind string) string {
+	if code, ok := errorCodes[kind]; ok {
+		return code
+	}
+	return "ERR"
+}
 
 // idlePlaceholder 空闲态的左栏占位。不能复用 UPLOAD——什么都没在传的时候
 // 显示「上传」是假信息。六个短横线只表示「这里没有正在计时的事」。

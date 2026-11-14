@@ -70,23 +70,26 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 		t.Fatalf("停止采集后左栏应立即显示 UPLOAD, got %q", got)
 	}
 
-	// 出错时左栏不能用 UPLOAD：「上传中」和「出错了」是两句话打架
-	failed := contentForStatus(voice.TUIVoiceStatus{State: "error", Detail: "ASR 连接失败"}, false, 120000)
-	if got := strings.TrimSpace(failed.Right); got != "ERR" {
-		t.Fatalf("错误态右栏 = %q", got)
+	// 出错时左栏固定 CRASH:，右栏给出错误类别；不再显示倒计时（还能录多久已无意义）
+	for kind, want := range map[string]string{
+		"asr": "ASRERR", "net": "NETERR", "dev": "DEVERR", "cfg": "CFGERR", "weird": "ERR",
+	} {
+		failed := contentForStatus(voice.TUIVoiceStatus{State: "error", ErrorKind: kind}, false, 120000)
+		if got := strings.TrimSpace(failed.Left); got != errorCrashLabel {
+			t.Fatalf("kind=%s 左栏 = %q, 期望 %q", kind, got, errorCrashLabel)
+		}
+		if got := strings.TrimSpace(failed.Right); got != want {
+			t.Fatalf("kind=%s 右栏 = %q, 期望 %q", kind, got, want)
+		}
+		if strings.TrimSpace(failed.Left) == uploadPlaceholder {
+			t.Fatal("错误态左栏不应显示 UPLOAD")
+		}
 	}
-	if got := strings.TrimSpace(failed.Left); got == uploadPlaceholder {
-		t.Fatal("错误态左栏不应显示 UPLOAD")
-	}
-	if got := strings.TrimSpace(failed.Left); got != idlePlaceholder {
-		t.Fatalf("错误态左栏应是中性占位, got %q", got)
-	}
-	// 错误发生时如果还在录音，左栏应继续显示时间
-	failedWhileRecording := contentForStatus(voice.TUIVoiceStatus{
-		State: "error", Recording: true, StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-10 * time.Second),
-	}, false, 120000)
-	if got := strings.TrimSpace(failedWhileRecording.Left); got != "R 110s" {
-		t.Fatalf("录音中出错应保留倒计时, got %q", got)
+	// 所有错误码都得塞进一栏
+	for kind := range errorCodes {
+		if len(errorCode(kind)) > columnCols {
+			t.Fatalf("错误码 %q 超出列宽 %d", errorCode(kind), columnCols)
+		}
 	}
 
 	// 停止状态下左栏不能是空的——那是用户报告的失衡场景

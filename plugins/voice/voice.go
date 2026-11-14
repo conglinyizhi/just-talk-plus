@@ -111,6 +111,9 @@ type TUIVoiceStatus struct {
 	StopDelayMs   int
 	// StartedAt 本次录音会话的开始时间（麦克风启动那一刻）；不在录音中时为零值。
 	StartedAt time.Time
+	// ErrorKind 错误类别，供显示侧区分故障来源："dev"（录音设备）、
+	// "cfg"（引擎配置）、"net"（连接与传输）、"asr"（识别侧）。
+	ErrorKind string
 	// VoiceStartedAt 首次检测到有效人声的时间；还没开口时为零值。胶囊的倒计时
 	// 用它当起点：等声音的时间不该算进「已经录了多久」，按下热键后一直没说话
 	// 时用户看到的应该是满额，而不是在倒扣。
@@ -392,6 +395,7 @@ type VoicePlugin struct {
 	stopGeneration         uint64
 	startedAt              time.Time
 	voiceStartedAt         time.Time
+	lastErrorKind          string
 	sessionID              uint64
 	sessionGen             uint64
 	recorder               *Recorder
@@ -783,7 +787,7 @@ func (p *VoicePlugin) startRecording() {
 	if err := rec.Start(); err != nil {
 		p.sessionID++
 		sessionID := p.sessionID
-		p.publishErrorLocked("录音启动失败: "+shortError(err), sessionID)
+		p.publishErrorLocked("dev", "录音启动失败: "+shortError(err), sessionID)
 		p.mu.Unlock()
 		pout("❌ 录音启动失败: %v", err)
 		return
@@ -853,7 +857,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 	prebuffer, err := p.waitForVoice(ctx, audioQueue, noiseThreshold)
 	if err != nil {
 		if ctx.Err() == nil {
-			p.failRecordingSession(sessionID, "录音读取失败: "+shortError(err))
+			p.failRecordingSession(sessionID, "dev", "录音读取失败: "+shortError(err))
 		}
 		return
 	}
@@ -876,7 +880,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 			p.pendingFinalAudio = nil
 			p.recordedAudio = nil
 			if !wasCanceled {
-				p.publishErrorLocked("ASR 引擎配置错误: "+shortError(err), sessionID)
+				p.publishErrorLocked("cfg", "ASR 引擎配置错误: "+shortError(err), sessionID)
 			} else {
 				p.publishStatusLocked()
 			}
@@ -920,7 +924,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 			p.pendingFinalAudio = nil
 			p.recordedAudio = nil
 			if !wasCanceled || connectTimedOut {
-				p.publishErrorLocked("ASR 连接失败: "+asrConnectErrorDetail(err), sessionID)
+				p.publishErrorLocked("net", "ASR 连接失败: "+asrConnectErrorDetail(err), sessionID)
 			} else {
 				p.publishStatusLocked()
 			}
@@ -963,7 +967,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		if err := p.streamAudio(ctx, client, prebuffer, audioQueue, recordedAudio, startedAt, sessionID, maxAudioMs); err != nil && ctx.Err() == nil {
 			p.logger.Error("ASR audio stream interrupted", "session_id", sessionID, "error", err)
 			pout("❌ ASR 音频传输中断: %v", shortError(err))
-			p.failRecordingSession(sessionID, "ASR 音频传输中断: "+shortError(err))
+			p.failRecordingSession(sessionID, "net", "ASR 音频传输中断: "+shortError(err))
 		}
 	}()
 	if waitingForASR {
@@ -978,7 +982,7 @@ func (p *VoicePlugin) connectASR(ctx context.Context, cancel context.CancelFunc,
 		for result := range client.Results() {
 			if result.Error != nil {
 				pout("❌ ASR 错误: %v", result.Error)
-				p.failASRSession(sessionID, result.Error.Error())
+				p.failASRSession(sessionID, "asr", result.Error.Error())
 				return
 			}
 			if result.IsFinal {
@@ -1130,8 +1134,8 @@ func (p *VoicePlugin) stopRecorderForASRWait(rec *Recorder, done chan struct{}) 
 }
 
 // failASRSession terminates a session after the ASR server reports a fatal error.
-func (p *VoicePlugin) failASRSession(sessionID uint64, detail string) {
-	p.logger.Error("ASR session failed", "session_id", sessionID, "detail", detail)
+func (p *VoicePlugin) failASRSession(sessionID uint64, kind, detail string) {
+	p.logger.Error("ASR session failed", "session_id", sessionID, "kind", kind, "detail", detail)
 	p.mu.Lock()
 	if p.sessionID != sessionID || !p.recording {
 		p.mu.Unlock()
@@ -1140,7 +1144,7 @@ func (p *VoicePlugin) failASRSession(sessionID uint64, detail string) {
 	p.asrFailed = true
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
-	p.publishErrorLocked(detail, sessionID)
+	p.publishErrorLocked(kind, detail, sessionID)
 	p.mu.Unlock()
 	if session != nil {
 		if session.asrCancel != nil {
@@ -1150,8 +1154,8 @@ func (p *VoicePlugin) failASRSession(sessionID uint64, detail string) {
 	}
 }
 
-func (p *VoicePlugin) failRecordingSession(sessionID uint64, detail string) {
-	p.logger.Error("recording session failed", "session_id", sessionID, "detail", detail)
+func (p *VoicePlugin) failRecordingSession(sessionID uint64, kind, detail string) {
+	p.logger.Error("recording session failed", "session_id", sessionID, "kind", kind, "detail", detail)
 	p.mu.Lock()
 	if p.sessionID != sessionID || !p.recording {
 		p.mu.Unlock()
@@ -1159,7 +1163,7 @@ func (p *VoicePlugin) failRecordingSession(sessionID uint64, detail string) {
 	}
 	session := p.detachRecordingLocked()
 	p.trackFinishLocked(session)
-	p.publishErrorLocked(detail, sessionID)
+	p.publishErrorLocked(kind, detail, sessionID)
 	p.mu.Unlock()
 	if session != nil {
 		go p.finishRecordingSession(session)
@@ -1253,7 +1257,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 				audioDrained = false
 				p.logger.Warn("finish session: audio stream drain timed out")
 				if !p.sessionCanceled(session.sessionID) {
-					p.publishError(fmt.Sprintf("停止录音超时: 等待音频发送结束超过 %s", audioDrainTimeout), session.sessionID)
+					p.publishError("net", fmt.Sprintf("停止录音超时: 等待音频发送结束超过 %s", audioDrainTimeout), session.sessionID)
 				}
 			}
 		}
@@ -1268,7 +1272,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			if err != nil {
 				p.logger.Warn("send final audio failed", "error", err)
 				if !p.sessionCanceled(session.sessionID) {
-					p.publishError("结束识别失败: "+shortError(err), session.sessionID)
+					p.publishError("asr", "结束识别失败: "+shortError(err), session.sessionID)
 				}
 			} else {
 				recordAudioAfterSend(session.asrClient, session.recordedAudio, finalAudio)
@@ -1292,7 +1296,7 @@ func (p *VoicePlugin) finishRecordingSession(session *recordingSession) {
 			case <-time.After(finalTimeout):
 				if !p.sessionCanceled(session.sessionID) {
 					pout("⚠️  识别超时")
-					p.publishError(fmt.Sprintf("识别超时: 等待 ASR final 超过 %s", finalTimeout), session.sessionID)
+					p.publishError("asr", fmt.Sprintf("识别超时: 等待 ASR final 超过 %s", finalTimeout), session.sessionID)
 				}
 			}
 		}
@@ -1500,8 +1504,9 @@ func (p *VoicePlugin) publishStatusLocked() {
 	p.syncTransientHotkeysLocked(recording || stopping || p.pendingDone > 0 || errorActive, errorActive)
 }
 
-func (p *VoicePlugin) publishErrorLocked(detail string, sessionID uint64) {
+func (p *VoicePlugin) publishErrorLocked(kind, detail string, sessionID uint64) {
 	p.lastError = detail
+	p.lastErrorKind = kind
 	p.errorUntil = time.Now().Add(errorHoldDuration)
 	if p.errorTimer != nil {
 		p.errorTimer.Stop()
@@ -1518,10 +1523,10 @@ func (p *VoicePlugin) publishErrorLocked(detail string, sessionID uint64) {
 	p.syncTransientHotkeysLocked(true, true)
 }
 
-func (p *VoicePlugin) publishError(detail string, sessionID uint64) {
+func (p *VoicePlugin) publishError(kind, detail string, sessionID uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.publishErrorLocked(detail, sessionID)
+	p.publishErrorLocked(kind, detail, sessionID)
 }
 
 func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recording, stopping bool, stopAt time.Time, sessionID uint64) {
@@ -1537,6 +1542,7 @@ func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recordin
 		s.StopDelayMs = p.stopDelayMs
 		s.StartedAt = p.startedAt
 		s.VoiceStartedAt = p.voiceStartedAt
+		s.ErrorKind = p.lastErrorKind
 		s.ErrorUntil = p.errorUntil
 		s.SessionID = sessionID
 		s.PendingFinishes = pendingDone
@@ -1550,6 +1556,7 @@ func (p *VoicePlugin) clearErrorLocked() {
 	}
 	p.errorUntil = time.Time{}
 	p.lastError = ""
+	p.lastErrorKind = ""
 }
 
 func (p *VoicePlugin) cleanupTransientHotkeysLocked() {
