@@ -2,6 +2,10 @@
 
 All notable project changes are tracked here.
 
+## Unreleased
+
+- **GitHub 仓库更名为 `just-talk-plus`**：仓库地址从 `conglinyizhi/just-talk-go-plus` 改为 `conglinyizhi/just-talk-plus`，与 Go 模块路径 `github.com/conglinyizhi/just-talk-plus` 对齐。旧地址由 GitHub 做 301 重定向，已有的 clone 仍能拉取，但建议 `git remote set-url` 换成新地址。托盘「关于」菜单里的项目名与源码链接已同步。
+
 ## v0.2.0 - 2026-11-14
 
 - **发布范围收窄为 Linux（用户可见行为变化）**：GitHub Release 只发布 Linux x86_64（amd64）归档，不再提供 Linux arm64、macOS 与 Windows 的预编译包。这些平台的代码仍在仓库里（热键、录音、剪贴板、自动上屏），需要时自行编译；做出这个取舍的原因是维护者没有对应平台可以验证，发布没人能担保的二进制比不发布更糟。CI 矩阵与 GoReleaser 配置同步裁剪，测试步骤维持原样（仍只在 amd64 上跑）。

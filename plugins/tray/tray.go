@@ -1139,8 +1139,8 @@ func terminalCommand(args ...string) *exec.Cmd {
 	}
 }
 
-const aboutJtgpURL = "https://github.com/conglinyizhi/just-talk-go-plus"
-const aboutJtgpLicense = `just-talk-go-plus
+const aboutJtgpURL = "https://github.com/conglinyizhi/just-talk-plus"
+const aboutJtgpLicense = `just-talk-plus
 许可协议：GPL-3.0（GNU General Public License v3.0）
 版权：© 2026 conglinyizhi
 
@@ -1169,7 +1169,7 @@ const historyMenuSlots = 8
 // dependencies. Each project carries a license dialog and a link to its source.
 func (p *Plugin) buildAboutMenu() {
 	about := systray.AddMenuItem("关于", "开源与许可声明")
-	p.addAboutProject(about, "just-talk-go-plus（当前）", "just-talk-go-plus 开源与许可", aboutJtgpLicense, aboutJtgpURL)
+	p.addAboutProject(about, "just-talk-plus（当前）", "just-talk-plus 开源与许可", aboutJtgpLicense, aboutJtgpURL)
 	p.addAboutProject(about, "just-talk-go", "just-talk-go 开源与许可", aboutJtgLicense, aboutJtgURL)
 	p.addAboutProject(about, "androidmic", "AndroidMic 开源与许可", aboutAmLicense, aboutAmURL)
 }
