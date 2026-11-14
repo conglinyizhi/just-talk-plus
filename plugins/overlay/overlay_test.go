@@ -74,8 +74,8 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	errorCases := map[string][2]string{
 		"asr":   {"CRASH:", "ASRERR"},
 		"net":   {"CRASH:", "NETERR"},
-		"dev":   {"ERROR", "DEVICE"},
-		"cfg":   {"ERROR", "CONFIG"},
+		"dev":   {"ERROR:", "DEVICE"},
+		"cfg":   {"ERROR:", "CONFIG"},
 		"weird": {"CRASH:", "ERR"}, // 未知类别回落
 	}
 	for kind, want := range errorCases {

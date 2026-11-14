@@ -107,8 +107,8 @@ type errorText struct {
 var errorTexts = map[string]errorText{
 	"asr": {left: "CRASH:", right: "ASRERR"}, // 识别侧：服务端报错、识别超时、结束识别失败
 	"net": {left: "CRASH:", right: "NETERR"}, // 连接与传输：建连失败、音频发送中断、发送超时
-	"dev": {left: "ERROR", right: "DEVICE"},  // 本地录音设备：启动失败、读取失败
-	"cfg": {left: "ERROR", right: "CONFIG"},  // 引擎配置错误
+	"dev": {left: "ERROR:", right: "DEVICE"}, // 本地录音设备：启动失败、读取失败
+	"cfg": {left: "ERROR:", right: "CONFIG"}, // 引擎配置错误
 }
 
 // errorTextFor 未知类别统一回落，不把内部字符串直接漏到屏幕上。
