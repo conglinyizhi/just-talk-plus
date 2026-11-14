@@ -77,29 +77,40 @@ var (
 	colorIdle      = statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}
 )
 
-// timeLabel 左栏唯一的内容：时间。
+// softLimitMs 是没有硬上限的引擎使用的软上限：只作提示，不强制停录。
+// 一分钟以内的语音识别成功率明显更高，所以默认也按 60 秒倒计数。
+const softLimitMs = 60 * 1000
+
+// timeLabel 左栏唯一的内容：距离上限还剩多少秒。
 //
-// 引擎声明了单次上限（如 DeepSeek 120 秒）就倒计数剩余可用秒数，让用户
-// 一眼看到还能录多久；没有上限则正计数已录时长。两种都按固定宽度排版，
-// 百位出现或消失时不会推动后面的字符。
+// 起点是「第一次检测到人声」（VoiceStartedAt），不是麦克风启动。按下热键后
+// 一直没说话时显示满额静止，开口后才开始倒扣——否则等声音的时间会被算成
+// 已经录掉的时长，看起来像白白流走。
+//
+// 宽度固定，百位出现或消失时不会推动后面的字符。
 func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
 	if status.StartedAt.IsZero() {
-		return ""
+		return "" // 不在录音中
 	}
-	elapsed := time.Since(status.StartedAt)
+	limit := limitMs
+	if limit <= 0 {
+		limit = softLimitMs
+	}
+	if status.VoiceStartedAt.IsZero() {
+		// 还没开口：满额静止
+		return fmt.Sprintf("%3ds", limit/1000)
+	}
+	elapsed := time.Since(status.VoiceStartedAt)
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	if limitMs > 0 {
-		remain := time.Duration(limitMs)*time.Millisecond - elapsed
-		if remain < 0 {
-			remain = 0
-		}
-		// 向上取整：刚开始录时显示满额（120s），而不是 119s
-		secs := int((remain + time.Second - 1) / time.Second)
-		return fmt.Sprintf("%3ds", secs)
+	remain := time.Duration(limit)*time.Millisecond - elapsed
+	if remain < 0 {
+		remain = 0
 	}
-	return fmt.Sprintf("%3ds", int(elapsed/time.Second))
+	// 向上取整：开口第一刻显示满额，而不是少一秒
+	secs := int((remain + time.Second - 1) / time.Second)
+	return fmt.Sprintf("%3ds", secs)
 }
 
 // asrLabel 右栏：识别链路状态。

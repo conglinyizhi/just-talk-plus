@@ -402,10 +402,10 @@ func (b *x11Backend) drawShape(content capsuleContent) {
 // metrics 返回与缩放相关的布局常量。
 func (b *x11Backend) metrics() capsuleMetrics {
 	return capsuleMetrics{
-		FontSize:  12 * b.scale,
-		Padding:   b.scaled(8),
-		Gap:       b.scaled(8),
-		BallD:     b.scaled(28),
+		FontSize:  13 * b.scale,
+		Padding:   b.scaled(10),
+		Gap:       b.scaled(9),
+		BallD:     b.scaled(34),
 		BallInset: b.scaled(3),
 	}
 }
@@ -413,7 +413,7 @@ func (b *x11Backend) metrics() capsuleMetrics {
 // measureText 用 cairo 按当前字号测量像素宽，供共享布局计算使用。
 func (b *x11Backend) measureText(s string) int {
 	canvas := newARGBCanvas(1, 1)
-	return canvas.systemTextWidth(s, 12*b.scale)
+	return canvas.systemTextWidth(s, 13*b.scale)
 }
 
 func (b *x11Backend) alloc(r, g, bl uint16) C.ulong {
