@@ -52,18 +52,18 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-5 * time.Second)}, 0); got != "R  55s" {
 		t.Fatalf("软上限倒计时 = %q", got)
 	}
-	// 录制结束、会话还在收尾：用等宽占位符顶住左边，避免球看起来偏右
-	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != placeholderTime {
-		t.Fatalf("收尾阶段应显示占位符, got %q", got)
+	// 录制结束、会话还在收尾：显示 UPLOAD，正好填满一栏
+	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != uploadPlaceholder {
+		t.Fatalf("收尾阶段应显示 UPLOAD, got %q", got)
 	}
-	if len(placeholderTime)+len(timePrefix) != 6 {
-		t.Fatalf("占位符 %q 加上前缀应与倒计时同为 6 字符", placeholderTime)
+	if len(uploadPlaceholder) != columnCols {
+		t.Fatalf("UPLOAD 长度 %d 应等于列宽 %d", len(uploadPlaceholder), columnCols)
 	}
 
 	// 停止状态下左栏不能是空的——那是用户报告的失衡场景
 	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping", PendingFinishes: 1}, false, 120000)
-	if strings.TrimSpace(stopping.Left) != "---s" {
-		t.Fatalf("停止收尾时左栏应显示占位符, got %q", stopping.Left)
+	if strings.TrimSpace(stopping.Left) != uploadPlaceholder {
+		t.Fatalf("停止收尾时左栏应显示 UPLOAD, got %q", stopping.Left)
 	}
 	if strings.TrimSpace(stopping.Right) != "A.WAIT" {
 		t.Fatalf("停止收尾时右栏 = %q", stopping.Right)
@@ -116,8 +116,16 @@ func TestContentForStatusMapsSemantics(t *testing.T) {
 	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, false, 120000); idle.Visible {
 		t.Fatal("空闲且 idle_visible=false 时不应显示")
 	}
-	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, true, 120000); !idle.Visible {
+	idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, true, 120000)
+	if !idle.Visible {
 		t.Fatal("idle_visible=true 时空闲应显示")
+	}
+	// 空闲时没有任何上传，不能借用 UPLOAD
+	if strings.TrimSpace(idle.Left) == uploadPlaceholder {
+		t.Fatal("空闲态不应显示 UPLOAD")
+	}
+	if strings.TrimSpace(idle.Left) != idlePlaceholder {
+		t.Fatalf("空闲占位 = %q", idle.Left)
 	}
 }
 

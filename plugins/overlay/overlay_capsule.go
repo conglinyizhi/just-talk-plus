@@ -63,7 +63,7 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 	case "error":
 		return capsuleContent{Left: left, Right: padRight("ERR"), Color: colorCapturing, Visible: true}
 	default:
-		return capsuleContent{Left: padLeft(placeholderTime), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
+		return capsuleContent{Left: padLeft(idlePlaceholder), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
 }
 
@@ -78,10 +78,13 @@ var (
 // 前缀把重量补回来，否则球看上去会偏向一边。
 const timePrefix = "R "
 
-// placeholderTime 录音已结束但会话仍在收尾时占据左栏位置。
-// 与倒计时同宽（补齐后 6 格），替换时不会改变胶囊尺寸或球的位置。
-// 收尾阶段已经不在录音，所以不带 "R " 前缀。
-const placeholderTime = "---s"
+// uploadPlaceholder 录音已结束、音频正在上传并等待云端识别时占据左栏。
+// 六个字符正好填满一栏，替换时不会改变胶囊尺寸或球的位置。
+const uploadPlaceholder = "UPLOAD"
+
+// idlePlaceholder 空闲态的左栏占位。不能复用 UPLOAD——什么都没在传的时候
+// 显示「上传」是假信息。六个短横线只表示「这里没有正在计时的事」。
+const idlePlaceholder = "------"
 
 // softLimitMs 是没有硬上限的引擎使用的软上限：只作提示，不强制停录。
 // 一分钟以内的语音识别成功率明显更高，所以默认也按 60 秒倒计数。
@@ -96,9 +99,9 @@ const softLimitMs = 60 * 1000
 // 宽度固定，百位出现或消失时不会推动后面的字符。
 func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
 	if status.StartedAt.IsZero() {
-		// 录制已经结束、会话还在收尾（等云端识别）。左栏留空会让球看起来
-		// 偏向右边，所以用一个和 "120s" 等宽的占位符顶住位置。
-		return placeholderTime
+		// 录制结束、会话还在收尾（上传并等云端识别）。左栏留空会让球看起来
+		// 偏向右边，所以用等宽占位符顶住位置。
+		return uploadPlaceholder
 	}
 	limit := limitMs
 	if limit <= 0 {
