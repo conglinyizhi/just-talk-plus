@@ -396,7 +396,13 @@ func (p *Plugin) syncChecks() {
 
 func (p *Plugin) setEngine(name string) {
 	cfg := p.reloadConfig()
-	if cfg == nil || cfg.Voice.Engine == name {
+	if cfg == nil {
+		return
+	}
+	if cfg.Voice.Engine == name {
+		// 配置里已经是这个引擎，但菜单勾选态可能因为外部改配置而错位
+		// （例如在 TUI 里换了引擎）。这里仍然刷新一次，让点击能把勾选纠回来。
+		p.syncChecks()
 		return
 	}
 	cfg.Voice.Engine = name
@@ -499,7 +505,12 @@ func (p *Plugin) refreshModels(explicit bool) {
 
 func (p *Plugin) setDevice(name string) {
 	cfg := p.reloadConfig()
-	if cfg == nil || cfg.Voice.Device == name {
+	if cfg == nil {
+		return
+	}
+	if cfg.Voice.Device == name {
+		// 同 setEngine：外部改过设备时靠这次刷新把勾选态纠正回来。
+		p.syncChecks()
 		return
 	}
 	cfg.Voice.Device = name
@@ -690,6 +701,9 @@ func (p *Plugin) OnConfigReloadResult(_ *config.Config, err error) {
 		return
 	}
 	p.setConfigStatus("配置状态: 已应用")
+	// 配置可能是在别处改的（TUI 保存、手动编辑后热加载），菜单的勾选态必须
+	// 跟着纠正，否则会出现「配置里是 A、菜单勾着 B」的错位。
+	p.syncChecks()
 	// During a manual refresh the handler shows the list of changed options, so
 	// suppress the generic toast to avoid two dialogs. Automatic hot-reload
 	// (WatchConfig) still reports here as usual.

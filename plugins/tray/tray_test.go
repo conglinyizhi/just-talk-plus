@@ -8,9 +8,12 @@ import (
 	"image/png"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
+
+	"fyne.io/systray"
 
 	"github.com/conglinyizhi/just-talk-plus/config"
 	"github.com/conglinyizhi/just-talk-plus/engine"
@@ -197,5 +200,95 @@ func TestTruncate(t *testing.T) {
 	}
 	if got := truncate("hello world", 5); got != "hello…" {
 		t.Errorf("truncate(ascii) = %q, want hello…", got)
+	}
+}
+
+// newCheckFixture 造一个「配置里是 deepseek，但菜单还勾着 mosi」的错位场景。
+// 这正是用户在 TUI 里换过引擎之后托盘菜单会出现的状态。
+func newCheckFixture(t *testing.T) (*Plugin, *systray.MenuItem, *systray.MenuItem) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	onDisk := config.Default()
+	onDisk.Voice.Engine = "deepseek"
+	if err := config.SaveTo(path, onDisk); err != nil {
+		t.Fatal(err)
+	}
+	live := config.Default()
+	live.Voice.Engine = "deepseek"
+
+	deepseekItem := &systray.MenuItem{}
+	mosiItem := &systray.MenuItem{}
+	mosiItem.Check() // 模拟菜单停留在旧状态
+
+	p := &Plugin{
+		cfgPath: path,
+		env:     fakeEnv{cfg: live},
+		engineItems: map[string]*systray.MenuItem{
+			"deepseek": deepseekItem,
+			"mosi":     mosiItem,
+		},
+	}
+	p.manualReload.Store(true) // 抑制测试期间的桌面弹窗
+	return p, deepseekItem, mosiItem
+}
+
+// TestSetEngineReconcilesStaleChecks 点击一个「配置里其实已经是它」的引擎时，
+// 不能因为值没变就直接返回——那样勾选态会一直错位，用户点也纠正不了。
+func TestSetEngineReconcilesStaleChecks(t *testing.T) {
+	p, deepseekItem, mosiItem := newCheckFixture(t)
+	p.setEngine("deepseek")
+	if !deepseekItem.Checked() {
+		t.Fatal("点击后应勾选当前引擎 deepseek")
+	}
+	if mosiItem.Checked() {
+		t.Fatal("点击后应取消 mosi 的勾选，否则会出现多个同时选中")
+	}
+}
+
+// TestConfigReloadReconcilesChecks 配置在别处被改（TUI 保存 / 手动编辑后热加载）
+// 时，菜单勾选态必须跟着纠正。
+func TestConfigReloadReconcilesChecks(t *testing.T) {
+	p, deepseekItem, mosiItem := newCheckFixture(t)
+	p.OnConfigReloadResult(p.env.Config(), nil)
+	if !deepseekItem.Checked() {
+		t.Fatal("配置重载后应勾选配置里的引擎")
+	}
+	if mosiItem.Checked() {
+		t.Fatal("配置重载后应取消其它引擎的勾选")
+	}
+}
+
+// TestSetDeviceReconcilesStaleChecks 设备菜单同理。
+func TestSetDeviceReconcilesStaleChecks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	onDisk := config.Default()
+	onDisk.Voice.Device = "androidmic"
+	if err := config.SaveTo(path, onDisk); err != nil {
+		t.Fatal(err)
+	}
+	live := config.Default()
+	live.Voice.Device = "androidmic"
+
+	amItem := &systray.MenuItem{}
+	autoItem := &systray.MenuItem{}
+	autoItem.Check()
+
+	p := &Plugin{
+		cfgPath: path,
+		env:     fakeEnv{cfg: live},
+		deviceItems: map[string]*systray.MenuItem{
+			"androidmic": amItem,
+			"":           autoItem,
+		},
+	}
+	p.setDevice("androidmic")
+	if !amItem.Checked() {
+		t.Fatal("点击后应勾选当前设备")
+	}
+	if autoItem.Checked() {
+		t.Fatal("点击后应取消自动（默认设备）的勾选")
 	}
 }
