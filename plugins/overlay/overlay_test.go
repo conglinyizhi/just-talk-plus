@@ -13,77 +13,92 @@ import (
 
 // testMetrics 固定的布局参数，配合下面的假测量函数做纯几何测试。
 func testMetrics() capsuleMetrics {
-	return capsuleMetrics{FontSize: 14, Padding: 10, Gap: 8, BallD: 40, BallInset: 4}
+	return capsuleMetrics{FontSize: 12, Padding: 8, Gap: 8, BallD: 28, BallInset: 3}
 }
 
 // fixedMeasure 假定等宽字体每字符 8 像素。
 func fixedMeasure(s string) int { return len([]rune(s)) * 8 }
 
-func TestCountdownLabelWidthIsStable(t *testing.T) {
-	// 倒计时必须在两位/三位数之间保持相同字符数，否则胶囊宽度会跳。
+// TestTimeLabelWidthIsStable 左栏时间必须定宽：百位出现或消失时不能推动后面的字符，
+// 否则每帧都会看到数字左右跳。
+func TestTimeLabelWidthIsStable(t *testing.T) {
+	limit := 120 * 1000 // 120 秒上限
 	cases := []struct {
-		remaining time.Duration
-		want      string
+		elapsed time.Duration
+		want    string
 	}{
-		{1200 * time.Millisecond, "STOP   1.2s"},
-		{9900 * time.Millisecond, "STOP   9.9s"},
-		{99 * time.Second, "STOP  99.0s"},
-		{120 * time.Second, "STOP 120.0s"},
+		{0, "120s"},                 // 刚开录：满额
+		{20 * time.Second, "100s"},  // 刚掉到三位
+		{21 * time.Second, " 99s"},  // 掉到两位，前补空格
+		{111 * time.Second, "  9s"}, // 一位
+		{200 * time.Second, "  0s"}, // 超时归零
 	}
 	for _, tc := range cases {
-		got := countdownLabel(voice.TUIVoiceStatus{State: "stopping_delayed", StopAt: time.Now().Add(tc.remaining), StopDelayMs: 6000})
-		if len(got) != len(tc.want) {
-			t.Fatalf("remaining %s → %q 长度 %d, 与 %q 的 %d 不一致", tc.remaining, got, len(got), tc.want, len(tc.want))
+		got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now().Add(-tc.elapsed)}, limit)
+		if len(got) != 4 {
+			t.Fatalf("elapsed=%s → %q 宽度 %d, 期望 4", tc.elapsed, got, len(got))
+		}
+		if got != tc.want {
+			t.Fatalf("elapsed=%s → %q, 期望 %q", tc.elapsed, got, tc.want)
 		}
 	}
 
-	// 已结束的倒计时归零且宽度不变
-	done := countdownLabel(voice.TUIVoiceStatus{State: "stopping_delayed", StopAt: time.Now().Add(-time.Millisecond), StopDelayMs: 6000})
-	if done != "STOP   0.0s" {
-		t.Fatalf("完成的倒计时 = %q", done)
+	// 没有上限的引擎：正计数已录时长，宽度同样固定
+	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now().Add(-5 * time.Second)}, 0); got != "  5s" {
+		t.Fatalf("无上限正计时 = %q", got)
+	}
+	// 不在录音中：空
+	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != "" {
+		t.Fatalf("未录音应为空, got %q", got)
 	}
 }
 
 func TestContentForStatusMapsSemantics(t *testing.T) {
+	started := time.Now().Add(-10 * time.Second) // 已录 10 秒，上限 120 秒 → 左栏应显示 110s
 	// 左栏 = 本地采集侧，右栏 = 识别侧；两栏都该有内容，球居中时视觉才平衡。
-	waiting := contentForStatus(voice.TUIVoiceStatus{State: "connecting", RecorderReady: true}, false)
-	if !waiting.Visible || strings.TrimSpace(waiting.Left) != "MIC ON" || strings.TrimSpace(waiting.Right) != "ASR .." {
+	waiting := contentForStatus(voice.TUIVoiceStatus{State: "connecting", RecorderReady: true, StartedAt: started}, false, 120000)
+	if !waiting.Visible || strings.TrimSpace(waiting.Right) != "ASR .." {
 		t.Fatalf("等待声音 = %+v", waiting)
+	}
+	// 左栏只剩时间：上限 120 秒、已录 10 秒 → 剩 110s
+	if got := strings.TrimSpace(waiting.Left); got != "110s" {
+		t.Fatalf("左栏应是剩余时间 110s, got %q", got)
 	}
 	if waiting.Color != colorListening {
 		t.Fatalf("等待声音应为黄色监听态, got %+v", waiting.Color)
 	}
 
-	dialing := contentForStatus(voice.TUIVoiceStatus{State: "connecting", RecorderReady: true, VoiceDetected: true}, false)
+	dialing := contentForStatus(voice.TUIVoiceStatus{State: "connecting", RecorderReady: true, VoiceDetected: true, StartedAt: started}, false, 120000)
 	if strings.TrimSpace(dialing.Right) != "ASR ->" || dialing.Color != colorCapturing {
 		t.Fatalf("拨号中 = %+v", dialing)
 	}
 
-	connected := contentForStatus(voice.TUIVoiceStatus{State: "recording", RecorderReady: true, ASRReady: true, VoiceDetected: true}, false)
-	if strings.TrimSpace(connected.Right) != "ASR ON" || strings.TrimSpace(connected.Left) != "MIC ON" {
+	connected := contentForStatus(voice.TUIVoiceStatus{State: "recording", RecorderReady: true, ASRReady: true, VoiceDetected: true, StartedAt: started}, false, 120000)
+	if strings.TrimSpace(connected.Right) != "ASR ON" {
 		t.Fatalf("已连接 = %+v", connected)
 	}
 
 	// 倒计时在左栏，右栏预告还在等识别收尾——两栏都有内容
-	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping_delayed", StopAt: time.Now().Add(time.Second), StopDelayMs: 3000}, false)
-	if !strings.HasPrefix(strings.TrimSpace(stopping.Left), "STOP ") {
-		t.Fatalf("倒计时应占左栏: left=%q", stopping.Left)
+	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping_delayed", StartedAt: started, StopAt: time.Now().Add(time.Second), StopDelayMs: 3000}, false, 120000)
+	// 停止延迟期间左栏时间继续走，不换成别的文案（否则就会闪烁）
+	if got := strings.TrimSpace(stopping.Left); got != "110s" {
+		t.Fatalf("停止延迟期间左栏应继续显示时间, got %q", got)
 	}
 	if strings.TrimSpace(stopping.Right) != "ASR WAIT" {
 		t.Fatalf("倒计时期间右栏应是 ASR WAIT, got %q", stopping.Right)
 	}
 
-	// 麦克风没起来时左栏应显示 MIC ..
-	noMic := contentForStatus(voice.TUIVoiceStatus{State: "recording", RecorderReady: false}, false)
-	if strings.TrimSpace(noMic.Left) != "MIC .." {
-		t.Fatalf("麦克风未就绪 = %+v", noMic)
+	// 没声明上限的引擎：左栏正计时，不是空白
+	noLimit := contentForStatus(voice.TUIVoiceStatus{State: "recording", RecorderReady: true, StartedAt: started}, false, 0)
+	if got := strings.TrimSpace(noLimit.Left); got != "10s" {
+		t.Fatalf("无上限时应正计时 10s, got %q", got)
 	}
 
 	// 空闲默认隐藏，idle_visible 打开才显示
-	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, false); idle.Visible {
+	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, false, 120000); idle.Visible {
 		t.Fatal("空闲且 idle_visible=false 时不应显示")
 	}
-	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, true); !idle.Visible {
+	if idle := contentForStatus(voice.TUIVoiceStatus{State: "idle"}, true, 120000); !idle.Visible {
 		t.Fatal("idle_visible=true 时空闲应显示")
 	}
 }
@@ -91,11 +106,11 @@ func TestContentForStatusMapsSemantics(t *testing.T) {
 func TestPaddingKeepsColumnWidthFixed(t *testing.T) {
 	// 补齐后所有文案的字符数一致，等宽字体下像素宽因此恒定。
 	texts := []string{
-		padRight("MIC ON  ASR ON"),
-		padRight("WAIT ASR"),
+		padRight("ASR ON"),
+		padRight("ASR WAIT"),
 		padRight("ERR"),
-		padLeft(countdownLabel(voice.TUIVoiceStatus{State: "stopping_delayed", StopAt: time.Now().Add(120 * time.Second), StopDelayMs: 6000})),
-		padLeft(countdownLabel(voice.TUIVoiceStatus{State: "stopping_delayed", StopAt: time.Now().Add(9 * time.Second), StopDelayMs: 6000})),
+		padLeft(timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now()}, 120000)),
+		padLeft(timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now().Add(-99 * time.Second)}, 120000)),
 	}
 	for _, s := range texts {
 		if got := len([]rune(s)); got != columnCols {

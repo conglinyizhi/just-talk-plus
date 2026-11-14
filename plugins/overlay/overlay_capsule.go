@@ -29,39 +29,42 @@ type capsuleContent struct {
 // 文案按固定列数排版：等宽字体下像素宽只取决于字符数，所以把列宽钉死，
 // 文案长短变化不会让窗口宽度或坐标跳动。
 const (
-	// leftCols 容纳 "STOP 120.0s"（11 字符），也容纳 "MIC ON"。
-	leftCols = 11
+	// leftCols 容纳 "1200s" 这类上限倒计时（5 字符）。
+	leftCols = 5
 	// rightCols 容纳 "ASR WAIT"（8 字符）。
 	rightCols = 8
 	// columnCols 左右两栏统列数，取两者较大值——这是球能居中的前提。
-	columnCols = leftCols
+	columnCols = rightCols
 )
 
 // contentForStatus 把语音状态映射成胶囊内容。
 //
 // 左栏给辅助信息（当前只有停止倒计时在用），右栏给录制/识别主状态。
-func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool) capsuleContent {
-	// 左栏放本地采集侧（麦克风是否在采、停止倒计时），右栏放识别侧
-	// （ASR 是否连上、是否在等最终结果）。两栏都有内容，球居中时视觉才平衡。
+func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int) capsuleContent {
+	// 左栏只表达「时间」，右栏只表达「识别侧状态」。
+	//
+	// 左栏以前会在 MIC ON / STOP 倒计时 / MIC .. 之间切换，按下停止的那一刻
+	// 会连续横跳好几次，看起来像闪烁。现在它唯二的两种内容都是时间，而且
+	// 停止后冻结在最后一帧，不再回退到别的文案。
+	left := padLeft(timeLabel(status, limitMs))
 	switch status.State {
 	case "connecting":
-		left := padLeft(micLabel(status))
 		if status.VoiceDetected {
 			// 已检测到人声、正在拨 ASR：红灯，提示已经开始真正发送音频
 			return capsuleContent{Left: left, Right: padRight("ASR ->"), Color: colorCapturing, Visible: true}
 		}
 		return capsuleContent{Left: left, Right: padRight("ASR .."), Color: colorListening, Visible: true}
 	case "recording":
-		return capsuleContent{Left: padLeft(micLabel(status)), Right: padRight(asrLabel(status)), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: left, Right: padRight(asrLabel(status)), Color: colorCapturing, Visible: true}
 	case "stopping_delayed":
-		// 等静音结束：左边报剩余时间，右边预告接下来在等识别收尾
-		return capsuleContent{Left: padLeft(countdownLabel(status)), Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
+		// 还在录（等静音结束）：左栏的时间继续走，不换成别的文案
+		return capsuleContent{Left: left, Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
 	case "waiting_asr":
-		return capsuleContent{Left: padLeft(micLabel(status)), Right: padRight("WAIT ASR"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("WAIT ASR"), Color: colorCapturing, Visible: true}
 	case "stopping":
-		return capsuleContent{Left: padLeft(micLabel(status)), Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
 	case "error":
-		return capsuleContent{Left: padLeft(micLabel(status)), Right: padRight("ERR"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("ERR"), Color: colorCapturing, Visible: true}
 	default:
 		return capsuleContent{Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
@@ -74,12 +77,29 @@ var (
 	colorIdle      = statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}
 )
 
-// micLabel 左栏：麦克风采集是否已经起来。
-func micLabel(status voice.TUIVoiceStatus) string {
-	if status.RecorderReady {
-		return "MIC ON"
+// timeLabel 左栏唯一的内容：时间。
+//
+// 引擎声明了单次上限（如 DeepSeek 120 秒）就倒计数剩余可用秒数，让用户
+// 一眼看到还能录多久；没有上限则正计数已录时长。两种都按固定宽度排版，
+// 百位出现或消失时不会推动后面的字符。
+func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
+	if status.StartedAt.IsZero() {
+		return ""
 	}
-	return "MIC .."
+	elapsed := time.Since(status.StartedAt)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	if limitMs > 0 {
+		remain := time.Duration(limitMs)*time.Millisecond - elapsed
+		if remain < 0 {
+			remain = 0
+		}
+		// 向上取整：刚开始录时显示满额（120s），而不是 119s
+		secs := int((remain + time.Second - 1) / time.Second)
+		return fmt.Sprintf("%3ds", secs)
+	}
+	return fmt.Sprintf("%3ds", int(elapsed/time.Second))
 }
 
 // asrLabel 右栏：识别链路状态。
@@ -91,21 +111,6 @@ func asrLabel(status voice.TUIVoiceStatus) string {
 		return "ASR ->"
 	}
 	return "ASR .."
-}
-
-// countdownLabel 停止倒计时。数字宽度固定，百位出现/消失时不整体位移。
-func countdownLabel(status voice.TUIVoiceStatus) string {
-	remaining := 0.0
-	if status.StopDelayMs > 0 && !status.StopAt.IsZero() {
-		remaining = time.Until(status.StopAt).Seconds()
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	if remaining > 999.9 {
-		remaining = 999.9
-	}
-	return fmt.Sprintf("STOP %5.1fs", remaining)
 }
 
 // padRight 把右栏文案补齐到固定列数（左对齐，尾部补空格）。
@@ -170,8 +175,9 @@ func computeLayout(content capsuleContent, m capsuleMetrics, measure func(string
 		BallY:    height / 2,
 		FontSize: m.FontSize,
 	}
-	// 文字垂直居中：基线大约在中心再加半个字高。
-	layout.TextBaseline = height/2 + int(m.FontSize)/2
+	// 文字垂直居中：基线的位置要让「上伸-下伸」的中点落在胶囊中心，
+	// 直接用 fontSize/2 会让文字整体偏下 1~2 像素。
+	layout.TextBaseline = height/2 + int(m.FontSize*0.36)
 
 	leftStart := m.Padding
 	rightStart := m.Padding + colW + m.Gap + m.BallD + m.Gap

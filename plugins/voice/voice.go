@@ -99,16 +99,19 @@ var tuiStatsSaveMu sync.Mutex
 var statsPathFunc = statsPath
 
 type TUIVoiceStatus struct {
-	State           string
-	Detail          string
-	Recording       bool
-	Stopping        bool
-	RecorderReady   bool
-	ASRReady        bool
-	VoiceDetected   bool
-	WaitingForASR   bool
-	StopAt          time.Time
-	StopDelayMs     int
+	State         string
+	Detail        string
+	Recording     bool
+	Stopping      bool
+	RecorderReady bool
+	ASRReady      bool
+	VoiceDetected bool
+	WaitingForASR bool
+	StopAt        time.Time
+	StopDelayMs   int
+	// StartedAt 本次录音会话的开始时间；不在录音中时为零值。
+	// 显示侧据此算已录时长（例如换算成引擎上限的剩余时间），不必自己计时。
+	StartedAt       time.Time
 	ErrorUntil      time.Time
 	UpdatedAt       time.Time
 	SessionID       uint64
@@ -1527,6 +1530,7 @@ func (p *VoicePlugin) publishStatusSnapshotLocked(state, detail string, recordin
 		s.WaitingForASR = p.waitingForASR
 		s.StopAt = stopAt
 		s.StopDelayMs = p.stopDelayMs
+		s.StartedAt = p.startedAt
 		s.ErrorUntil = p.errorUntil
 		s.SessionID = sessionID
 		s.PendingFinishes = pendingDone

@@ -360,11 +360,11 @@ func (b *waylandBackend) draw(content capsuleContent) {
 // metrics 返回与缩放相关的布局常量。
 func (b *waylandBackend) metrics() capsuleMetrics {
 	return capsuleMetrics{
-		FontSize:  14 * b.scale,
-		Padding:   b.scaled(10),
+		FontSize:  12 * b.scale,
+		Padding:   b.scaled(8),
 		Gap:       b.scaled(8),
-		BallD:     b.scaled(40),
-		BallInset: b.scaled(4),
+		BallD:     b.scaled(28),
+		BallInset: b.scaled(3),
 	}
 }
 
@@ -372,7 +372,7 @@ func (b *waylandBackend) metrics() capsuleMetrics {
 func (b *waylandBackend) measureText(s string) int {
 	cs := C.CString(s)
 	defer C.free(unsafe.Pointer(cs))
-	return int(C.wayland_system_text_width(cs, C.double(14*b.scale)))
+	return int(C.wayland_system_text_width(cs, C.double(12*b.scale)))
 }
 
 func (b *waylandBackend) drawSystemText(x, y int, label string, fontSize float64) {
