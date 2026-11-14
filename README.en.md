@@ -32,8 +32,8 @@ Linux, macOS, and Windows desktops are supported:
 | --- | --- | --- |
 | Linux Wayland | Supported | Works with Sway / wlroots; hotkeys use evdev and require input permissions |
 | Linux X11 | Supported | Uses native X11 global hotkeys |
-| macOS | Supported | Global hotkeys use CGEventTap, recording uses CoreAudio, clipboard uses NSPasteboard, and overlay uses AppKit NSPanel |
-| Windows 10/11 | Supported | Global key polling with a low-level keyboard-hook edge fallback, WinMM recording, Unicode clipboard, SendInput auto-submit, and a Win32 status overlay |
+| macOS | Implemented, not verified on hardware | Global hotkeys use CGEventTap, recording uses CoreAudio, clipboard uses NSPasteboard; **no recording capsule** (overlay is Linux-only) |
+| Windows 10/11 | Implemented, not verified on hardware | Global key polling with low-level keyboard hook edge fallback, WinMM recording, Unicode clipboard, SendInput auto-submit; **no recording capsule** (overlay is Linux-only) |
 
 ## Build
 

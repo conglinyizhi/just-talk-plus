@@ -14,7 +14,7 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 - Android 手机可作为录音麦克风（内嵌 AndroidMic 服务端，手机端装官方 APK）。
 - 麦克风调试面板：测试录音、电平与增益调整、自适应增益。
 - 识别历史与可选录音保留，便于回放与复查。
-- 顶层录音状态胶囊；TUI 采用 tab 分组配置。
+- 顶层录音状态胶囊（仅 Linux）：中间状态球 + 左右两栏，左栏显示麦克风采集与停止倒计时，右栏显示识别状态；TUI 采用 tab 分组配置。
 
 ## 测试状态
 
@@ -28,8 +28,8 @@ Just Talk Plus 是一个面向桌面环境的语音输入工具。它通过全�
 | ------------- | ------ | --------------------------------------------------------------------------------------------------- |
 | Linux Wayland | 已支持 | 已支持 Sway / wlroots 场景；快捷键基于 evdev，需要 input 权限                                       |
 | Linux X11     | 已支持 | 使用 X11 原生全局热键                                                                               |
-| macOS         | 已支持 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard，胶囊显示使用 AppKit NSPanel |
-| Windows 10/11 | 已支持 | 全局按键轮询及低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 自动上屏和 Win32 状态胶囊 |
+| macOS         | 已实现，未经真机验证 | 全局快捷键基于 CGEventTap，录音使用 CoreAudio，剪贴板使用 NSPasteboard；**无录音胶囊**（overlay 仅 Linux 实现） |
+| Windows 10/11 | 已实现，未经真机验证 | 全局按键轮询及低级键盘钩子边沿回退、WinMM 录音、Unicode 剪贴板、SendInput 自动上屏；**无录音胶囊**（overlay 仅 Linux 实现） |
 
 ## 构建
 

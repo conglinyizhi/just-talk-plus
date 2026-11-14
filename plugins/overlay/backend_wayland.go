@@ -142,9 +142,11 @@ func newWaylandBackend(cfg config.OverlayConfig) (backend, error) {
 		scale = 1.0
 	}
 	b := &waylandBackend{display: display, position: cfg.Position, scale: scale}
-	b.w = b.scaled(basePillW)
-	b.h = b.scaled(basePillH)
 	b.margin = b.scaled(baseMargin)
+	// 窗口尺寸由共享布局算出：列宽是常量（等宽字体下像素宽只取决于字符数），
+	// 所以尺寸恒定，文案长短变化不会改变窗口。这里先量一次定尺寸。
+	probe := computeLayout(capsuleContent{Left: padLeft(""), Right: padRight("")}, b.metrics(), b.measureText)
+	b.w, b.h = probe.Width, probe.Height
 	if b.position == "" {
 		b.position = "top-right"
 	}
@@ -175,13 +177,13 @@ func newWaylandBackend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *waylandBackend) Show(label string, color statusColor) error {
+func (b *waylandBackend) Show(content capsuleContent) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.display == nil || b.closed || b.destroyed {
 		return nil
 	}
-	b.draw(label, color)
+	b.draw(content)
 	C.wl_surface_attach(b.surface, b.buffer, 0, 0)
 	C.wl_surface_damage_buffer(b.surface, 0, 0, C.int32_t(b.w), C.int32_t(b.h))
 	C.wl_surface_commit(b.surface)
@@ -328,30 +330,49 @@ func (b *waylandBackend) createBuffer() error {
 	return nil
 }
 
-func (b *waylandBackend) draw(label string, color statusColor) {
+func (b *waylandBackend) draw(content capsuleContent) {
+	layout := computeLayout(content, b.metrics(), b.measureText)
 	clear(b.data)
 	bg := rgba{20, 20, 20, 215}
-	dot := rgba{uint8(color.R >> 8), uint8(color.G >> 8), uint8(color.B >> 8), 255}
-	radius := b.h / 2
+	ball := rgba{uint8(content.Color.R >> 8), uint8(content.Color.G >> 8), uint8(content.Color.B >> 8), 255}
+
+	// 胶囊底：整块圆角矩形（全圆角时就是标准胶囊）。
 	for y := 0; y < b.h; y++ {
 		for x := 0; x < b.w; x++ {
-			if coverage := waylandRoundedRectCoverage(x, y, b.w, b.h, radius); coverage > 0 {
+			if coverage := waylandRoundedRectCoverage(x, y, b.w, b.h, layout.Radius); coverage > 0 {
 				c := bg
 				c.a = uint8(uint16(c.a) * uint16(coverage) / 255)
 				b.setPixel(x, y, c)
 			}
 		}
 	}
-	dotSize := b.scaled(14)
-	fontSize := 14 * b.scale
-	text := C.CString(label)
-	textW := int(C.wayland_system_text_width(text, C.double(fontSize)))
-	C.free(unsafe.Pointer(text))
-	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), textW)
-	dotY := (b.h - dotSize) / 2
-	b.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textY := (b.h-int(fontSize))/2 - b.scaled(1)
-	b.drawSystemText(textX, textY+int(fontSize), label, fontSize)
+	// 中间大球：状态色，绝对居中。
+	b.fillCircleAA(layout.BallX, layout.BallY, layout.BallD/2, ball)
+	// 左右两栏文字：列宽恒定，文字长度变化不会移动坐标。
+	if layout.LeftText != "" {
+		b.drawSystemText(layout.LeftX, layout.TextBaseline, layout.LeftText, layout.FontSize)
+	}
+	if layout.RightText != "" {
+		b.drawSystemText(layout.RightX, layout.TextBaseline, layout.RightText, layout.FontSize)
+	}
+}
+
+// metrics 返回与缩放相关的布局常量。
+func (b *waylandBackend) metrics() capsuleMetrics {
+	return capsuleMetrics{
+		FontSize:  14 * b.scale,
+		Padding:   b.scaled(10),
+		Gap:       b.scaled(8),
+		BallD:     b.scaled(40),
+		BallInset: b.scaled(4),
+	}
+}
+
+// measureText 用 cairo 按当前字号测量像素宽，供共享布局计算使用。
+func (b *waylandBackend) measureText(s string) int {
+	cs := C.CString(s)
+	defer C.free(unsafe.Pointer(cs))
+	return int(C.wayland_system_text_width(cs, C.double(14*b.scale)))
 }
 
 func (b *waylandBackend) drawSystemText(x, y int, label string, fontSize float64) {

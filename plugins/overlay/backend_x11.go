@@ -176,9 +176,11 @@ func newX11Backend(cfg config.OverlayConfig) (backend, error) {
 		scale = 1.0
 	}
 	b := &x11Backend{dpy: dpy, screen: C.XDefaultScreen(dpy), position: cfg.Position, scale: scale}
-	b.w = b.scaled(basePillW)
-	b.h = b.scaled(basePillH)
 	b.margin = b.scaled(baseMargin)
+	// 窗口尺寸由共享布局给出：列宽是常量，等宽字体下像素宽只取决于字符数，
+	// 因此尺寸恒定，文案长短变化不会改变窗口或坐标。
+	probe := computeLayout(capsuleContent{}, b.metrics(), b.measureText)
+	b.w, b.h = probe.Width, probe.Height
 	if b.position == "" {
 		b.position = "top-right"
 	}
@@ -234,12 +236,12 @@ func newX11Backend(cfg config.OverlayConfig) (backend, error) {
 	return b, nil
 }
 
-func (b *x11Backend) Show(label string, color statusColor) error {
+func (b *x11Backend) Show(content capsuleContent) error {
 	if b.dpy == nil {
 		return nil
 	}
 	b.move()
-	b.draw(label, color)
+	b.draw(content)
 	if !b.visible {
 		C.XMapRaised(b.dpy, b.win)
 		b.visible = true
@@ -315,36 +317,44 @@ func (b *x11Backend) focusedMonitor() (x, y, w, h int) {
 	return 0, 0, w, h
 }
 
-func (b *x11Backend) draw(label string, color statusColor) {
+func (b *x11Backend) draw(content capsuleContent) {
 	if !b.argb {
-		b.drawShape(label, color)
+		b.drawShape(content)
 		return
 	}
+	layout := computeLayout(content, b.metrics(), b.measureText)
 	p := newARGBCanvas(b.w, b.h)
 	bg := rgba{20, 20, 20, 215}
-	fg := rgba{245, 245, 245, 255}
-	dot := rgba{uint8(color.R >> 8), uint8(color.G >> 8), uint8(color.B >> 8), 255}
-	radius := b.h / 2
+	ball := rgba{uint8(content.Color.R >> 8), uint8(content.Color.G >> 8), uint8(content.Color.B >> 8), 255}
+	textScale := b.scaled(3)
+
+	// 胶囊底：整块圆角矩形。
 	for y := 0; y < b.h; y++ {
 		for x := 0; x < b.w; x++ {
-			if coverage := roundedRectCoverage(x, y, b.w, b.h, radius); coverage > 0 {
+			if coverage := roundedRectCoverage(x, y, b.w, b.h, layout.Radius); coverage > 0 {
 				c := bg
 				c.a = uint8(uint16(c.a) * uint16(coverage) / 255)
 				p.setPixel(x, y, c)
 			}
 		}
 	}
-	dotSize := b.scaled(14)
-	textScale := b.scaled(3)
-	fontSize := 14 * b.scale
-	textW := p.systemTextWidth(label, fontSize)
-	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), int(textW))
-	dotY := (b.h - dotSize) / 2
-	p.fillCircleAA(dotX+dotSize/2, dotY+dotSize/2, dotSize/2, dot)
-	textY := (b.h-int(fontSize))/2 - b.scaled(1)
-	if !p.drawSystemText(textX, textY, label, fontSize) {
-		p.drawText(textX, textY, label, textScale, fg)
+	// 中间大球，绝对居中。
+	p.fillCircleAA(layout.BallX, layout.BallY, layout.BallD/2, ball)
+
+	// 左右两栏：坐标由布局给定，文字长度不影响位置。
+	textTop := layout.TextBaseline - int(layout.FontSize)
+	drawColumn := func(text string, x int) {
+		if text == "" {
+			return
+		}
+		if p.drawSystemText(x, textTop, text, layout.FontSize) {
+			return
+		}
+		// 系统字体不可用时退回点阵字形，只影响观感，不影响位置。
+		drawBitmapText(b, x, textTop, text, textScale)
 	}
+	drawColumn(layout.LeftText, layout.LeftX)
+	drawColumn(layout.RightText, layout.RightX)
 	b.putImage(p.data)
 }
 
@@ -361,28 +371,49 @@ func (p *argbCanvas) systemTextWidth(label string, fontSize float64) int {
 	return int(C.system_text_width(text, C.double(fontSize)))
 }
 
-func (b *x11Backend) drawShape(label string, color statusColor) {
+func (b *x11Backend) drawShape(content capsuleContent) {
+	// 不支持 ARGB visual 时的降级路径：X11 原生填充，没有圆角与抗锯齿。
+	// 布局仍走共享计算，球位置与两栏对齐和主路径一致。
+	layout := computeLayout(content, b.metrics(), b.measureText)
 	bg := b.alloc(20<<8, 20<<8, 20<<8)
 	fg := b.alloc(245<<8, 245<<8, 245<<8)
-	dot := b.alloc(color.R, color.G, color.B)
-	dotEdge := b.alloc((color.R+(20<<8))/2, (color.G+(20<<8))/2, (color.B+(20<<8))/2)
+	ball := b.alloc(content.Color.R, content.Color.G, content.Color.B)
+	textScale := b.scaled(3)
 
 	C.XSetForeground(b.dpy, b.gc, bg)
 	C.XFillRectangle(b.dpy, C.Drawable(b.win), b.gc, 0, 0, C.uint(b.w), C.uint(b.h))
-	dotSize := b.scaled(14)
-	textScale := b.scaled(3)
-	textW := bitmapTextWidth(label, textScale)
-	dotX, textX := capsuleContentLayout(b.w, dotSize, b.scaled(10), textW)
-	dotY := (b.h - dotSize) / 2
-	C.XSetForeground(b.dpy, b.gc, dotEdge)
-	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX), C.int(dotY), C.uint(dotSize), C.uint(dotSize), 0, 360*64)
-	inset := b.scaled(1)
-	C.XSetForeground(b.dpy, b.gc, dot)
-	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc, C.int(dotX+inset), C.int(dotY+inset), C.uint(dotSize-2*inset), C.uint(dotSize-2*inset), 0, 360*64)
+
+	C.XSetForeground(b.dpy, b.gc, ball)
+	C.XFillArc(b.dpy, C.Drawable(b.win), b.gc,
+		C.int(layout.BallX-layout.BallD/2), C.int(layout.BallY-layout.BallD/2),
+		C.uint(layout.BallD), C.uint(layout.BallD), 0, 360*64)
+
 	C.XSetForeground(b.dpy, b.gc, fg)
 	textH := 7 * textScale
-	textY := (b.h - textH) / 2
-	drawBitmapText(b, textX, textY, label, textScale)
+	textTop := layout.BallY - textH/2
+	if layout.LeftText != "" {
+		drawBitmapText(b, layout.LeftX, textTop, layout.LeftText, textScale)
+	}
+	if layout.RightText != "" {
+		drawBitmapText(b, layout.RightX, textTop, layout.RightText, textScale)
+	}
+}
+
+// metrics 返回与缩放相关的布局常量。
+func (b *x11Backend) metrics() capsuleMetrics {
+	return capsuleMetrics{
+		FontSize:  14 * b.scale,
+		Padding:   b.scaled(10),
+		Gap:       b.scaled(8),
+		BallD:     b.scaled(40),
+		BallInset: b.scaled(4),
+	}
+}
+
+// measureText 用 cairo 按当前字号测量像素宽，供共享布局计算使用。
+func (b *x11Backend) measureText(s string) int {
+	canvas := newARGBCanvas(1, 1)
+	return canvas.systemTextWidth(s, 14*b.scale)
 }
 
 func (b *x11Backend) alloc(r, g, bl uint16) C.ulong {

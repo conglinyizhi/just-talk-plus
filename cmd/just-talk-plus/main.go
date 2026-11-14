@@ -37,9 +37,6 @@ func main() {
 	doctorOnly := flag.Bool("doctor", false, "run startup doctor and exit")
 	installOnly := flag.Bool("install", false, "install just-talk-plus for the current user")
 	systemdInstall := flag.Bool("install-systemd", false, "install a systemd --user unit for autostart + journal logging (Linux)")
-	overlayHelper := flag.Bool("overlay-helper", false, "run macOS overlay helper")
-	overlayPosition := flag.String("overlay-position", "top-right", "overlay helper position")
-	overlayScale := flag.Float64("overlay-scale", 1.0, "overlay helper scale")
 	flag.Parse()
 	if *installOnly {
 		if err := installSelf(); err != nil {
@@ -51,13 +48,6 @@ func main() {
 	if *systemdInstall {
 		if err := installSystemdUser(); err != nil {
 			fmt.Fprintf(os.Stderr, "systemd install failed: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if *overlayHelper {
-		if err := overlay.RunHelper(*overlayPosition, *overlayScale, os.Stdin); err != nil {
-			fmt.Fprintf(os.Stderr, "overlay helper error: %v\n", err)
 			os.Exit(1)
 		}
 		return

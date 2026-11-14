@@ -33,7 +33,7 @@ go build -o build/just-talk-plus.exe ./cmd/just-talk-plus   # Windows
 
 Runtime: `just-talk-plus` (TUI default), `--gui` (daemon), `--doctor`, `--backend x11|wayland|darwin` (or `JUST_TALK_PLUS_BACKEND`); `mock` is provider-testing only.
 
-Never add or keep non-cgo macOS fallback builds: a build that compiles but lacks native hotkeys/recording/clipboard/auto-submit/overlay is worse than a failed build.
+Never add or keep non-cgo macOS fallback builds: a build that compiles but lacks native hotkeys/recording/clipboard/auto-submit is worse than a failed build. (The overlay capsule does not exist on macOS at all — see the overlay bullet above.)
 
 ## Architecture
 
@@ -42,8 +42,8 @@ Startup: `cmd/just-talk-plus/main.go` → `config.Load` → `doctor.Run` → `ho
 - `hotkey/`: global hotkey providers + combo/event types.
 - `engine/`: plugin lifecycle, config reload.
 - `plugins/voice/`: recorder, ASR sessions, hotkey behavior, clipboard/auto-submit dispatch, stats.
-- `plugins/overlay/`: recording status capsule.
-- `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai` / `dashscope` / `mimo-asr` / `siliconflow`.
+- `plugins/overlay/`: recording status capsule, **Linux only** (X11 + Wayland). The Windows and macOS backends were removed: they came from upstream and the maintainer has no way to verify them. `backend_stub.go` returns "not implemented" everywhere else, so the app still runs without a capsule. Layout is shared and unit-tested in `overlay_capsule.go`; platform backends only draw at the coordinates it returns.
+- `internal/speech/`: ASR engine abstraction (Engine + registry), streaming sessions, batch adapter, engines `doubao-stream` / `auralwise` / `openai` / `dashscope` / `mimo-asr` / `siliconflow` / `mosi` / `deepseek`.
 - `internal/asrcfg/`: builds an engine from `config.VoiceConfig`; the single place importing engine packages (registers them).
 - `internal/autotype/`, `internal/clipboard/`, `internal/doctor/`, `internal/tui/` (Bubble Tea UI on the charmbracelet component library: tab-grouped settings via `list`, `textinput` editing, `help` key bar; channel picker/config and mic-debug are modal overlays).
 
@@ -52,9 +52,10 @@ Startup: `cmd/just-talk-plus/main.go` → `config.Load` → `doctor.Run` → `ho
 The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 
 - Selection: `[voice].engine` (default `doubao-stream`) + per-engine `[voice.engine_configs.<engine>]`. The legacy flat `engine_config` is a fallback for `doubao-stream` **only** (it is a Doubao-era single-engine format); every other engine reads its own group and is unconfigured without one, so one vendor's credentials can never leak to another endpoint. Legacy `app_key`/`access_key`/`resource_id` are Doubao-only shortcuts.
-- Canonical types: `doubao-stream`, `auralwise`, `openai`, `dashscope`, `mimo-asr`, `siliconflow`. Do not add aliases (removed on purpose).
+- Canonical types: `doubao-stream`, `auralwise`, `openai`, `dashscope`, `mimo-asr`, `siliconflow`, `mosi`, `deepseek`. Do not add aliases (removed on purpose).
 - `null` is the internal fallback only; never list it in the TUI channel picker.
 - Streaming engines implement `speech.StreamingEngine`; batch-only engines are wrapped by `speech.BatchSession` (buffers PCM, `Transcribe` at stop; the plugin waits longer for them).
+- Engines with a hard per-request audio limit implement `speech.AudioLimiter` (e.g. `deepseek` = 120 s). `BatchSession` truncates to that limit and the voice plugin stops recording when it is reached, so a request never goes out already over the limit. Honor `TranscribeRequest.DurationMs` when enforcing it: the recorder knows the exact duration and containers do not need to be parsed.
 - Adding an engine: `speech.Register` in the package init → blank import in `internal/asrcfg` → add to `asrcfg.Types()` (`userEngines`) and the TUI `engineChannels` → update the bilingual README. Match the recorder's 16 kHz 16-bit mono PCM.
 - Doubao: `model_version` `"1.0"` (bigasr, `volc.bigasr.sauc.*`, `app_id`+`access_key`) or `"2.0"` (seedasr, `volc.seedasr.sauc.*`, `api_key`). The resource ID derives from `model_version` — never ship a default `resource_id` in `config.Default()` (it overrides the derivation).
 
@@ -62,8 +63,8 @@ The voice plugin works against `speech.StreamSession`, never a concrete vendor.
 
 - Wayland: evdev hotkeys (`input` group), `wl-clipboard`/`wtype` for clipboard/auto-submit.
 - X11: native X11 via cgo; auto-submit uses XTest.
-- macOS: CGEventTap hotkeys, CoreAudio/AudioQueue recording, NSPasteboard, AppKit NSPanel overlay; users grant Accessibility/Microphone to the launching terminal, not a `.app` bundle.
-- Windows: `GetAsyncKeyState` polling + observational `WH_KEYBOARD_LL` fallback that always passes events through and never consumes/replays modifiers (`Alt`, `Super`, `Alt+Tab` stay untouched; combinations need an exact modifier set). winmm recording (16 kHz 16-bit mono), Win32 clipboard, `SendInput` Ctrl+V, click-through topmost overlay. No ffmpeg/SoX/cgo/admin needed.
+- macOS: CGEventTap hotkeys, CoreAudio/AudioQueue recording, NSPasteboard; users grant Accessibility/Microphone to the launching terminal, not a `.app` bundle. No overlay capsule.
+- Windows: `GetAsyncKeyState` polling + observational `WH_KEYBOARD_LL` fallback that always passes events through and never consumes/replays modifiers (`Alt`, `Super`, `Alt+Tab` stay untouched; combinations need an exact modifier set). winmm recording (16 kHz 16-bit mono), Win32 clipboard, `SendInput` Ctrl+V. No overlay capsule. No ffmpeg/SoX/cgo/admin needed.
 
 ## Behavioural Rules
 
