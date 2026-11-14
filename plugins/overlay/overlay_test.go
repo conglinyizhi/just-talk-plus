@@ -27,16 +27,16 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 		elapsed time.Duration
 		want    string
 	}{
-		{0, "120s"},                 // 刚开录：满额
-		{20 * time.Second, "100s"},  // 刚掉到三位
-		{21 * time.Second, " 99s"},  // 掉到两位，前补空格
-		{111 * time.Second, "  9s"}, // 一位
-		{200 * time.Second, "  0s"}, // 超时归零
+		{0, "R 120s"},                 // 刚开录：满额
+		{20 * time.Second, "R 100s"},  // 刚掉到三位
+		{21 * time.Second, "R  99s"},  // 掉到两位，前补空格
+		{111 * time.Second, "R   9s"}, // 一位
+		{200 * time.Second, "R   0s"}, // 超时归零
 	}
 	for _, tc := range cases {
 		got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-tc.elapsed)}, limit)
-		if len(got) != 4 {
-			t.Fatalf("elapsed=%s → %q 宽度 %d, 期望 4", tc.elapsed, got, len(got))
+		if len(got) != 6 {
+			t.Fatalf("elapsed=%s → %q 宽度 %d, 期望 6", tc.elapsed, got, len(got))
 		}
 		if got != tc.want {
 			t.Fatalf("elapsed=%s → %q, 期望 %q", tc.elapsed, got, tc.want)
@@ -44,20 +44,20 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	}
 
 	// 还没开口：满额静止。等声音的时间不该算成已经录掉的时长。
-	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now().Add(-30 * time.Second)}, limit); got != "120s" {
+	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now().Add(-30 * time.Second)}, limit); got != "R 120s" {
 		t.Fatalf("未开口时应显示满额静止, got %q", got)
 	}
 
 	// 没有上限的引擎用 60 秒软上限，同样定宽
-	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-5 * time.Second)}, 0); got != " 55s" {
+	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-5 * time.Second)}, 0); got != "R  55s" {
 		t.Fatalf("软上限倒计时 = %q", got)
 	}
 	// 录制结束、会话还在收尾：用等宽占位符顶住左边，避免球看起来偏右
 	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != placeholderTime {
 		t.Fatalf("收尾阶段应显示占位符, got %q", got)
 	}
-	if len(placeholderTime) != 4 {
-		t.Fatalf("占位符 %q 应与 120s 同为 4 字符", placeholderTime)
+	if len(placeholderTime)+len(timePrefix) != 6 {
+		t.Fatalf("占位符 %q 加上前缀应与倒计时同为 6 字符", placeholderTime)
 	}
 
 	// 停止状态下左栏不能是空的——那是用户报告的失衡场景
@@ -65,7 +65,7 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	if strings.TrimSpace(stopping.Left) != "---s" {
 		t.Fatalf("停止收尾时左栏应显示占位符, got %q", stopping.Left)
 	}
-	if strings.TrimSpace(stopping.Right) != "ASR WAIT" {
+	if strings.TrimSpace(stopping.Right) != "A.WAIT" {
 		t.Fatalf("停止收尾时右栏 = %q", stopping.Right)
 	}
 }
@@ -79,7 +79,7 @@ func TestContentForStatusMapsSemantics(t *testing.T) {
 		t.Fatalf("等待声音 = %+v", waiting)
 	}
 	// 左栏只剩时间：上限 120 秒、已录 10 秒 → 剩 110s
-	if got := strings.TrimSpace(waiting.Left); got != "110s" {
+	if got := strings.TrimSpace(waiting.Left); got != "R 110s" {
 		t.Fatalf("左栏应是剩余时间 110s, got %q", got)
 	}
 	if waiting.Color != colorListening {
@@ -99,16 +99,16 @@ func TestContentForStatusMapsSemantics(t *testing.T) {
 	// 倒计时在左栏，右栏预告还在等识别收尾——两栏都有内容
 	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping_delayed", StartedAt: started, VoiceStartedAt: opened, StopAt: time.Now().Add(time.Second), StopDelayMs: 3000}, false, 120000)
 	// 停止延迟期间左栏时间继续走，不换成别的文案（否则就会闪烁）
-	if got := strings.TrimSpace(stopping.Left); got != "110s" {
+	if got := strings.TrimSpace(stopping.Left); got != "R 110s" {
 		t.Fatalf("停止延迟期间左栏应继续显示时间, got %q", got)
 	}
-	if strings.TrimSpace(stopping.Right) != "ASR WAIT" {
-		t.Fatalf("倒计时期间右栏应是 ASR WAIT, got %q", stopping.Right)
+	if strings.TrimSpace(stopping.Right) != "A.WAIT" {
+		t.Fatalf("倒计时期间右栏应是 A.WAIT, got %q", stopping.Right)
 	}
 
 	// 没声明上限的引擎：套用 60 秒软上限倒计时（只提示，不强制停录）
 	noLimit := contentForStatus(voice.TUIVoiceStatus{State: "recording", RecorderReady: true, StartedAt: started, VoiceStartedAt: opened}, false, 0)
-	if got := strings.TrimSpace(noLimit.Left); got != "50s" {
+	if got := strings.TrimSpace(noLimit.Left); got != "R  50s" {
 		t.Fatalf("软上限倒计时应为 50s, got %q", got)
 	}
 

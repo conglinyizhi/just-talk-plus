@@ -29,12 +29,9 @@ type capsuleContent struct {
 // 文案按固定列数排版：等宽字体下像素宽只取决于字符数，所以把列宽钉死，
 // 文案长短变化不会让窗口宽度或坐标跳动。
 const (
-	// leftCols 容纳 "1200s" 这类上限倒计时（5 字符）。
-	leftCols = 5
-	// rightCols 容纳 "ASR WAIT"（8 字符）。
-	rightCols = 8
-	// columnCols 左右两栏统列数，取两者较大值——这是球能居中的前提。
-	columnCols = rightCols
+	// columnCols 两栏统一的列数。右栏最长是 "A.WAIT"，左栏是前缀加倒计时，
+	// 两侧都正好填满，球居中时视觉才对称。
+	columnCols = 6
 )
 
 // contentForStatus 把语音状态映射成胶囊内容。
@@ -58,11 +55,11 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 		return capsuleContent{Left: left, Right: padRight(asrLabel(status)), Color: colorCapturing, Visible: true}
 	case "stopping_delayed":
 		// 还在录（等静音结束）：左栏的时间继续走，不换成别的文案
-		return capsuleContent{Left: left, Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "waiting_asr":
-		return capsuleContent{Left: left, Right: padRight("WAIT ASR"), Color: colorCapturing, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorCapturing, Visible: true}
 	case "stopping":
-		return capsuleContent{Left: left, Right: padRight("ASR WAIT"), Color: colorStopping, Visible: true}
+		return capsuleContent{Left: left, Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "error":
 		return capsuleContent{Left: left, Right: padRight("ERR"), Color: colorCapturing, Visible: true}
 	default:
@@ -77,8 +74,13 @@ var (
 	colorIdle      = statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}
 )
 
+// timePrefix 左栏时间的前缀。两栏等宽，右栏文字比纯数字长，所以左侧靠这个
+// 前缀把重量补回来，否则球看上去会偏向一边。
+const timePrefix = "R "
+
 // placeholderTime 录音已结束但会话仍在收尾时占据左栏位置。
-// 四个字符，与 "120s" 同宽，替换时不会改变胶囊尺寸或球的位置。
+// 与倒计时同宽（补齐后 6 格），替换时不会改变胶囊尺寸或球的位置。
+// 收尾阶段已经不在录音，所以不带 "R " 前缀。
 const placeholderTime = "---s"
 
 // softLimitMs 是没有硬上限的引擎使用的软上限：只作提示，不强制停录。
@@ -104,7 +106,7 @@ func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
 	}
 	if status.VoiceStartedAt.IsZero() {
 		// 还没开口：满额静止
-		return fmt.Sprintf("%3ds", limit/1000)
+		return timePrefix + fmt.Sprintf("%3ds", limit/1000)
 	}
 	elapsed := time.Since(status.VoiceStartedAt)
 	if elapsed < 0 {
@@ -116,7 +118,7 @@ func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
 	}
 	// 向上取整：开口第一刻显示满额，而不是少一秒
 	secs := int((remain + time.Second - 1) / time.Second)
-	return fmt.Sprintf("%3ds", secs)
+	return timePrefix + fmt.Sprintf("%3ds", secs)
 }
 
 // asrLabel 右栏：识别链路状态。
