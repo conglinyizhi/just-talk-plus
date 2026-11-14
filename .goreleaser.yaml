@@ -24,7 +24,11 @@ archives:
     files:
       - README.md
       - README.en.md
+      - CHANGELOG.md      # README 里链接到它，缺了就是断链
       - LICENSE
+      - NOTICE            # GPL-3.0 分发必须随附的归属与修改声明
+      - THIRD_PARTY_NOTICES # 第三方组件许可
+      - docs/screenshot-tui.png # README.en 引用
 
 checksum:
   disable: true
