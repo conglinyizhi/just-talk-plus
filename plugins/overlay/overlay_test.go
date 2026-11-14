@@ -70,25 +70,33 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 		t.Fatalf("停止采集后左栏应立即显示 UPLOAD, got %q", got)
 	}
 
-	// 出错时左栏固定 CRASH:，右栏给出错误类别；不再显示倒计时（还能录多久已无意义）
-	for kind, want := range map[string]string{
-		"asr": "ASRERR", "net": "NETERR", "dev": "DEVERR", "cfg": "CFGERR", "weird": "ERR",
-	} {
+	// 出错时两栏换成故障文案，球变灰（红色代表正在采集，出错时那件事已经停了）
+	errorCases := map[string][2]string{
+		"asr":   {"CRASH:", "ASRERR"},
+		"net":   {"CRASH:", "NETERR"},
+		"dev":   {"ERROR", "DEVICE"},
+		"cfg":   {"ERROR", "CONFIG"},
+		"weird": {"CRASH:", "ERR"}, // 未知类别回落
+	}
+	for kind, want := range errorCases {
 		failed := contentForStatus(voice.TUIVoiceStatus{State: "error", ErrorKind: kind}, false, 120000)
-		if got := strings.TrimSpace(failed.Left); got != errorCrashLabel {
-			t.Fatalf("kind=%s 左栏 = %q, 期望 %q", kind, got, errorCrashLabel)
+		if got := strings.TrimSpace(failed.Left); got != want[0] {
+			t.Fatalf("kind=%s 左栏 = %q, 期望 %q", kind, got, want[0])
 		}
-		if got := strings.TrimSpace(failed.Right); got != want {
-			t.Fatalf("kind=%s 右栏 = %q, 期望 %q", kind, got, want)
+		if got := strings.TrimSpace(failed.Right); got != want[1] {
+			t.Fatalf("kind=%s 右栏 = %q, 期望 %q", kind, got, want[1])
+		}
+		if failed.Color != colorIdle {
+			t.Fatalf("kind=%s 出错时球应为灰色, got %+v", kind, failed.Color)
 		}
 		if strings.TrimSpace(failed.Left) == uploadPlaceholder {
 			t.Fatal("错误态左栏不应显示 UPLOAD")
 		}
 	}
-	// 所有错误码都得塞进一栏
-	for kind := range errorCodes {
-		if len(errorCode(kind)) > columnCols {
-			t.Fatalf("错误码 %q 超出列宽 %d", errorCode(kind), columnCols)
+	// 每种错误文案都得塞进一栏
+	for kind, txt := range errorTexts {
+		if len([]rune(txt.left)) > columnCols || len([]rune(txt.right)) > columnCols {
+			t.Fatalf("kind=%s 文案超宽: %q / %q", kind, txt.left, txt.right)
 		}
 	}
 

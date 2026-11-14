@@ -72,7 +72,9 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 	case "stopping":
 		return capsuleContent{Left: placeholder(uploadPlaceholder), Right: padRight("A.WAIT"), Color: colorStopping, Visible: true}
 	case "error":
-		return capsuleContent{Left: padLeft(errorCrashLabel), Right: padRight(errorCode(status.ErrorKind)), Color: colorCapturing, Visible: true}
+		// 球用灰色：红色一直代表「正在采集/发送」，出错时那件事已经停了。
+		t := errorTextFor(status.ErrorKind)
+		return capsuleContent{Left: padLeft(t.left), Right: padRight(t.right), Color: colorIdle, Visible: true}
 	default:
 		return capsuleContent{Left: padLeft(idlePlaceholder), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
@@ -93,24 +95,28 @@ const timePrefix = "R "
 // 六个字符正好填满一栏，替换时不会改变胶囊尺寸或球的位置。
 const uploadPlaceholder = "UPLOAD"
 
-// errorCrashLabel 出错时左栏固定显示这个，右栏给出错误类别。
-// 左侧不再显示时间——出错时「还能录多久」已经没有意义了。
-const errorCrashLabel = "CRASH:"
-
-// errorCodes 把 voice 插件给出的错误类别翻成六字符的胶囊文案。
-var errorCodes = map[string]string{
-	"asr": "ASRERR", // 识别侧：服务端报错、识别超时、结束识别失败
-	"net": "NETERR", // 连接与传输：建连失败、音频发送中断、发送超时
-	"dev": "DEVERR", // 本地录音设备：启动失败、读取失败
-	"cfg": "CFGERR", // 引擎配置错误
+// errorText 错误状态在两栏里的文案。
+//
+// 出错时左栏不再显示时间——「还能录多久」已经没有意义了。识别侧和网络侧
+// 保留 CRASH: 的说法，设备与配置两个本地故障用更好读的 ERROR + 单词。
+type errorText struct {
+	left  string
+	right string
 }
 
-// errorCode 未知类别统一回落成 ERR，不把内部字符串直接漏到屏幕上。
-func errorCode(kind string) string {
-	if code, ok := errorCodes[kind]; ok {
-		return code
+var errorTexts = map[string]errorText{
+	"asr": {left: "CRASH:", right: "ASRERR"}, // 识别侧：服务端报错、识别超时、结束识别失败
+	"net": {left: "CRASH:", right: "NETERR"}, // 连接与传输：建连失败、音频发送中断、发送超时
+	"dev": {left: "ERROR", right: "DEVICE"},  // 本地录音设备：启动失败、读取失败
+	"cfg": {left: "ERROR", right: "CONFIG"},  // 引擎配置错误
+}
+
+// errorTextFor 未知类别统一回落，不把内部字符串直接漏到屏幕上。
+func errorTextFor(kind string) errorText {
+	if t, ok := errorTexts[kind]; ok {
+		return t
 	}
-	return "ERR"
+	return errorText{left: "CRASH:", right: "ERR"}
 }
 
 // idlePlaceholder 空闲态的左栏占位。不能复用 UPLOAD——什么都没在传的时候
