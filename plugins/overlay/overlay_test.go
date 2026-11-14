@@ -52,9 +52,21 @@ func TestTimeLabelWidthIsStable(t *testing.T) {
 	if got := timeLabel(voice.TUIVoiceStatus{StartedAt: time.Now(), VoiceStartedAt: time.Now().Add(-5 * time.Second)}, 0); got != " 55s" {
 		t.Fatalf("软上限倒计时 = %q", got)
 	}
-	// 不在录音中：空
-	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != "" {
-		t.Fatalf("未录音应为空, got %q", got)
+	// 录制结束、会话还在收尾：用等宽占位符顶住左边，避免球看起来偏右
+	if got := timeLabel(voice.TUIVoiceStatus{}, 120000); got != placeholderTime {
+		t.Fatalf("收尾阶段应显示占位符, got %q", got)
+	}
+	if len(placeholderTime) != 4 {
+		t.Fatalf("占位符 %q 应与 120s 同为 4 字符", placeholderTime)
+	}
+
+	// 停止状态下左栏不能是空的——那是用户报告的失衡场景
+	stopping := contentForStatus(voice.TUIVoiceStatus{State: "stopping", PendingFinishes: 1}, false, 120000)
+	if strings.TrimSpace(stopping.Left) != "---s" {
+		t.Fatalf("停止收尾时左栏应显示占位符, got %q", stopping.Left)
+	}
+	if strings.TrimSpace(stopping.Right) != "ASR WAIT" {
+		t.Fatalf("停止收尾时右栏 = %q", stopping.Right)
 	}
 }
 

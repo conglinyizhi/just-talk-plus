@@ -66,7 +66,7 @@ func contentForStatus(status voice.TUIVoiceStatus, idleVisible bool, limitMs int
 	case "error":
 		return capsuleContent{Left: left, Right: padRight("ERR"), Color: colorCapturing, Visible: true}
 	default:
-		return capsuleContent{Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
+		return capsuleContent{Left: padLeft(placeholderTime), Right: padRight("IDL"), Color: colorIdle, Visible: idleVisible}
 	}
 }
 
@@ -76,6 +76,10 @@ var (
 	colorStopping  = statusColor{R: 255 << 8, G: 140 << 8, B: 60 << 8} // 橙：停止/收尾
 	colorIdle      = statusColor{R: 145 << 8, G: 145 << 8, B: 145 << 8}
 )
+
+// placeholderTime 录音已结束但会话仍在收尾时占据左栏位置。
+// 四个字符，与 "120s" 同宽，替换时不会改变胶囊尺寸或球的位置。
+const placeholderTime = "---s"
 
 // softLimitMs 是没有硬上限的引擎使用的软上限：只作提示，不强制停录。
 // 一分钟以内的语音识别成功率明显更高，所以默认也按 60 秒倒计数。
@@ -90,7 +94,9 @@ const softLimitMs = 60 * 1000
 // 宽度固定，百位出现或消失时不会推动后面的字符。
 func timeLabel(status voice.TUIVoiceStatus, limitMs int) string {
 	if status.StartedAt.IsZero() {
-		return "" // 不在录音中
+		// 录制已经结束、会话还在收尾（等云端识别）。左栏留空会让球看起来
+		// 偏向右边，所以用一个和 "120s" 等宽的占位符顶住位置。
+		return placeholderTime
 	}
 	limit := limitMs
 	if limit <= 0 {
